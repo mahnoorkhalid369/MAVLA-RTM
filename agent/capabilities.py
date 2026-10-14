@@ -190,6 +190,10 @@ def run_locate(ctx: Context, args: dict) -> StepResult:
     except VLMFailure as exc:
         return StepResult("failed", f"could not search for {text!r}: {exc}")
     if r.id is None:
+        # Gemma lists every object when nothing fits: if no description contains the words either, it is not visible
+        if not ctx.tools.lexical_candidates(ctx.obs, text):
+            return StepResult("insufficient_info", f"I do not see {text!r} from the current view (no measured object "
+                                                   "is described that way; searching other viewpoints is not available yet)")
         if r.candidates:
             lst = ", ".join(f"{k} at x {ctx.obs.measured[k]['centre'][0] * 1000:+.0f}, y {ctx.obs.measured[k]['centre'][1] * 1000:+.0f} mm"
                             for k in r.candidates)

@@ -334,3 +334,29 @@ Design approved with changes; revision 1 kept as `ARCHITECTURE_rev1_2026-10-14.m
   Gemma per call with the Isaac Sim window vs headless (measured): describe 8.2-8.4 s vs 2.9-3.7 s, parse
   11.8-12.5 s vs 4.3-6.3 s. GPU memory peak 8.1 GB GUI / 7.7 GB headless (12 GB); Gemma's 4.7 GB per-layer
   embedding table is in CPU RAM (vlm/model.py), so CPU load also slows Gemma.
+
+## 2026-10-14 — Goal supervisor refactor (user request; branch refactor/goal-supervisor)
+- **Rollback point:** tag `baseline-before-goal-supervisor` (c140d64). Audit: `docs/architecture/AUDIT.md`;
+  design and measurements: `docs/architecture/ARCHITECTURE.md`.
+- **Structure:** the fixed pick-and-place graph becomes a skill (`agent/pick_place.py`, unchanged checks and
+  budgets); a new LangGraph goal supervisor (`agent/supervisor.py`) runs a bounded plan → delegate → verify
+  loop over a capability registry (`agent/capabilities.py`) with an explicit task state (`agent/world_state.py`:
+  facts / Gemma hypotheses / plan / verified outcomes). One Gemma and one YOLO instance shared by all agents.
+- **Planner = one Gemma call replacing `parse`** (no extra call); output schema is an enum of capability
+  names with flat per-capability keys (the 2B model dropped braces in nested JSON: 3/4 pick-and-place
+  instructions failed with the first schema, 4/4 pass with the flat one). Deterministic validation; generic,
+  logged completion rules (unused observation → report; question → answer).
+- **New capabilities:** observe / describe_scene / answer / locate (read-only, no robot motion unless a motion
+  step follows) and return_home; `explore` declared but not implemented (reported as unsupported, never
+  faked). Outcome classes: completed / unsupported / insufficient_info / ambiguous / infeasible / unsafe /
+  cancelled / failed.
+- **Bugs found live and fixed (with regression tests):** (1) `locate` reported "ambiguous" listing every object
+  when nothing fit (Gemma lists all) → "not visible" when no description contains the words; (2) a count
+  answer contradicted its cited objects → consistency check + one retry; (3) **false success**: a replan that
+  dropped the failed objective ([observe] after "locate banana" failed) completed the goal → replans must
+  pursue the failed objective and goal verification requires every replaced step to be achieved later.
+- **Freshness:** observations older than 120 s or taken before a robot command are re-captured (cheap: the
+  session description memory avoids new Gemma calls); manipulation reuses only cleared-view observations.
+- **Measured:** live A/B regression back to back, no regression (446.7 / 257.2 s vs 455.5 / 303.0 s under
+  similar load; same Gemma call counts; correct objects; placement and HOME verified); observation-only goals
+  work end to end with zero robot motion. Unchanged: legacy agent, vlm/model.py, frozen baseline (manifest OK).

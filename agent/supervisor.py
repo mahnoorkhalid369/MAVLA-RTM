@@ -42,6 +42,12 @@ NEEDS_OBSERVATION = {"describe_scene", "answer", "locate"}
 MAX_REPLANS = 1
 MAX_STEPS_EXECUTED = 10  # hard bound on capability executions per instruction (plans + replans)
 RECOVERABLE = {"insufficient_info", "infeasible", "failed"}  # may be replanned once; unsafe / cancelled never
+# capabilities that can achieve a failed step's objective in a replan (the step itself always can)
+ALTERNATIVES = {"locate": {"explore"}, "answer": {"describe_scene"}, "describe_scene": {"answer"}}
+
+
+def achieves(step_cap: str, failed_cap: str) -> bool:
+    return step_cap == failed_cap or step_cap in ALTERNATIVES.get(failed_cap, set())
 
 
 CONSUMERS = {"describe_scene", "answer", "locate", "pick_place", "explore"}  # steps that use an observation
@@ -75,6 +81,7 @@ class GoalSupervisor:
         self.ts: TaskState | None = None
         self.ctx: caps.Context | None = None
         self.executed = 0
+        self.failed_motion = 0
         g = StateGraph(GoalState)
         for s in STATES:
             g.add_node(s, self._wrap(s, getattr(self, "_" + s.lower())))
@@ -205,6 +212,7 @@ class GoalSupervisor:
             return self._finish("UNSUPPORTED", "unsupported", f"Step {step.index} ({step.capability}) is not possible yet: "
                                 f"{step.summary}" + self._done_so_far())
         if step.outcome in RECOVERABLE and self.ts.replans < MAX_REPLANS and self.executed < MAX_STEPS_EXECUTED:
+            self.failed_motion = getattr(self.tools, "motion_count", 0)
             return {"next": "REPLANNING"}
         return self._finish("FAILED", step.outcome, f"Step {step.index} ({step.capability}) {step.outcome}: {step.summary}"
                             + self._done_so_far() + " I did not report success.")
@@ -212,14 +220,22 @@ class GoalSupervisor:
     def _replanning(self, state) -> dict:
         self.ts.replans += 1
         failed = next(s for s in reversed(self.ts.plan) if s.status == "failed")
+        failed_motion = self.failed_motion
         note = (f"{state['instruction']}\n(Previous attempt: step '{failed.capability}' with {failed.args} ended "
                 f"'{failed.outcome}': {failed.summary[:200]}. Plan again from the current situation.)")
         try:
             plan = self.tools.roles.plan_goal(note, caps.planner_menu())
         except VLMFailure as exc:
             return self._finish("FAILED", failed.outcome, f"{failed.summary} (replanning failed: {exc})")
-        if not plan.steps or (plan.steps[0].capability == failed.capability and plan.steps[0].args == failed.args):
-            self.log("replan", accepted=False, reason="the new plan repeats the failed step or is empty")
+        unchanged = getattr(self.tools, "motion_count", 0) == failed_motion
+        if not any(achieves(st.capability, failed.capability) for st in plan.steps):
+            why = f"the new plan no longer pursues the failed step ({failed.capability})"
+        elif unchanged and any(st.capability == failed.capability and st.args == failed.args for st in plan.steps):
+            why = "the new plan repeats the failed step in an unchanged situation"
+        else:
+            why = None
+        if why:
+            self.log("replan", accepted=False, reason=why)
             return self._finish("FAILED", failed.outcome, f"Step {failed.index} ({failed.capability}) {failed.outcome}: "
                                 f"{failed.summary}. Replanning offered nothing different." + self._done_so_far())
         self.log("replan", accepted=True)
@@ -232,9 +248,18 @@ class GoalSupervisor:
         ok = steps and all(s.status == "done" and s.outcome == "completed" for s in steps)
         if not ok:
             return self._finish("FAILED", "failed", "not every step was verified" + self._done_so_far())
+        for r in (s for s in self.ts.plan if s.status == "replaced"):  # a replaced step's objective must be achieved later
+            if not any(s.index > r.index and achieves(s.capability, r.capability) for s in steps):
+                return self._finish("FAILED", r.outcome or "failed", f"Step {r.index} ({r.capability}) {r.outcome}: {r.summary}; "
+                                    "the replanned steps did not achieve it." + self._done_so_far() + " I did not report success.")
         evidence = [v.get("check") for v in self.ts.verified if v.get("pass")]
         self.log("goal_verified", steps=len(steps), evidence=evidence)
-        return self._finish("COMPLETED", "completed", "\n".join(s.summary for s in steps if s.summary))
+        result = [s for s in steps if s.capability != "observe" and s.summary]  # what the user asked for first
+        support = [s for s in steps if s.capability == "observe" and s.summary]
+        msg = "\n".join(s.summary for s in result) or "\n".join(s.summary for s in support)
+        if result and support:
+            msg += f"\n({support[-1].summary})"
+        return self._finish("COMPLETED", "completed", msg)
 
     def _done_so_far(self) -> str:
         done = [f"{s.index}. {s.capability}" for s in self.ts.plan if s.status == "done"]

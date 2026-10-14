@@ -216,3 +216,31 @@ def test_plan_completion_rules_are_generic_and_logged(tmp_path):
     (tmp_path / "q").mkdir()
     r, _ = run(tmp_path / "q", t, instruction="How many cubes are there?")  # a question gets an answer step
     assert [s["capability"] for s in r["plan"]] == ["observe", "answer"] and "not verified" in r["message"]
+
+
+def test_locate_reports_not_visible_when_no_description_matches(tmp_path):
+    t = GoalTools([plan(("observe", {}), ("locate", {"object": "banana"})), plan(("observe", {}), ("locate", {"object": "banana"}))],
+                  ambiguous={"banana": [1, 2, 3]})  # Gemma lists everything when nothing fits
+    r, _ = run(tmp_path, t)
+    assert r["status"] == "FAILED" and r["outcome"] == "insufficient_info" and "do not see 'banana'" in r["message"]
+
+
+def test_result_comes_before_the_observation_summary(tmp_path):
+    t = GoalTools([plan(("observe", {}), ("describe_scene", {}))])
+    r, _ = run(tmp_path, t)
+    assert r["message"].startswith("I see 3 objects") and r["message"].rstrip().endswith("workspace points from the camera)")
+
+
+def test_counting_answer_must_match_the_cited_objects():
+    vlm = RecordedVLM(['{"answer": "11", "object_ids": [1, 2, 3]}', '{"answer": "3", "object_ids": [1, 2, 3]}'])
+    a = Roles(vlm).answer("how many?", "facts", [1, 2, 3, 4])
+    assert a.answer == "3" and "count again" in vlm.calls[1]
+
+
+def test_replan_that_drops_the_objective_is_rejected(tmp_path):
+    """Regression (live 18:48): 'find the banana' -> locate failed -> replan [observe] must not complete the goal."""
+    t = GoalTools([plan(("observe", {}), ("locate", {"object": "banana"})), plan(("observe", {}))],
+                  ambiguous={"banana": [1, 2, 3]})
+    r, ev = run(tmp_path, t)
+    assert r["status"] == "FAILED" and "do not see 'banana'" in r["message"]
+    assert [e["reason"] for e in ev if e["kind"] == "replan"] == ["the new plan no longer pursues the failed step (locate)"]

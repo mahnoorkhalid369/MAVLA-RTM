@@ -334,6 +334,10 @@ class Roles:
             bad = sorted(set(a.object_ids) - set(ids))
             if bad:
                 raise ValueError(f"object_ids {bad} are not in the list")
+            num = re.fullmatch(r"\s*(\d+)\b.*", a.answer)  # a count must agree with the objects it cites
+            if num and a.object_ids and int(num.group(1)) != len(set(a.object_ids)):
+                raise ValueError(f"the answer says {num.group(1)} but lists {len(set(a.object_ids))} objects; "
+                                 "count again and list exactly the objects you counted")
         return self._call("answer", SceneAnswer, ANSWER_PROMPT.format(facts=facts, question=question), check=check,
                           max_new_tokens=200)
 

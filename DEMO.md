@@ -65,6 +65,11 @@ cd ~/Documents/PhD-CE/Research-LF/6DOF-Arm
   - `Pick up the yellow cube and put it on the tan box.`
   - `Put the orange cube on the purple cylinder.`
   - `Put the pink cube next to the white tall cylinder.`
+- Since the goal-supervisor refactor (2026-10-14) other goals work too, without moving the robot:
+  `Take a look at your surroundings.` (grounded scene report), `How many cubes are on the table?`
+  (Gemma's answer, marked unverified), `Where is the red cube?` (measured position), and sequences
+  (`Put the red cube on the green cube, then put the orange cube on the purple cylinder.` — HOME once at
+  the end). Searching other viewpoints ("find X" when X is hidden) is not available yet; the robot says so.
 - Relations understood: on, next to, left of, right of, in front of, behind (robot's frame: +x =
   the robot's right, "in front of" = towards the robot; say "from the camera's view" for the camera
   frame).
