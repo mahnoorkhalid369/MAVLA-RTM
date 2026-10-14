@@ -63,8 +63,14 @@ SPECS: dict[str, CapabilitySpec] = {s.name: s for s in [
     CapabilitySpec("return_home", "move the arm to its safe home pose", '{"do": "return_home"}', "motion",
                    "nothing held; gripper open", "arm at HOME", "holding; path collides; execution failure",
                    "HOME joints within 1.5 deg (joint feedback)"),
-    CapabilitySpec("explore", "look for something that is not visible from the current view", '{"do": "explore", "object": "<words>"}',
-                   "motion", "-", "-", "not implemented", "-", implemented=False),
+    CapabilitySpec("inspect", "move the wrist camera closer to look at one visible object in detail",
+                   '{"do": "inspect", "object": "<words>"}', "motion",
+                   "object visible and confirmed; nothing held", "close-up position / size / description (wrist camera); arm back at HOME",
+                   "object not found / no safe viewpoint / move failed", "viewpoint reached (joint feedback), wrist measurement associated"),
+    CapabilitySpec("explore", "look for something the table camera cannot see (e.g. behind another object)",
+                   '{"do": "explore", "object": "<words>", "near": "<words for an object it may be behind, or null>"}', "motion",
+                   "nothing held", "wrist observations of hidden regions in the world model; arm back at HOME",
+                   "no hidden region / no safe viewpoint / not found", "finding is decided by locate, not by moving"),
 ]}
 
 MOTION = {n for n, s in SPECS.items() if s.safety == "motion"}
@@ -186,6 +192,10 @@ def run_locate(ctx: Context, args: dict) -> StepResult:
     resolution, lexical cross-check, comparison) plus confirm_object on its crop. Read-only."""
     text = (args or {}).get("target", "").strip()
     _ensure_described(ctx)
+    for w in ctx.extra_obs:  # wrist observations from this instruction (exploration / inspection)
+        found = _find_in(ctx, w, text)
+        if found is not None:
+            return found
     try:
         r = ctx.tools.resolve(ctx.obs, text)
     except VLMFailure as exc:
@@ -213,6 +223,27 @@ def run_locate(ctx: Context, args: dict) -> StepResult:
                                    "[position measured; identity from Gemma, confirmed on its crop]", {"mark": r.id})
 
 
+def _find_in(ctx: Context, wobs, text: str) -> StepResult | None:
+    """A described object among a wrist observation's NEW objects (not seen by the table camera), confirmed on
+    its crop; None if not there."""
+    new = [k for k in wobs.marks if getattr(wobs, "assoc", {}).get(k, {}).get("status") == "new"]
+    if not new:
+        return None
+    ctx.tools.describe(wobs, new)
+    lex = [k for k in ctx.tools.lexical_candidates(wobs, text) if k in new]
+    if len(lex) != 1:
+        return None
+    k = lex[0]
+    c = ctx.tools.confirm(wobs, k, text)
+    if c.match != "yes":
+        return None
+    g = wobs.measured[k]
+    ctx.log("located", text=text, mark=k, confirm=c.match, centre=g["centre"], camera="wrist")
+    return StepResult("completed", f"{text!r} found with the wrist camera (frame {wobs.frame_id}, not visible to the table camera) at "
+                                   f"x {g['centre'][0] * 1000:+.0f} mm, y {g['centre'][1] * 1000:+.0f} mm, {g['height'] * 1000:.0f} mm tall "
+                                   "[position measured; identity from Gemma, confirmed on its crop]", {"mark": k, "camera": "wrist"})
+
+
 def _target_mark(ctx: Context, text: str) -> tuple[int | None, StepResult | None]:
     """Resolve + confirm a described object in the current (table) observation, like locate."""
     r = run_locate(ctx, {"target": text})
@@ -231,6 +262,7 @@ def _wrist_observation(ctx: Context, target_world: np.ndarray, target_id: int | 
     for k, g in wobs.measured.items():
         st, oid = t.world.add_observation(g, "wrist", wobs.frame_id, k)
         assoc[k] = {"status": st, "world_id": oid}
+    wobs.assoc = assoc
     near = sorted(wobs.measured, key=lambda k: np.hypot(*(np.array(wobs.measured[k]["centre"][:2]) - target_world[:2])))
     mark = near[0] if near and np.hypot(*(np.array(wobs.measured[near[0]]["centre"][:2]) - target_world[:2])) < 0.06 else None
     desc = None
@@ -300,6 +332,72 @@ def run_inspect(ctx: Context, args: dict) -> StepResult:
                       f"close-up: {d.get('colour', '')} {d.get('name', '')}, shape {d.get('shape', '?')!r} [Gemma, from the wrist view]. "
                       f"{'Wrist measurement adopted' if used else 'Table measurement kept (wrist view partial or inconsistent)'}; {home.summary}.",
                       data)
+
+
+MAX_EXPLORE_VIEWPOINTS = 2
+
+
+def run_explore(ctx: Context, args: dict) -> StepResult:
+    """Look into regions the table camera cannot see: the occlusion shadows behind measured objects (behind the
+    object named in `near` if given, else the largest shadows), at most MAX_EXPLORE_VIEWPOINTS collision-checked
+    wrist viewpoints, then HOME. Moving the camera is not finding: the result says what was newly seen; the
+    supervisor decides the goal with locate."""
+    from agent.exploration import ViewpointPlanner, shadow_points
+    from control.motion import joint_move
+    from control.robot import ARM_SPEED
+    from control.skills import MoveStep
+    text, near = (args or {}).get("target", "").strip(), ((args or {}).get("near") or "").strip()
+    t, t0 = ctx.tools, time.monotonic()
+    if t.world.holding is not None:
+        return StepResult("unsafe", "not exploring while holding an object")
+    objs = [{"id": o.id, "geometry": o.geometry} for o in t.world.objects.values() if o.status in ("on_surface", "occluded")]
+    if near:
+        m, fail = _target_mark(ctx, near)
+        if fail is not None:
+            return StepResult(fail.outcome, f"cannot find {near!r} to look behind: {fail.summary}")
+        oid = ctx.obs.object_ids.get(m)
+        objs = [o for o in objs if o["id"] == oid]
+    regions = shadow_points(objs, n_max=MAX_EXPLORE_VIEWPOINTS if not near else 1)
+    if not regions:
+        return StepResult("insufficient_info", "no hidden region to look into")
+    vp, views, new_total, tried = ViewpointPlanner(), 0, 0, []
+    found = None
+    for point, behind_id in regions:
+        q0 = t.bridge.q()
+        tp = time.monotonic()
+        plan = vp.plan(point, q0, t.obstacles())
+        ctx.log("exploration", purpose="explore", target=text, region=[round(v, 3) for v in point], behind=behind_id,
+                plan=plan.summary(), seconds=round(time.monotonic() - tp, 2))
+        tried.append({"region": point.tolist(), "behind": behind_id, "plan": plan.summary()})
+        if not plan.ok:
+            continue
+        res = t.execute([MoveStep(joint_move(Kinematics_tcp(), q0, plan.best.q, ARM_SPEED), f"move wrist camera to look behind object {behind_id}")], "explore view")
+        if not res.ok:
+            run_return_home(ctx, {})
+            return StepResult("unsafe" if "safety" in (res.reason or "").lower() else "failed", f"exploration move failed: {res.reason}")
+        t.bridge.wait_still()
+        reach = vp.reached(t.bridge.q(), plan.best)
+        ctx.log("verification", check="viewpoint", **reach)
+        if not reach["pass"]:
+            break
+        views += 1
+        w = _wrist_observation(ctx, point, None)
+        new = [k for k, a in w["obs"].assoc.items() if a["status"] == "new"]
+        new_total += len(new)
+        found = _find_in(ctx, w["obs"], text) if text else None
+        if found is not None:
+            break
+    home = run_return_home(ctx, {}) if views else None
+    ctx.log("explore_result", target=text, viewpoints=views, new_objects=new_total, found=found is not None,
+            seconds=round(time.monotonic() - t0, 1))
+    data = {"viewpoints": views, "new_objects": new_total, "regions": tried, "found": found is not None}
+    if views == 0:
+        reasons = "; ".join(r["plan"]["reason"] for r in tried)
+        return StepResult("infeasible", f"no safe viewpoint into the hidden region(s): {reasons}", data)
+    tail = f" {home.summary}." if home else ""
+    return StepResult("completed", f"Looked into {views} hidden region(s) with the wrist camera: {new_total} object(s) not "
+                                   f"visible to the table camera" + (f"; {found.summary}" if found else f"; no {text!r} among them") + tail,
+                      {**data, "found_summary": found.summary if found else None})
 
 
 def Kinematics_tcp():

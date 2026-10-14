@@ -63,6 +63,9 @@ class GoalTools(StubTools):
     def view_blockage(self, q=None):
         return 1, 36
 
+    def obstacles(self):
+        return []
+
     def lexical_candidates(self, obs, text):
         return []
 
@@ -117,10 +120,45 @@ def test_empty_plan_is_reported_as_unsupported_with_the_capabilities(tmp_path):
     assert t.executed == []
 
 
-def test_unimplemented_capability_stops_with_explanation_after_done_steps(tmp_path):
-    t = GoalTools([plan(("observe", {}), ("explore", {"object": "banana"}))])
+@pytest.fixture
+def explore_stub(monkeypatch):
+    """Exploration internals are tested elsewhere; here it returns a scripted result."""
+    from agent import capabilities as caps
+    calls = []
+
+    def fake(ctx, args, finds=False):
+        calls.append(args)
+        if finds:
+            ctx.found_by_wrist = args["target"]
+        return caps.StepResult("completed", f"looked into 1 hidden region(s); {'found it' if finds else 'nothing new'}")
+    monkeypatch.setattr(caps, "run_explore", fake)
+    return calls
+
+
+def test_not_visible_target_triggers_one_exploration_then_locate_again(tmp_path, explore_stub):
+    t = GoalTools([plan(("observe", {}), ("locate", {"object": "zz"})), plan(("observe", {}), ("locate", {"object": "zz"}))],
+                  ambiguous={"zz": []})
+    r, ev = run(tmp_path, t)
+    assert [s["capability"] for s in r["plan"]] == ["observe", "locate", "explore", "locate"]
+    assert [s["status"] for s in r["plan"]][:3] == ["done", "replaced", "done"]
+    assert len(explore_stub) == 1 and any(e["kind"] == "subtask" for e in ev)
+    assert r["status"] == "FAILED" and r["outcome"] == "insufficient_info"  # exploring is not finding
+
+
+def test_found_after_exploration_completes_the_goal(tmp_path, monkeypatch):
+    from agent import capabilities as caps
+    monkeypatch.setattr(caps, "run_explore", lambda ctx, args: caps.StepResult("completed", "looked behind object 2"))
+    real_locate, n = caps.run_locate, []
+
+    def locate(ctx, args):
+        n.append(1)
+        if len(n) == 1:
+            return caps.StepResult("insufficient_info", "I do not see 'zz' from the current view")
+        return caps.StepResult("completed", "'zz' found with the wrist camera at x +100 mm", {"mark": 9, "camera": "wrist"})
+    monkeypatch.setattr(caps, "run_locate", locate)
+    t = GoalTools([plan(("observe", {}), ("locate", {"object": "zz"}))])
     r, _ = run(tmp_path, t)
-    assert r["status"] == "UNSUPPORTED" and "not implemented" in r["message"] and "1. observe" in r["message"]
+    assert r["status"] == "COMPLETED" and r["message"].startswith("looked behind") is False and "found with the wrist camera" in r["message"]
 
 
 def test_multi_step_plan_returns_home_once_at_the_end(tmp_path):
@@ -191,19 +229,16 @@ def test_planner_rejects_unknown_capabilities_and_bad_arguments():
         Roles(RecordedVLM(['{"steps": [{"do": "rm -rf"}]}'] * 2)).plan_goal("x", "menu")
 
 
-def test_locate_finds_confirms_or_reports_not_visible(tmp_path):
+def test_locate_finds_confirms(tmp_path):
     t = GoalTools([plan(("observe", {}), ("locate", {"object": "a"}))])
     r, ev = run(tmp_path, t)
     assert r["status"] == "COMPLETED" and "is object 1" in r["message"] and t.executed == []
-    t = GoalTools([plan(("locate", {"object": "zz"})), plan(("locate", {"object": "zz"}))], ambiguous={"zz": []})
-    r, _ = run(tmp_path / "x" if (tmp_path / "x").mkdir() is None else tmp_path, t)
-    assert r["status"] == "FAILED" and r["outcome"] == "insufficient_info" and "do not see 'zz'" in r["message"]
 
 
 def test_planner_menu_lists_only_registry_capabilities():
     from agent.capabilities import SPECS, planner_menu
     menu = planner_menu()
-    assert all(f"- {n}:" in menu for n in SPECS) and "(not available yet)" in menu
+    assert all(f"- {n}:" in menu for n in SPECS) and all(sp.implemented for sp in SPECS.values())
     assert {s.safety for s in SPECS.values()} == {"read_only", "motion"}
 
 
@@ -218,7 +253,7 @@ def test_plan_completion_rules_are_generic_and_logged(tmp_path):
     assert [s["capability"] for s in r["plan"]] == ["observe", "answer"] and "not verified" in r["message"]
 
 
-def test_locate_reports_not_visible_when_no_description_matches(tmp_path):
+def test_locate_reports_not_visible_when_no_description_matches(tmp_path, explore_stub):
     t = GoalTools([plan(("observe", {}), ("locate", {"object": "banana"})), plan(("observe", {}), ("locate", {"object": "banana"}))],
                   ambiguous={"banana": [1, 2, 3]})  # Gemma lists everything when nothing fits
     r, _ = run(tmp_path, t)
@@ -237,8 +272,9 @@ def test_counting_answer_must_match_the_cited_objects():
     assert a.answer == "3" and "count again" in vlm.calls[1]
 
 
-def test_replan_that_drops_the_objective_is_rejected(tmp_path):
-    """Regression (live 18:48): 'find the banana' -> locate failed -> replan [observe] must not complete the goal."""
+def test_replan_that_drops_the_objective_is_rejected(tmp_path, explore_stub):
+    """Regression (live 18:48): 'find the banana' -> locate failed (also after exploring) -> a replan [observe]
+    must not complete the goal."""
     t = GoalTools([plan(("observe", {}), ("locate", {"object": "banana"})), plan(("observe", {}))],
                   ambiguous={"banana": [1, 2, 3]})
     r, ev = run(tmp_path, t)

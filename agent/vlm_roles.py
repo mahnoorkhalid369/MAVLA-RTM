@@ -100,7 +100,7 @@ class TaskSpec(BaseModel):
 
 class PlanStep(BaseModel):
     """One flat step (the 2B model drops braces in nested JSON; flat keys are converted deterministically)."""
-    do: Literal["observe", "describe_scene", "answer", "locate", "pick_place", "return_home", "explore"]
+    do: Literal["observe", "describe_scene", "answer", "locate", "inspect", "pick_place", "return_home", "explore"]
     object: str | None = None  # pick_place: object to move; locate / explore: what to find
     relation: Literal["on", "next_to", "left_of", "right_of", "in_front_of", "behind"] | None = None
     target: str | None = None  # pick_place: destination object
@@ -108,6 +108,7 @@ class PlanStep(BaseModel):
     object_relation: Literal["next_to", "left_of", "right_of", "in_front_of", "behind", "on"] | None = None
     object_anchor: str | None = None  # "the <A> that is next to the <B>": object_relation next_to, object_anchor <B>
     question: str | None = None  # answer
+    near: str | None = None  # explore: an object the thing may be hidden behind
 
     @property
     def capability(self) -> str:
@@ -119,8 +120,10 @@ class PlanStep(BaseModel):
             return {"object": {"text": self.object, "relation": self.object_relation, "anchor": self.object_anchor},
                     "relation": self.relation, "reference": {"text": self.target, "relation": None, "anchor": None},
                     "frame": self.frame}
-        if self.do in ("locate", "explore"):
+        if self.do in ("locate", "inspect"):
             return {"target": self.object}
+        if self.do == "explore":
+            return {"target": self.object, "near": self.near}
         if self.do == "answer":
             return {"question": self.question}
         return {}
@@ -322,7 +325,7 @@ class Roles:
                                          "out unless the user describes where the object to move is now")
                     if bool(st.object_anchor) != bool(st.object_relation):
                         raise ValueError(f"step {i}: object_relation and object_anchor go together")
-                elif st.do in ("locate", "explore") and not st.object:
+                elif st.do in ("locate", "inspect", "explore") and not st.object:
                     raise ValueError(f"step {i}: {st.do} needs object")
                 elif st.do == "answer" and not (st.question or "").strip():
                     raise ValueError(f"step {i}: answer needs question")

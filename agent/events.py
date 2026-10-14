@@ -36,7 +36,8 @@ STATE_TEXT = {
     "INTERPRETING": "planning the goal (capabilities only)", "DISPATCHING": "choosing the next step",
     "OBSERVING_SCENE": "perception: observing the table", "REPORTING_SCENE": "perception: reporting the scene",
     "ANSWERING": "perception: answering from the measured objects", "LOCATING": "perception: finding the described object", "MANIPULATING": "manipulation: pick-and-place skill",
-    "RETURNING_SAFE": "manipulation: returning HOME", "UNAVAILABLE": "capability not available",
+    "RETURNING_SAFE": "manipulation: returning HOME", "INSPECTING": "exploration: close look with the wrist camera",
+    "EXPLORING": "exploration: looking into hidden regions", "UNAVAILABLE": "capability not available",
     "VERIFYING_STEP": "verification: checking the step's evidence", "REPLANNING": "planning again after a failure",
     "VERIFYING_GOAL": "verification: checking every step of the goal",
 }

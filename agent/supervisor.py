@@ -12,7 +12,7 @@ Agents (logical responsibilities, one shared Gemma / YOLO instance):
   perception    capabilities.run_observe / run_describe_scene / run_answer / run_locate (YOLO + depth + Gemma)
   manipulation  capabilities.run_pick_place (the validated PickPlaceWorkflow skill) / run_return_home
   verification  inside the skills (contact, camera placement, HOME joints) + VERIFYING_STEP / VERIFYING_GOAL here
-  exploration   declared, not implemented (reported as unsupported)
+  exploration   capabilities.run_inspect / run_explore (agent/exploration.py viewpoint planner, wrist camera)
 Safety: the planner can only name capabilities from agent/capabilities.py; every motion still goes through
 SkillPlanner + CollisionChecker + RosExecutor + the simulator's safety layer.
 """
@@ -33,24 +33,26 @@ from agent.eventlog import EventLog
 from agent.vlm_roles import VLMFailure
 from agent.world_state import Step, TaskState
 
-STATES = ["INTERPRETING", "DISPATCHING", "OBSERVING_SCENE", "REPORTING_SCENE", "ANSWERING", "LOCATING", "MANIPULATING",
+STATES = ["INTERPRETING", "DISPATCHING", "OBSERVING_SCENE", "REPORTING_SCENE", "ANSWERING", "LOCATING", "INSPECTING",
+          "EXPLORING", "MANIPULATING",
           "RETURNING_SAFE", "UNAVAILABLE", "VERIFYING_STEP", "REPLANNING", "VERIFYING_GOAL"]
 TERMINAL = ["COMPLETED", "FAILED", "CANCELLED", "UNSUPPORTED"]
 NODE_OF = {"observe": "OBSERVING_SCENE", "describe_scene": "REPORTING_SCENE", "answer": "ANSWERING", "locate": "LOCATING",
+           "inspect": "INSPECTING", "explore": "EXPLORING",
            "pick_place": "MANIPULATING", "return_home": "RETURNING_SAFE"}
-NEEDS_OBSERVATION = {"describe_scene", "answer", "locate"}
+NEEDS_OBSERVATION = {"describe_scene", "answer", "locate", "inspect", "explore"}
 MAX_REPLANS = 1
 MAX_STEPS_EXECUTED = 10  # hard bound on capability executions per instruction (plans + replans)
 RECOVERABLE = {"insufficient_info", "infeasible", "failed"}  # may be replanned once; unsafe / cancelled never
 # capabilities that can achieve a failed step's objective in a replan (the step itself always can)
-ALTERNATIVES = {"locate": {"explore"}, "answer": {"describe_scene"}, "describe_scene": {"answer"}}
+ALTERNATIVES = {"answer": {"describe_scene"}, "describe_scene": {"answer"}}
 
 
 def achieves(step_cap: str, failed_cap: str) -> bool:
     return step_cap == failed_cap or step_cap in ALTERNATIVES.get(failed_cap, set())
 
 
-CONSUMERS = {"describe_scene", "answer", "locate", "pick_place", "explore"}  # steps that use an observation
+CONSUMERS = {"describe_scene", "answer", "locate", "inspect", "pick_place", "explore"}  # steps that use an observation
 
 
 def complete_plan(plan, instruction: str) -> list[str]:
@@ -184,6 +186,14 @@ class GoalSupervisor:
         step, t0 = self.ts.current(), time.monotonic()
         return self._step_done(step, caps.run_locate(self.ctx, step.args), t0)
 
+    def _inspecting(self, state) -> dict:
+        step, t0 = self.ts.current(), time.monotonic()
+        return self._step_done(step, caps.run_inspect(self.ctx, step.args), t0)
+
+    def _exploring(self, state) -> dict:
+        step, t0 = self.ts.current(), time.monotonic()
+        return self._step_done(step, caps.run_explore(self.ctx, step.args), t0)
+
     def _manipulating(self, state) -> dict:
         step, t0 = self.ts.current(), time.monotonic()
         final_home = not self._later_motion(step)  # HOME once per instruction, after the last motion step
@@ -201,6 +211,19 @@ class GoalSupervisor:
     def _verifying_step(self, state) -> dict:
         step = next(s for s in reversed(self.ts.plan) if s.status in ("done", "failed"))
         if step.outcome == "completed":
+            return {"next": "DISPATCHING"}
+        # information-gathering subtask (deterministic): a target not visible to the table camera -> explore
+        # hidden regions once, then look for it again; exploring itself never counts as finding it
+        if (step.capability == "locate" and step.outcome == "insufficient_info" and caps.SPECS["explore"].implemented
+                and not any(s.capability == "explore" for s in self.ts.plan) and self.executed < MAX_STEPS_EXECUTED - 2):
+            step.status = "replaced"
+            nxt = max(s.index for s in self.ts.plan) + 1
+            new = [Step(nxt, "explore", {"target": step.args.get("target"), "near": None}),
+                   Step(nxt + 1, "locate", dict(step.args))]
+            rest = self.ts.remaining(step)
+            self.ts.plan = [s for s in self.ts.plan if s not in rest] + new + [Step(s.index + 2, s.capability, s.args) for s in rest]
+            self.log("subtask", reason=f"{step.args.get('target')!r} not visible to the table camera: explore hidden regions, then locate again",
+                     steps=[{"index": s.index, "capability": s.capability} for s in new])
             return {"next": "DISPATCHING"}
         for s in self.ts.remaining(step):  # nothing after a failed step runs on stale assumptions
             s.status = "skipped"
@@ -254,11 +277,12 @@ class GoalSupervisor:
                                     "the replanned steps did not achieve it." + self._done_so_far() + " I did not report success.")
         evidence = [v.get("check") for v in self.ts.verified if v.get("pass")]
         self.log("goal_verified", steps=len(steps), evidence=evidence)
-        result = [s for s in steps if s.capability != "observe" and s.summary]  # what the user asked for first
-        support = [s for s in steps if s.capability == "observe" and s.summary]
+        supporting = {"observe", "explore"}  # information gathering; never the answer itself
+        result = [s for s in steps if s.capability not in supporting and s.summary]  # what the user asked for first
+        support = [s for s in steps if s.capability in supporting and s.summary]
         msg = "\n".join(s.summary for s in result) or "\n".join(s.summary for s in support)
         if result and support:
-            msg += f"\n({support[-1].summary})"
+            msg += "\n(" + "; ".join(s.summary for s in support[-2:]) + ")"
         return self._finish("COMPLETED", "completed", msg)
 
     def _done_so_far(self) -> str:
