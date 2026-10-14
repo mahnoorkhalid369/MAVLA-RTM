@@ -16,7 +16,7 @@ import numpy as np
 
 from agent.config import FIXTURES, Relations, Tolerances, unit
 from agent.geometry import RobotVolume, measure, snap_supports
-from agent.somark import crop, draw_marks, draw_names
+from agent.somark import draw_marks, draw_names, isolate
 from agent.world import WorldModel
 from control.collision import Box, CollisionChecker
 from control.kinematics import Kinematics
@@ -93,11 +93,15 @@ class Tools:
         return Observation(fid, camera, frame.rgb, som, marks, measured, excluded=excluded)
 
     def describe(self, obs: Observation) -> None:
+        """The VLM's own words for every measured object, each from its own isolated crop."""
         if not obs.marks:
             return
-        d = self.roles.describe(obs.som, list(obs.marks))
-        obs.descriptions = {o.id: o.model_dump(exclude={"id"}) for o in d.objects}
-        img = draw_names(obs.som, obs.marks, {k: v.get("name", "") for k, v in obs.descriptions.items()})
+        obs.descriptions = {}
+        for k, m in obs.marks.items():
+            c = isolate(obs.rgb, m)
+            cv2.imwrite(str(self.run_dir / "images" / f"{obs.frame_id}_obj_{k}.jpg"), cv2.cvtColor(c, cv2.COLOR_RGB2BGR))
+            obs.descriptions[k] = self.roles.describe_one(c).model_dump()
+        img = draw_names(obs.som, obs.marks, {k: f"{v.get('colour', '')} {v.get('name', '')}" for k, v in obs.descriptions.items()})
         cv2.imwrite(str(self.run_dir / "images" / f"{obs.frame_id}_names.jpg"), cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
 
     def update_world(self, obs: Observation) -> list[dict]:
@@ -119,7 +123,7 @@ class Tools:
         return self.roles.resolve(obs.som, descs, text, list(obs.marks))
 
     def confirm(self, obs: Observation, mark: int, text: str):
-        c = crop(obs.rgb, obs.marks[mark])
+        c = isolate(obs.rgb, obs.marks[mark])
         cv2.imwrite(str(self.run_dir / "images" / f"{obs.frame_id}_crop_{mark}.jpg"), cv2.cvtColor(c, cv2.COLOR_RGB2BGR))
         return self.roles.confirm(c, text)
 
@@ -232,6 +236,9 @@ class Tools:
     # ------------------------------------------------------------------- acting
     def execute(self, steps, label: str):
         t0 = time.monotonic()
+        # RosExecutor (frozen) reads its sim clock only while spinning: refresh it after the VLM pauses,
+        # otherwise its first step starts from a stale clock (wrong tracking numbers, early step end)
+        self.ex.spin(0.3)
         res = self.ex.execute(steps)
         self.log("tool", tool="execute", label=label, ok=res.ok, failed_step=res.failed_step, reason=res.reason,
                  steps=res.steps, seconds=round(time.monotonic() - t0, 2))

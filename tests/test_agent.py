@@ -182,7 +182,7 @@ class StubTools:
         self.contact, self.placement = list(contact), list(placement)
         self.resolve_ambiguous, self.exec_fail, self.task = resolve_ambiguous, exec_fail, task
         self.world = WorldModel()
-        self.ex = SimpleNamespace(safety_events=[])
+        self.ex = SimpleNamespace(safety_events=[], spin=lambda s: None)
         self.bridge = SimpleNamespace(q=lambda: np.zeros(6))
         self.held_box = None
         self.executed = []
@@ -307,3 +307,15 @@ def test_park_pose_choice_counts_blocked_camera_rays():
     assert r["ok"] and r["blocked"] == min(x["blocked"] for x in r["tried"] if x["path_free"])
     r = t.park_for_view((0.6, 0.25))  # a point near the camera's view centre must end unblocked
     assert r["ok"] and r["blocked"] == 0
+
+
+def test_describe_one_per_isolated_crop():
+    from agent.somark import isolate
+    rgb = np.full((100, 100, 3), 200, np.uint8)
+    m = np.zeros((100, 100), bool)
+    m[40:60, 40:60] = True
+    c = isolate(rgb, m)
+    h, w = c.shape[:2]
+    assert tuple(c[h // 2, w // 2]) == (200, 200, 200) and tuple(c[2, 2]) == (60, 60, 60)  # object untouched, rest dimmed
+    d = Roles(RecordedVLM(['{"name": "thing", "colour": "c"}'])).describe_one(c)
+    assert d.name == "thing"

@@ -75,6 +75,13 @@ class Description(BaseModel):
     material: str = ""
 
 
+class ObjectDescription(BaseModel):
+    name: str
+    colour: str = ""
+    shape: str = ""
+    material: str = ""
+
+
 class Descriptions(BaseModel):
     objects: list[Description]
 
@@ -135,6 +142,10 @@ For EVERY number, describe the object inside that outline as you see it. Answer 
 {{"objects": [{{"id": <number>, "name": "<short name>", "colour": "<colour>", "shape": "<shape>", "material": "<material>"}}, ...]}}
 Include every number exactly once and no other numbers."""
 
+DESCRIBE_ONE_PROMPT = """This picture shows one object at full brightness; everything around it is dimmed.
+Describe that object as you see it. Answer with ONE JSON object only:
+{"name": "<short name>", "colour": "<main colour>", "shape": "<shape>", "material": "<material>"}"""
+
 RESOLVE_PROMPT = """The objects in the image are outlined and numbered. Their descriptions:
 {descriptions}
 Which ONE numbered object does the user mean by "{text}"?
@@ -142,7 +153,7 @@ If exactly one object fits, give its number. If several fit equally well, or non
 "ambiguous" to true and list the numbers that could fit. Answer with ONE JSON object only:
 {{"id": <number or null>, "ambiguous": <true|false>, "candidates": [<numbers>], "reason": "<short>"}}"""
 
-CONFIRM_PROMPT = """Look at the outlined object in this picture. Is it "{text}"?
+CONFIRM_PROMPT = """Look at the object at full brightness in this picture (everything around it is dimmed). Is it "{text}"?
 Answer with ONE JSON object only: {{"match": "yes" | "no" | "unsure", "reason": "<short>"}}"""
 
 
@@ -189,6 +200,9 @@ class Roles:
                 raise ValueError(f"ids {got} do not match the drawn ids {sorted(ids)}")
         return self._call("describe", Descriptions, DESCRIBE_PROMPT.format(ids=", ".join(map(str, ids))), image=som_image, check=check,
                           max_new_tokens=80 * len(ids) + 300)
+
+    def describe_one(self, crop_image: np.ndarray) -> ObjectDescription:
+        return self._call("describe", ObjectDescription, DESCRIBE_ONE_PROMPT, image=crop_image, max_new_tokens=120)
 
     def resolve(self, som_image: np.ndarray, descriptions: list[dict], text: str, ids: list[int]) -> Resolution:
         def check(r: Resolution):

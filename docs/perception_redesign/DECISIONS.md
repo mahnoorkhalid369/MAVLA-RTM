@@ -201,3 +201,13 @@ Design approved with changes; revision 1 kept as `ARCHITECTURE_rev1_2026-10-14.m
   cylinder 3/3, precision 0.952); rounds 2-3 are only for failures. Training used 1.75 of 4 h.
   Caveat recorded: the criterion is measured on ONE image (today's layout); the 20 extra layouts
   (after the demo) are needed for a statistically meaningful number.
+- **Rehearsal fix cycle 1 (of 3), bugs in new code only:** (1) Gemma described 15 of 21 objects as
+  "Yellow square" from the set-of-mark image: the yellow outlines bleed into small objects after
+  downscaling -> each object is described from its own crop with the surroundings dimmed and nothing
+  drawn on it (same for confirmation crops); offline check on today's capture with the round-1
+  detector: 8/8 rehearsal references resolved correctly, all confirmed "yes", 1 invalid answer in 38
+  calls (fixed by the retry), 32 s to describe 21 objects (`out/demo/2026-10-14/vlm_check/`).
+  (2) The frozen RosExecutor reads its sim clock only while it spins, so after a VLM pause the first
+  step started from a stale clock ("tracking 153 deg", step could end early before the settle wait)
+  -> the agent spins the executor 0.3 s before each execute. Cycle 1 stopped after run 1 (CANCELLED,
+  asked; scored, kept in `rehearsal/cycle1/`).

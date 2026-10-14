@@ -59,3 +59,22 @@ def draw_names(som: np.ndarray, masks: dict[int, np.ndarray], names: dict[int, s
         cv2.rectangle(out, (u0 - 2, v - h - 3), (u0 + w + 2, v + 3), (0, 0, 0), -1)
         cv2.putText(out, text, (u0, v), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 0), 1, cv2.LINE_AA)
     return out
+
+
+def isolate(rgb: np.ndarray, mask: np.ndarray, margin: float = 0.6, min_side: int = 224, dim: float = 0.3) -> np.ndarray:
+    """Crop around a mask with context; everything outside the mask is dimmed and NOTHING is drawn on
+    the object, so its own colours reach the VLM unchanged (an outline colour bleeds into small objects
+    once the image is downscaled). Upscaled if small."""
+    ys, xs = np.nonzero(mask)
+    h, w = ys.max() - ys.min() + 1, xs.max() - xs.min() + 1
+    pad = int(max(h, w) * margin) + 8
+    y0, y1 = max(0, ys.min() - pad), min(rgb.shape[0], ys.max() + pad + 1)
+    x0, x1 = max(0, xs.min() - pad), min(rgb.shape[1], xs.max() + pad + 1)
+    out = rgb[y0:y1, x0:x1].astype(np.float32)
+    m = mask[y0:y1, x0:x1].astype(bool)
+    out[~m] *= dim
+    out = out.astype(np.uint8)
+    s = max(1.0, min_side / max(out.shape[:2]))
+    if s > 1.0:
+        out = cv2.resize(out, None, fx=s, fy=s, interpolation=cv2.INTER_CUBIC)
+    return out
