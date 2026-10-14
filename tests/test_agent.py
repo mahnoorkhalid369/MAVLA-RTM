@@ -144,7 +144,7 @@ def tools_with(objects):
 def test_plan_on_places_on_measured_top():
     t, (a, b) = tools_with([geom(0.55, 0.15, 0.04), geom(0.55, 0.45, 0.05, fp=(0.06, 0.06))])
     from control.robot import ARM_HOME
-    p = t.plan_pick_place(a, "on", b, "robot", np.asarray(ARM_HOME, float))
+    p = t.plan_pick_place(a, "on", b, "robot", np.array(ARM_HOME, float))
     assert np.allclose(p.target_centre[:2], [0.55, 0.45])
     assert abs(p.target_top - (0.05 + 0.04)) < 1e-6
     assert p.held.width == pytest.approx(0.04)
@@ -154,13 +154,13 @@ def test_plan_on_refuses_narrow_support():
     t, (a, b) = tools_with([geom(0.55, 0.15, 0.04), geom(0.55, 0.45, 0.10, fp=(0.02, 0.02))])
     from control.robot import ARM_HOME
     with pytest.raises(PlanningError):
-        t.plan_pick_place(a, "on", b, "robot", np.asarray(ARM_HOME, float))
+        t.plan_pick_place(a, "on", b, "robot", np.array(ARM_HOME, float))
 
 
 def test_plan_next_to_finds_a_free_spot_with_gap():
     t, (a, b) = tools_with([geom(0.55, 0.15, 0.04), geom(0.0, 0.65, 0.08, fp=(0.05, 0.05))])
     from control.robot import ARM_HOME
-    p = t.plan_pick_place(a, "next_to", b, "robot", np.asarray(ARM_HOME, float))
+    p = t.plan_pick_place(a, "next_to", b, "robot", np.array(ARM_HOME, float))
     d = np.hypot(p.target_centre[0] - 0.0, p.target_centre[1] - 0.65)
     assert 0.045 + 0.02 - 1e-6 <= d <= 0.045 + 0.02 + 0.10 + 1e-6
     assert p.target_top == pytest.approx(0.04)
@@ -301,7 +301,7 @@ def test_park_pose_choice_counts_blocked_camera_rays():
     t, _ = tools_with([])
     from control.robot import ARM_HOME
     executed = []
-    t.bridge = SimpleNamespace(q=lambda: np.asarray(ARM_HOME, float))
+    t.bridge = SimpleNamespace(q=lambda: np.array(ARM_HOME, float))
     t.execute = lambda steps, label: executed.append(steps[0].label) or SimpleNamespace(ok=True)
     r = t.park_for_view(None)
     assert r["ok"] and r["blocked"] == min(x["blocked"] for x in r["tried"] if x["path_free"])
