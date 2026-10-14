@@ -26,9 +26,10 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_WEIGHTS = ROOT / "out/seg/runs/yolo11s_seg_r1/weights/best.pt"
 
 
-def start_sim(gui: bool, log: Path) -> subprocess.Popen:
+def start_sim(gui: bool, log: Path, scenario: str | None = None) -> subprocess.Popen:
     env = {**os.environ, "OMNI_KIT_ACCEPT_EULA": "YES"}
-    cmd = [str(ROOT / ".venv/bin/python"), "-u", "-m", "sim.run_live"] + ([] if gui else ["--headless"])
+    mod = ["sim.run_scenario", "--scenario", scenario] if scenario else ["sim.run_live"]
+    cmd = [str(ROOT / ".venv/bin/python"), "-u", "-m", *mod] + ([] if gui else ["--headless"])
     return subprocess.Popen(cmd, cwd=ROOT, stdout=open(log, "w"), stderr=subprocess.STDOUT, env=env, start_new_session=True)
 
 
@@ -74,6 +75,7 @@ def main() -> int:
     ap.add_argument("--conf", type=float, default=0.25)
     ap.add_argument("--start-sim", action="store_true", help="start Isaac Sim after loading the models")
     ap.add_argument("--gui", action="store_true", help="with --start-sim: show the Isaac Sim window")
+    ap.add_argument("--scenario", help="with --start-sim: an active-perception test scene (sim/scenarios/<name>.json)")
     ap.add_argument("--sim-flag", help="write this file when the models are loaded (rehearsal harness)")
     ap.add_argument("--ask", choices=["terminal", "scripted"], default="terminal",
                     help="who answers clarification questions: the person at this terminal (default) or, for "
@@ -104,7 +106,7 @@ def main() -> int:
     print("[agent] models loaded", flush=True)
     if a.sim_flag:
         Path(a.sim_flag).write_text("models loaded\n")
-    sim = start_sim(a.gui, out / "sim.log") if a.start_sim else None
+    sim = start_sim(a.gui, out / "sim.log", a.scenario) if a.start_sim else None
     try:
         from agent.ros_bridge import RosBridge
         from execution.ros_executor import RosExecutor

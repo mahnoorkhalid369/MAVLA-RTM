@@ -1,0 +1,19 @@
+{
+ "name": "ap_categories",
+ "seed": 0,
+ "description": "Active perception: new object categories (YCB meshes from NVIDIA's asset server: banana, bowl, mug were never in YOLO training; mustard and bleach bottles were), fruit PROXIES (spheres labelled as proxies, not fruit models), a thin mat, look-alike red cubes, and two small yellow objects whose shape is hard to see from the table camera (cylinder vs cube). Poses fixed.",
+ "objects": [
+  {"name": "banana", "shape": "ycb", "asset": "011_banana", "xy": [0.45, 0.40], "yaw_deg": 30, "role": "fruit (real YCB mesh, novel to YOLO)"},
+  {"name": "mustard_bottle", "shape": "ycb", "asset": "006_mustard_bottle", "xy": [0.30, 0.66], "yaw_deg": 0, "role": "bottle (YCB mesh, in YOLO training)"},
+  {"name": "bleach_bottle", "shape": "ycb", "asset": "021_bleach_cleanser", "xy": [-0.30, 0.62], "yaw_deg": 90, "role": "bottle (YCB mesh, in YOLO training)"},
+  {"name": "mug", "shape": "ycb", "asset": "025_mug", "xy": [0.62, 0.02], "yaw_deg": 0, "role": "container (YCB mesh, novel to YOLO)"},
+  {"name": "bowl", "shape": "ycb", "asset": "024_bowl", "xy": [0.12, 0.80], "yaw_deg": 0, "role": "container (YCB mesh, novel to YOLO)"},
+  {"name": "apple_proxy", "shape": "sphere", "xy": [-0.12, 0.78], "size": [0.075, 0.075, 0.075], "color": [0.75, 0.08, 0.10], "role": "PROXY: red sphere standing in for an apple"},
+  {"name": "orange_proxy", "shape": "sphere", "xy": [0.55, -0.22], "size": [0.07, 0.07, 0.07], "color": [0.95, 0.50, 0.05], "role": "PROXY: orange sphere standing in for an orange"},
+  {"name": "green_mat", "shape": "box", "xy": [0.40, 0.15], "size": [0.20, 0.15, 0.008], "color": [0.15, 0.35, 0.20], "role": "mat / placing surface"},
+  {"name": "red_cube", "shape": "box", "xy": [0.05, 0.47], "size": [0.04, 0.04, 0.04], "color": [0.80, 0.10, 0.10], "role": "look-alike pair A"},
+  {"name": "dark_red_cube", "shape": "box", "xy": [0.16, 0.45], "size": [0.04, 0.04, 0.04], "color": [0.55, 0.05, 0.08], "role": "look-alike pair B"},
+  {"name": "small_yellow_cylinder", "shape": "cylinder", "xy": [-0.16, 0.45], "size": [0.025, 0.025, 0.03], "color": [0.95, 0.85, 0.10], "role": "small: shape needs a close look"},
+  {"name": "small_yellow_cube", "shape": "box", "xy": [-0.23, 0.47], "size": [0.025, 0.025, 0.025], "color": [0.95, 0.85, 0.10], "role": "small: shape needs a close look"}
+ ]
+}

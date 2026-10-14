@@ -21,15 +21,16 @@ def main() -> int:
     ap.add_argument("--instruction", required=True, action="append", help="repeat for several instructions in one session")
     ap.add_argument("--pick-near", type=float, nargs=2, required=True)
     ap.add_argument("--console", required=True)
-    ap.add_argument("--launcher-args", nargs="*", default=[])
+    ap.add_argument("--launcher-args", default="", help='e.g. "--headless --scenario ap_occlusion" (one quoted string)')
     ap.add_argument("--timeout", type=float, default=3000)
     ap.add_argument("--launcher", default="launch/start_demo.sh")
     ap.add_argument("--gpu-log", help="log nvidia-smi memory / utilisation every 2 s to this file")
+    ap.add_argument("--truth-out", help="save one simulator ground-truth message here once the agent is ready (evaluation only)")
     a = ap.parse_args()
     gpu = subprocess.Popen(["nvidia-smi", "--query-gpu=timestamp,memory.used,utilization.gpu", "--format=csv,noheader", "-l", "2"],
                            stdout=open(a.gpu_log, "w")) if a.gpu_log else None
     launcher = Path(a.launcher)
-    p = subprocess.Popen([str(launcher if launcher.is_absolute() else ROOT / launcher), *a.launcher_args],
+    p = subprocess.Popen([str(launcher if launcher.is_absolute() else ROOT / launcher), *a.launcher_args.split()],
                          cwd=(launcher.parents[1] if launcher.is_absolute() else ROOT), stdin=subprocess.PIPE,
                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
     log = open(a.console, "w")
@@ -41,6 +42,8 @@ def main() -> int:
         if time.time() - t0 > a.timeout:
             print("driver timeout", flush=True)
             break
+        if "[agent] ready" in line and a.truth_out:
+            subprocess.Popen([str(ROOT / ".venv-seg/bin/python"), "-m", "evaluation.truth_snapshot", a.truth_out], cwd=ROOT)
         if "[agent] ready" in line and todo:
             p.stdin.write(todo.pop(0) + "\n")
             p.stdin.flush()

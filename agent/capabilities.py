@@ -230,7 +230,11 @@ def _find_in(ctx: Context, wobs, text: str) -> StepResult | None:
     if not new:
         return None
     ctx.tools.describe(wobs, new)
-    lex = [k for k in ctx.tools.lexical_candidates(wobs, text) if k in new]
+    words = ctx.tools.words(text) - GENERIC_WORDS
+    if not words:  # "the object / something behind ...": any single newly seen object answers it
+        lex = new if len(new) == 1 else []
+    else:
+        lex = [k for k in ctx.tools.lexical_candidates(wobs, text) if k in new]
     if len(lex) != 1:
         return None
     k = lex[0]
@@ -335,6 +339,7 @@ def run_inspect(ctx: Context, args: dict) -> StepResult:
 
 
 MAX_EXPLORE_VIEWPOINTS = 2
+GENERIC_WORDS = {"object", "thing", "something", "item", "anything", "stuff"}  # English: no category meaning
 
 
 def run_explore(ctx: Context, args: dict) -> StepResult:
@@ -351,13 +356,14 @@ def run_explore(ctx: Context, args: dict) -> StepResult:
     if t.world.holding is not None:
         return StepResult("unsafe", "not exploring while holding an object")
     objs = [{"id": o.id, "geometry": o.geometry} for o in t.world.objects.values() if o.status in ("on_surface", "occluded")]
-    if near:
-        m, fail = _target_mark(ctx, near)
-        if fail is not None:
-            return StepResult(fail.outcome, f"cannot find {near!r} to look behind: {fail.summary}")
-        oid = ctx.obs.object_ids.get(m)
-        objs = [o for o in objs if o["id"] == oid]
-    regions = shadow_points(objs, n_max=MAX_EXPLORE_VIEWPOINTS if not near else 1)
+    if near:  # behind the named object; if several objects fit the name, behind each (bounded)
+        r = ctx.tools.resolve(ctx.obs, near)
+        marks = [r.id] if r.id is not None else list(r.candidates)
+        if not marks:
+            return StepResult("insufficient_info", f"cannot find {near!r} to look behind")
+        ids = {ctx.obs.object_ids.get(m) for m in marks}
+        objs = [o for o in objs if o["id"] in ids]
+    regions = shadow_points(objs, n_max=MAX_EXPLORE_VIEWPOINTS)
     if not regions:
         return StepResult("insufficient_info", "no hidden region to look into")
     vp, views, new_total, tried = ViewpointPlanner(), 0, 0, []

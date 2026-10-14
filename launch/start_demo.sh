@@ -11,6 +11,7 @@
 #   ./launch/start_demo.sh --headless         # no Isaac Sim window (demo viewer still opens)
 #   ./launch/start_demo.sh --no-viewer        # terminal only (logs are printed here as well)
 #   ./launch/start_demo.sh --camera-windows   # also the raw wrist + table RGB-D windows
+#   ./launch/start_demo.sh --scenario ap_occlusion   # an active-perception test scene (sim/scenarios/)
 # Outputs: out/demo/<date>/live_<time>/<nn>/ (events.jsonl, images/, result.json); viewer feed out/demo/live/
 # Extra viewer options: DEMO_VIEWER_ARGS="--snapshot-every 3 --snapshot-dir out/demo/shots" ./launch/start_demo.sh
 
@@ -19,12 +20,16 @@ cd "$ROOT" || exit 1
 GUI="--gui"
 VIEWER=1
 CAMERAS=0
+SCENARIO=()
+NEXT_IS_SCENARIO=0
 for arg in "$@"; do
+    if [ "$NEXT_IS_SCENARIO" = 1 ]; then SCENARIO=(--scenario "$arg"); NEXT_IS_SCENARIO=0; continue; fi
     case "$arg" in
+        --scenario) NEXT_IS_SCENARIO=1 ;;
         --headless) GUI="" ;;
         --no-viewer) VIEWER=0 ;;
         --camera-windows) CAMERAS=1 ;;
-        *) echo "unknown option $arg (use --headless, --no-viewer, --camera-windows)"; exit 1 ;;
+        *) echo "unknown option $arg (use --headless, --no-viewer, --camera-windows, --scenario NAME)"; exit 1 ;;
     esac
 done
 source /opt/ros/jazzy/setup.bash
@@ -52,4 +57,4 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-"$ROOT/.venv-seg/bin/python" -u -m agent.run --start-sim $GUI --live-dir out/demo/live
+"$ROOT/.venv-seg/bin/python" -u -m agent.run --start-sim $GUI --live-dir out/demo/live "${SCENARIO[@]}"
