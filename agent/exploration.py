@@ -38,6 +38,9 @@ MIN_DEPTH = 0.20
 LIMIT_MARGIN = np.radians(5.0)
 REACH_TOL_DEG = 1.5
 MAX_CANDIDATES_EXECUTED = 2
+VIEW_PAD = 0.010  # m: line-of-sight clearance from measured objects
+REGION_RADIUS = 0.03  # m: a hidden region is seen only if points this far around its centre are all visible
+REGION_HEIGHT = 0.04  # m: ... at the floor and this high
 
 
 @dataclass
@@ -123,7 +126,8 @@ class ViewpointPlanner:
         return True
 
     def plan(self, target: np.ndarray, q_now: np.ndarray, obstacles: list, target_box_name: str | None = None,
-             distances=DISTANCES, elevations=ELEVATIONS_DEG, azimuths=None) -> ViewPlan:
+             distances=DISTANCES, elevations=ELEVATIONS_DEG, azimuths=None, region_radius: float = 0.0,
+             region_height: float = 0.0) -> ViewPlan:
         """All candidates around `target` (world point to look at); the best safe one (or a reason)."""
         checker = CollisionChecker(obstacles)
         others = [b for b in obstacles if b.name != target_box_name]
@@ -168,7 +172,11 @@ class ViewpointPlanner:
         cands.sort(key=lambda v: v.cost)
         for v in cands:
             cam, sol = v.camera_pos, v.q
-            if any(self._segment_hits_box(cam, target, b) for b in others):
+            # the whole region must be in clear view: rays to points around the look-at point (+-region_radius,
+            # two heights) clear every measured object by VIEW_PAD (a grazing view past an edge is not enough)
+            pts = [target + [dx, dy, dz] for dx in (-region_radius, 0, region_radius) for dy in (-region_radius, 0, region_radius)
+                   for dz in (0.0, region_height)] if region_radius > 0 else [target]
+            if any(self._segment_hits_box(cam, p, b, pad=VIEW_PAD) for p in pts for b in others):
                 reject("view blocked by a measured object")
                 continue
             c, r, idx, names = checker.spheres(sol)

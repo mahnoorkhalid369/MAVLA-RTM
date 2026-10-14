@@ -181,6 +181,9 @@ class Confirmation(BaseModel):
         return str(v).strip().lower()
 
 
+HIDING_WORDS = re.compile(r"\b(behind|under|beneath|below|inside)\b", re.I)  # English prepositions of hiding
+
+
 class VLMFailure(RuntimeError):
     pass
 
@@ -325,6 +328,9 @@ class Roles:
                                          "out unless the user describes where the object to move is now")
                     if bool(st.object_anchor) != bool(st.object_relation):
                         raise ValueError(f"step {i}: object_relation and object_anchor go together")
+                elif st.do == "explore" and not st.near and HIDING_WORDS.search(instruction):
+                    raise ValueError(f"step {i}: the instruction says where the thing is hidden; set explore.object to "
+                                     "the thing to find and explore.near to the object it is behind / under")
                 elif st.do in ("locate", "inspect", "explore") and not st.object:
                     raise ValueError(f"step {i}: {st.do} needs object")
                 elif st.do == "answer" and not (st.question or "").strip():

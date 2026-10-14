@@ -380,7 +380,9 @@ def run_explore(ctx: Context, args: dict) -> StepResult:
     for point, behind_id in regions:
         q0 = t.bridge.q()
         tp = time.monotonic()
-        plan = vp.plan(point, q0, t.obstacles())
+        from agent.exploration import REGION_HEIGHT, REGION_RADIUS
+        plan = vp.plan(point, q0, t.obstacles(), region_radius=REGION_RADIUS, region_height=REGION_HEIGHT,
+                       elevations=(70.0, 55.0, 40.0))  # steeper views see further behind an occluder
         ctx.log("exploration", purpose="explore", target=text, region=[round(v, 3) for v in point], behind=behind_id,
                 plan=plan.summary(), seconds=round(time.monotonic() - tp, 2))
         tried.append({"region": point.tolist(), "behind": behind_id, "plan": plan.summary()})

@@ -287,3 +287,11 @@ def test_explore_at_the_end_of_a_plan_gets_a_locate(tmp_path, explore_stub):
     r, ev = run(tmp_path, t)
     assert [s["capability"] for s in r["plan"]] == ["explore", "locate"] and r["status"] != "COMPLETED"
     assert any(e["kind"] == "plan_completed" for e in ev)
+
+
+def test_planner_explore_needs_the_hiding_place_when_the_instruction_names_one():
+    bad = json.dumps({"steps": [{"do": "explore", "object": "box"}]})
+    good = json.dumps({"steps": [{"do": "explore", "object": "thing", "near": "box"}]})
+    vlm = RecordedVLM([bad, good])
+    p = Roles(vlm).plan_goal("Find the object behind the box.", "menu")
+    assert p.steps[0].args == {"target": "thing", "near": "box"} and "explore.near" in vlm.calls[1]
