@@ -4,7 +4,10 @@ Goal: perception and grounding with no hardcoded object knowledge (see the brief
 the inventory in HARDCODING_INVENTORY.md). Evidence labels: measured / from files / unverified.
 
 ## Active phase
-**AUTONOMOUS DEMO RUN started 2026-10-14T08:19:52Z (hard stop at 20:19Z, 12 h).** Brief: user message of
+**AUTONOMOUS DEMO RUN 2026-10-14T08:19:52Z – ~12:50Z: finished (no hard stop). Result: demo NOT READY
+as specified (DEMO_REPORT.md): instructions 1 and 3 verified 3/3 each, instruction 2 asks 3/3,
+instruction 4 not run. Next: reference-resolution evaluation (DEMO_REPORT §4), 20 eval layouts +
+ambiguity sets, Phase 2 Mask R-CNN comparison.** (Earlier header follows.) Brief: user message of
 2026-10-14 (demo thin slice of ARCHITECTURE rev 3; rules, budgets, hard stops). Steps: 1 dataset ->
 2 fine-tune YOLO11s-seg (<= 3 rounds, <= 4 h) -> 3 demo slice (agent/) -> 4 rehearsal (3 runs x
 instructions) -> 5 DEMO.md, DEMO_REPORT.md, out/demo/<date>/.
@@ -25,6 +28,13 @@ instructions) -> 5 DEMO.md, DEMO_REPORT.md, out/demo/<date>/.
   (one image only: the Wilson 95 % lower bound for 16/16 is 0.81); val recall 0.976 / precision
   0.904; test_novel recall 0.965 / precision 0.893 (ycb_novel 0.939 lowest). No round 2/3 needed.
 - 10:45 rehearsal cycle 1 started (instructions 1-3 x 3 runs, fresh sim per run).
+- 10:45-12:29 rehearsal: 4 cycles, 3 fix cycles (DECISIONS). Final cycle 4 (measured, ground truth
+  scored after each run): i1 3/3, i3 3/3 (2.0-3.9 mm), i2 0/3 asked (yellow look-alikes), 0 false
+  done, 0 false failed; instruction 4 not run (gate). Cycle 3 had 2 false done (wrong object) before
+  fix 3.
+- 12:30-12:40 demo paths tested: interactive headless (COMPLETED 4.0 mm) and launch/start_demo.sh
+  with GUI (COMPLETED 1.7 mm, GPU peak 7.1 GB); launcher cleanup fixed (killed its caller's group).
+- ~12:45 deliverables: DEMO.md, DEMO_REPORT.md (**demo NOT READY as specified**), out/demo/2026-10-14/.
 
 ## Phases (the merged plan is ARCHITECTURE.md §12; this table tracks the data / perception track)
 | # | Phase | Status | Evidence |

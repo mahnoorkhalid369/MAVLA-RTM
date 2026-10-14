@@ -330,3 +330,12 @@ Active work is tracked in `docs/perception_redesign/PROGRESS.md` (read first), d
   rev 1 kept): wrong-object confirmation and a "confident wrong resolution" metric (≤ 2 %), statistics
   with trial counts and Wilson intervals, mass estimate as a plausibility check until validated,
   no stopgap demo, joint efforts via a new sim entry point importing the frozen code.
+
+- 2026-10-14 (autonomous demo run, 08:19–~12:50 UTC): first thin slice of ARCHITECTURE rev 3 built
+  (`agent/`: LangGraph supervisor, YOLO11s-seg masks, depth geometry, Gemma naming / resolution /
+  confirmation, SkillPlanner + CollisionChecker + RosExecutor, camera verification). Synthetic dataset
+  complete (7,500 images); YOLO11s-seg round 1 met the demo perception criteria on today's scene
+  (one image). Final rehearsal (measured, ground truth for scoring only): red→green 3/3, orange→purple
+  3/3, yellow→tan 0/3 (asked), next-to not run; no false done in the final cycle, 2 in the previous one
+  (wrong object). Verdict: **demo NOT READY as specified** — `docs/perception_redesign/DEMO_REPORT.md`.
+  Frozen baseline A unchanged (manifest verified).

@@ -3,6 +3,13 @@
 First thin slice of `docs/perception_redesign/ARCHITECTURE.md` (rev 3). Results and readiness:
 `docs/perception_redesign/DEMO_REPORT.md` (read its first lines first).
 
+**Status (2026-10-14, measured in the final rehearsal, 3 runs each, fresh sim per run):**
+- "Put the red cube on the green cube." 3/3 verified successes (2.0–3.1 mm vs ground truth).
+- "Put the orange cube on the purple cylinder." 3/3 verified successes (3.7–3.9 mm).
+- "Pick up the yellow cube and put it on the tan box." 0/3: every time the agent asks which yellow
+  cube (an olive and a gold cube also look yellow) and stops. This is expected behaviour, not a crash.
+- The "next to" instruction was not rehearsed.
+
 ```
 "put the red cube on the green cube"
   → LangGraph supervisor (agent/graph.py)
@@ -27,7 +34,8 @@ cd ~/Documents/PhD-CE/Research-LF/6DOF-Arm
 ./launch/start_demo.sh --headless  # no Isaac Sim window (camera windows still open)
 ```
 
-- Wait for `[agent] ready` (about 2–4 min: Gemma ~1 min, Isaac Sim 1–2 min).
+- Wait for `[agent] ready` (about 2–3 min: Gemma ~1 min, Isaac Sim 1–2 min). GPU peak with the
+  Isaac Sim window measured at 7.1 GB of 12 GB.
 - Type an instruction at the `instruction (empty line to quit)>` prompt, e.g.
   - `Put the red cube on the green cube.`
   - `Pick up the yellow cube and put it on the tan box.`
@@ -53,11 +61,13 @@ One instruction, no prompt: `.venv-seg/bin/python -m agent.run --start-sim --ins
 ## What you will see
 
 1. The arm turns about its base to the pose that hides the fewest table positions from the camera.
-2. ~30–60 s of thinking: detection, measuring, Gemma naming every numbered object, resolving and
-   confirming the two objects (watch `images/` fill up, see below).
+2. About 2 min of looking and thinking (measured median 111 s): detection, measuring, Gemma describing
+   every object from its own crop, then ~16 s to resolve and confirm the two objects (watch
+   `images/` fill up, see below). Nothing moves during this time; that is normal.
 3. The arm moves above the object, descends, closes, checks that the fingers stalled on it,
    lifts, carries, lowers onto / next to the destination, opens and retreats.
-4. The arm turns away again, the table camera looks, and the agent prints one of:
+4. The arm turns away again, the table camera looks (~40 s), and the agent prints one of (a full
+   instruction takes ~4.5 min measured, plus start-up):
    - `COMPLETED: Done (verified by the table camera): placed … mm from the planned spot …`
    - `FAILED (<class>): <reason>. I did not report success.`
    - `CANCELLED: I asked (…) and the answer was 'cancel'.` — whenever the agent is unsure

@@ -240,3 +240,15 @@ Design approved with changes; revision 1 kept as `ARCHITECTURE_rev1_2026-10-14.m
   on the false-done crops the visual comparison alone picked the brown cube 3/3 times
   (`vlm_check/compare_check.json`), so the agreement rule turns that case into a question instead of
   a wrong pick. Conservative by design: some correct picks will now be questions.
+- **Final cycle 4 (no code change during it):** i1 3/3, i3 3/3, i2 0/3 asked, 0 false done / failed.
+  **Instruction 4 not run** (brief: only if 1-3 each >= 2/3). **Instruction 2 not substituted:** the
+  brief substitutes only *infeasible* instructions; instruction 2 is feasible (it planned offline and
+  succeeded in cycle 3 run 3) but ambiguous to the agent's conservative rule — recorded as "asked".
+  No fix cycle left; the candidate improvement (accept the visual choice when it is among the
+  most-specific descriptions) is recorded in DEMO_REPORT §4 as unverified.
+- **Launcher fix after the rehearsal (deliverable script, not agent code):** `launch/start_demo.sh`
+  cleaned up with `kill 0`, which also killed the calling shell when started non-interactively; the
+  camera viewers now run in their own process group and only that group is stopped. Re-tested: start,
+  quit, nothing left running, caller unaffected (measured).
+- **Run ended early (~12:50Z of the 20:19Z limit):** all steps done; the 20 extra layouts, ambiguity
+  sets and Phase 2 wait for the user (brief: "after the demo").

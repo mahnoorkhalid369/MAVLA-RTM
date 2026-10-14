@@ -18,19 +18,19 @@ export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-42}"
 export OMNI_KIT_ACCEPT_EULA=YES
 mkdir -p out/logs
 
-cleanup() {
-    trap - EXIT INT TERM
-    kill 0 2>/dev/null  # everything started from this script (viewers; the agent stops the sim itself)
-}
-trap cleanup EXIT INT TERM
-
-(
-    until ros2 topic list 2>/dev/null | grep -q '^/table_camera/color/image_raw$'; do sleep 3; done
+# camera windows in their own process group (started once the table camera streams), stopped on exit
+setsid bash -c '
+    until ros2 topic list 2>/dev/null | grep -q "^/table_camera/color/image_raw$"; do sleep 3; done
     /usr/bin/python3 ros_nodes/camera_viewer.py > out/logs/demo_wrist_viewer.log 2>&1 &
     /usr/bin/python3 ros_nodes/camera_viewer.py --title "Table camera - RGB and depth" \
         --color-topic /table_camera/color/image_raw --depth-topic /table_camera/depth/image_rect_raw \
         --depth-min 1.2 --depth-max 3.2 --ros-args -r __node:=table_viewer > out/logs/demo_table_viewer.log 2>&1 &
-    wait
-) &
+    wait' &
+VIEWERS=$!
+cleanup() {
+    trap - EXIT INT TERM
+    kill -- -"$VIEWERS" 2>/dev/null  # only the viewers' group (the agent stops Isaac Sim itself)
+}
+trap cleanup EXIT INT TERM
 
 "$ROOT/.venv-seg/bin/python" -u -m agent.run --start-sim $GUI
