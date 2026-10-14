@@ -129,7 +129,7 @@ def kill_group(p, sig=signal.SIGINT, wait=30) -> None:
             pass
 
 
-def one_run(k: int, n: int, out: Path, weights: str, timeout_s: float) -> dict:
+def one_run(k: int, n: int, out: Path, weights: str, timeout_s: float, truth: "Truth") -> dict:
     spec = INSTRUCTIONS[k]
     rd = out / f"i{k}_run{n}"
     rd.mkdir(parents=True, exist_ok=True)
@@ -153,7 +153,7 @@ def one_run(k: int, n: int, out: Path, weights: str, timeout_s: float) -> dict:
         sim = subprocess.Popen([str(ROOT / ".venv/bin/python"), "-u", "-m", "sim.run_live", "--headless"], cwd=ROOT,
                                stdout=open(rd / "sim.log", "w"), stderr=subprocess.STDOUT,
                                env={**env, "OMNI_KIT_ACCEPT_EULA": "YES"}, start_new_session=True)
-        truth = Truth()
+        truth.latest = None  # only messages from this run's simulator
         before = truth.get(after=1.0)  # after the objects have settled for 1 s of sim time
         if before is None:
             rec["error"] = "no ground truth from the simulator"
@@ -196,9 +196,10 @@ def main() -> int:
     out = Path(a.out) / (a.tag or time.strftime("cycle_%H%M%S"))
     out.mkdir(parents=True, exist_ok=True)
     recs = []
+    truth = Truth()
     for k in a.instructions:
         for n in range(1, a.runs + 1):
-            r = one_run(k, n, out, a.weights, a.timeout)
+            r = one_run(k, n, out, a.weights, a.timeout, truth)
             recs.append(r)
             s = r.get("score", {})
             print(f"[rehearsal] i{k} run{n}: agent {r.get('result_status')} | truth success {s.get('truth_success')} | "
