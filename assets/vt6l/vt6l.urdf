@@ -1,0 +1,303 @@
+<?xml version="1.0"?>
+<!--
+  Epson VT6L (VT6-A901S, table-top, AC standard) for simulation.
+
+  SOURCE: Epson "VT series Manipulator Manual" (VT_Robot.pdf, footer "VT series Rev.6",
+  https://download.epson.biz/robots/data/us/English/VT_Robot.pdf), downloaded 2026-10-13:
+    [S] Appendix A "VT6L Specifications", manual p.175-176
+    [D] 2.3 "Outer Dimensions" p.42-43 and 2.4 "Standard Motion Range" p.44
+
+  Kinematics, from the drawings [D] (millimetres; zero joint angles = Epson "0 pulse position":
+  upper arm vertical, forearm horizontal pointing forward, flange facing forward):
+    J2 axis 412 above the base mounting surface, 100 in front of the J1 axis
+    J2 -> J3 (upper arm) 420
+    J3 -> P point (wrist centre, J4/J5/J6 intersection) 400, on the J3 axis height (no elbow offset)
+    P point -> flange face 80
+  Cross-checks: 100 + 420 + 400 = 920 (reach to P point, [S]/[D]); + 80 = 1000 (to flange);
+  412 + 420 + 400 = 1232 (top of the P-point range, [D]). tests/test_vt6l_model.py checks the
+  manual's four P-point radii 274.4, 527.3, 351.7, 293.9 mm (footnotes *1-*4, p.45).
+  Side offsets of the links (the drawings' 238 / 204 / 119 / 61 mm) are along the pitch axes and
+  cancel out, so the P point lies in the J1 plane; they only matter for the visuals below.
+
+  Joint directions: J2 + = upper arm tilts backwards (+65 [D]); J3 + = forearm tilts UP (from the
+  manual's J2-to-P-point radii: -51 deg gives 274.4 mm (*1) only if the forearm goes DOWN, +190 gives
+  527.3 mm (*2) only if it goes up and over; the manual's wording in *3/*4 contradicts *1/*2, the
+  numbers decide); J5 + = flange tilts up (+125 [D]).
+  J1, J4, J6 are symmetric: their positive direction is NOT shown in the drawings (UNVERIFIED).
+
+  Limits: ranges and max. operating speeds from [S] (speeds: AC standard model; J4 188.1 and J6
+  234.5 deg/s on protection / DC models). EFFORT values are NOT from Epson (it gives motor power
+  300/300/200/100/100/100 W, not torque): SIMULATION-ONLY placeholders, never use them to
+  authorise a physical robot. Payload: 3 kg rated, 6 kg max; allowable moment J4/J5 12 N m,
+  J6 7 N m; allowable inertia J4/J5 0.3, J6 0.1 kg m^2 [S].
+
+  Geometry: Epson publishes no meshes in this project; visuals/collisions are SIMPLIFIED boxes and
+  cylinders sized from [D] (base 285 x 240, upper arm ~120 wide, wrist ~120 high, flange d40).
+  Inertia: APPROXIMATE (total 40 kg = [S] weight without cables); replace with CAD values.
+  Arm points along +Y at zero joint angles; J1 axis = world Z at the origin.
+-->
+<robot name="epson_vt6l">
+  <material name="white"><color rgba="0.95 0.95 0.95 1"/></material>
+  <material name="grey"><color rgba="0.55 0.57 0.60 1"/></material>
+
+  <link name="base_link">
+    <inertial>
+      <origin xyz="0 -0.02 0.10" rpy="0 0 0"/>
+      <mass value="13.5"/>
+      <inertia ixx="0.16" ixy="0" ixz="0" iyy="0.14" iyz="0" izz="0.16"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 -0.0325 0.0085" rpy="0 0 0"/>
+      <geometry><box size="0.240 0.285 0.017"/></geometry>
+      <material name="grey"/>
+    </visual>
+    <visual>
+      <origin xyz="0 -0.0325 0.105" rpy="0 0 0"/>
+      <geometry><box size="0.200 0.250 0.180"/></geometry>
+      <material name="white"/>
+    </visual>
+    <collision>
+      <origin xyz="0 -0.0325 0.0985" rpy="0 0 0"/>
+      <geometry><box size="0.240 0.285 0.197"/></geometry>
+    </collision>
+  </link>
+
+  <link name="j1_link">
+    <inertial>
+      <origin xyz="0 0.04 0.10" rpy="0 0 0"/>
+      <mass value="9.0"/>
+      <inertia ixx="0.10" ixy="0" ixz="0" iyy="0.10" iyz="0" izz="0.08"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0.03 0.06" rpy="0 0 0"/>
+      <geometry><cylinder radius="0.095" length="0.12"/></geometry>
+      <material name="white"/>
+    </visual>
+    <visual>  <!-- shoulder housing around the J2 axis -->
+      <origin xyz="0 0.100 0.212" rpy="0 1.570796 0"/>
+      <geometry><cylinder radius="0.085" length="0.200"/></geometry>
+      <material name="white"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0.03 0.06" rpy="0 0 0"/>
+      <geometry><cylinder radius="0.095" length="0.12"/></geometry>
+    </collision>
+    <collision>
+      <origin xyz="0 0.100 0.212" rpy="0 1.570796 0"/>
+      <geometry><cylinder radius="0.085" length="0.200"/></geometry>
+    </collision>
+  </link>
+  <joint name="j1_joint" type="revolute">
+    <origin xyz="0 0 0.200" rpy="0 0 0"/>
+    <parent link="base_link"/>
+    <child link="j1_link"/>
+    <axis xyz="0 0 1"/>
+    <!-- [S] +/-170 deg, 166.2 deg/s -->
+    <limit lower="-2.96706" upper="2.96706" velocity="2.90074" effort="400"/>
+    <dynamics damping="0.0" friction="0.0"/>
+  </joint>
+
+  <link name="j2_link">  <!-- upper arm, J2 -> J3, 420 mm -->
+    <inertial>
+      <origin xyz="0 0 0.21" rpy="0 0 0"/>
+      <mass value="7.0"/>
+      <inertia ixx="0.12" ixy="0" ixz="0" iyy="0.12" iyz="0" izz="0.02"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0.21" rpy="0 0 0"/>
+      <geometry><box size="0.100 0.120 0.330"/></geometry>
+      <material name="white"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.21" rpy="0 0 0"/>
+      <geometry><box size="0.100 0.120 0.330"/></geometry>
+    </collision>
+  </link>
+  <joint name="j2_joint" type="revolute">
+    <origin xyz="0 0.100 0.212" rpy="0 0 0"/>  <!-- 412 mm above the base, 100 mm forward [D] -->
+    <parent link="j1_link"/>
+    <child link="j2_link"/>
+    <axis xyz="1 0 0"/>  <!-- + tilts the upper arm backwards [D] -->
+    <!-- [S] -160 .. +65 deg, 122.5 deg/s -->
+    <limit lower="-2.79253" upper="1.13446" velocity="2.13803" effort="400"/>
+    <dynamics damping="0.0" friction="0.0"/>
+  </joint>
+
+  <link name="j3_link">  <!-- elbow housing + first 100 mm of the forearm -->
+    <inertial>
+      <origin xyz="0 0.04 0" rpy="0 0 0"/>
+      <mass value="4.5"/>
+      <inertia ixx="0.02" ixy="0" ixz="0" iyy="0.02" iyz="0" izz="0.02"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 1.570796 0"/>
+      <geometry><cylinder radius="0.070" length="0.160"/></geometry>
+      <material name="white"/>
+    </visual>
+    <visual>
+      <origin xyz="0 0.06 0" rpy="0 0 0"/>
+      <geometry><box size="0.100 0.080 0.110"/></geometry>
+      <material name="white"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 1.570796 0"/>
+      <geometry><cylinder radius="0.070" length="0.160"/></geometry>
+    </collision>
+  </link>
+  <joint name="j3_joint" type="revolute">
+    <origin xyz="0 0 0.420" rpy="0 0 0"/>  <!-- upper arm 420 mm [D] -->
+    <parent link="j2_link"/>
+    <child link="j3_link"/>
+    <axis xyz="1 0 0"/>  <!-- + = forearm tilts up (manual radii *1, *2 [D]) -->
+    <!-- [S] -51 .. +190 deg, 141.2 deg/s -->
+    <limit lower="-0.89012" upper="3.31613" velocity="2.46440" effort="200"/>
+    <dynamics damping="0.0" friction="0.0"/>
+  </joint>
+
+  <link name="j4_link">  <!-- forearm, rolls about its own axis (J4) -->
+    <inertial>
+      <origin xyz="0 0.15 0" rpy="0 0 0"/>
+      <mass value="3.0"/>
+      <inertia ixx="0.025" ixy="0" ixz="0" iyy="0.004" iyz="0" izz="0.025"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0.12 0" rpy="0 0 0"/>
+      <geometry><box size="0.085 0.200 0.095"/></geometry>
+      <material name="white"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0.12 0" rpy="0 0 0"/>
+      <geometry><box size="0.085 0.200 0.095"/></geometry>
+    </collision>
+  </link>
+  <joint name="j4_joint" type="revolute">
+    <origin xyz="0 0.100 0" rpy="0 0 0"/>  <!-- J4 bearing along the forearm (position along the axis does not change kinematics) -->
+    <parent link="j3_link"/>
+    <child link="j4_link"/>
+    <axis xyz="0 -1 0"/>  <!-- direction UNVERIFIED (symmetric range) -->
+    <!-- [S] +/-200 deg, 268.7 deg/s (AC standard) -->
+    <limit lower="-3.49066" upper="3.49066" velocity="4.68973" effort="60"/>
+    <dynamics damping="0.0" friction="0.0"/>
+  </joint>
+
+  <link name="j5_link">  <!-- wrist; origin = P point -->
+    <inertial>
+      <origin xyz="0 0.02 0" rpy="0 0 0"/>
+      <mass value="2.0"/>
+      <inertia ixx="0.004" ixy="0" ixz="0" iyy="0.004" iyz="0" izz="0.004"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 1.570796 0"/>
+      <geometry><cylinder radius="0.050" length="0.120"/></geometry>
+      <material name="white"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 1.570796 0"/>
+      <geometry><cylinder radius="0.050" length="0.120"/></geometry>
+    </collision>
+  </link>
+  <joint name="j5_joint" type="revolute">
+    <origin xyz="0 0.300 0" rpy="0 0 0"/>  <!-- J3 -> P point 400 mm in total [D] -->
+    <parent link="j4_link"/>
+    <child link="j5_link"/>
+    <axis xyz="1 0 0"/>  <!-- + tilts the flange up [D] -->
+    <!-- [S] +/-125 deg, 296.8 deg/s -->
+    <limit lower="-2.18166" upper="2.18166" velocity="5.18014" effort="60"/>
+    <dynamics damping="0.0" friction="0.0"/>
+  </joint>
+  <link name="p_point"/>  <!-- Epson wrist reference point (reach 920 mm), for checks -->
+  <joint name="p_point_joint" type="fixed">
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <parent link="j5_link"/>
+    <child link="p_point"/>
+  </joint>
+
+  <link name="j6_link">  <!-- flange: z = tool direction, face at the frame origin -->
+    <inertial>
+      <origin xyz="0 0 -0.01" rpy="0 0 0"/>
+      <mass value="0.5"/>
+      <inertia ixx="0.0004" ixy="0" ixz="0" iyy="0.0004" iyz="0" izz="0.0004"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 -0.015" rpy="0 0 0"/>
+      <geometry><cylinder radius="0.020" length="0.030"/></geometry>  <!-- flange d40 [D] -->
+      <material name="grey"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 -0.015" rpy="0 0 0"/>
+      <geometry><cylinder radius="0.020" length="0.030"/></geometry>
+    </collision>
+  </link>
+  <joint name="j6_joint" type="revolute">
+    <origin xyz="0 0.080 0" rpy="-1.570796 -1.570796 0"/>  <!-- P point -> flange face 80 mm [D] -->
+    <parent link="j5_link"/>
+    <child link="j6_link"/>
+    <axis xyz="0 0 -1"/>  <!-- direction UNVERIFIED (symmetric range) -->
+    <!-- [S] +/-360 deg, 293.2 deg/s (AC standard) -->
+    <limit lower="-6.28319" upper="6.28319" velocity="5.11731" effort="30"/>
+    <dynamics damping="0.0" friction="0.0"/>
+  </joint>
+
+  <link name="tool0"/>
+  <joint name="tool0_joint" type="fixed">
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <parent link="j6_link"/>
+    <child link="tool0"/>
+  </joint>
+
+  <!--
+    Wrist camera: RealSense D435-style (90 x 25 x 25 mm) on a bracket on the SIDE of the J5 wrist
+    housing, toed in 30 deg towards the 2F-85 finger gap; pitches with J5, does not spin with J6.
+    Mount position is a SIMULATION CHOICE (no lab mount defined yet).
+      camera_link                 x forward, y left, z up
+      camera_color_optical_frame  z forward, x right, y down
+  -->
+  <link name="camera_link">
+    <inertial>
+      <origin xyz="0 0 -0.02" rpy="0 0 0"/>
+      <mass value="0.17"/>
+      <inertia ixx="0.00013" ixy="0" ixz="0" iyy="0.00005" iyz="0" izz="0.00013"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><box size="0.025 0.090 0.025"/></geometry>
+      <material name="d435_grey"><color rgba="0.20 0.20 0.22 1"/></material>
+    </visual>
+    <visual>
+      <origin xyz="0.0126 0 0" rpy="0 1.570796 0"/>
+      <geometry><box size="0.016 0.080 0.0005"/></geometry>
+      <material name="d435_glass"><color rgba="0.02 0.02 0.02 1"/></material>
+    </visual>
+    <visual>
+      <origin xyz="0 0 -0.0375" rpy="0 0 0"/>
+      <geometry><box size="0.020 0.040 0.050"/></geometry>
+      <material name="bracket"><color rgba="0.75 0.75 0.78 1"/></material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><box size="0.025 0.090 0.025"/></geometry>
+    </collision>
+  </link>
+  <joint name="camera_mount_joint" type="fixed">
+    <!-- j5 frame: +Y = tool direction, J5 axis = X, wrist housing side face at x = 0.060 -->
+    <origin xyz="0.095 0.075 0" rpy="1.570796 0 2.094395"/>
+    <parent link="j5_link"/>
+    <child link="camera_link"/>
+  </joint>
+
+  <link name="camera_color_optical_frame"/>
+  <joint name="camera_color_optical_joint" type="fixed">
+    <origin xyz="0.0126 0 0" rpy="-1.570796 0 -1.570796"/>
+    <parent link="camera_link"/>
+    <child link="camera_color_optical_frame"/>
+  </joint>
+
+  <!-- tcp = the Robotiq 2F-85 grip frame, between the finger pads, 133.7 mm from the flange
+       (gripper attached to tool0 at simulation time by sim/scene.py) -->
+  <link name="tcp"/>
+  <joint name="tcp_joint" type="fixed">
+    <origin xyz="0 0 0.1337" rpy="0 0 0"/>
+    <parent link="tool0"/>
+    <child link="tcp"/>
+  </joint>
+</robot>

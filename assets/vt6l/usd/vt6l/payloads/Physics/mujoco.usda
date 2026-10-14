@@ -1,0 +1,136 @@
+#usda 1.0
+(
+    customLayerData = {
+        string creator = "URDF USD Converter v0.3.2"
+    }
+    defaultPrim = "epson_vt6l"
+    endTimeCode = 1000000
+    kilogramsPerUnit = 1
+    metersPerUnit = 1
+    startTimeCode = 0
+    subLayers = [
+        @./physics.usda@
+    ]
+    upAxis = "Z"
+)
+
+over "epson_vt6l"
+{
+    over "Physics"
+    {
+        over "j1_joint" (
+            delete apiSchemas = ["PhysicsDriveAPI:angular", "PhysicsJointStateAPI:angular"]
+            prepend apiSchemas = ["MjcJointAPI"]
+        )
+        {
+        }
+
+        over "j2_joint" (
+            delete apiSchemas = ["PhysicsDriveAPI:angular", "PhysicsJointStateAPI:angular"]
+            prepend apiSchemas = ["MjcJointAPI"]
+        )
+        {
+        }
+
+        over "j3_joint" (
+            delete apiSchemas = ["PhysicsDriveAPI:angular", "PhysicsJointStateAPI:angular"]
+            prepend apiSchemas = ["MjcJointAPI"]
+        )
+        {
+        }
+
+        over "j4_joint" (
+            delete apiSchemas = ["PhysicsDriveAPI:angular", "PhysicsJointStateAPI:angular"]
+            prepend apiSchemas = ["MjcJointAPI"]
+        )
+        {
+        }
+
+        over "j5_joint" (
+            delete apiSchemas = ["PhysicsDriveAPI:angular", "PhysicsJointStateAPI:angular"]
+            prepend apiSchemas = ["MjcJointAPI"]
+        )
+        {
+        }
+
+        over "j6_joint" (
+            delete apiSchemas = ["PhysicsDriveAPI:angular", "PhysicsJointStateAPI:angular"]
+            prepend apiSchemas = ["MjcJointAPI"]
+        )
+        {
+        }
+
+        def MjcActuator "j1_joint_actuator"
+        {
+            uniform double[] mjc:biasPrm = [0, -1745.3292236328125, -17.453292846679688, 0, 0, 0, 0, 0, 0, 0]
+            uniform token mjc:biasType = "affine"
+            uniform double mjc:forceRange:max = 400
+            uniform double mjc:forceRange:min = -400
+            uniform double[] mjc:gainPrm = [1745.3292236328125, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            uniform token mjc:gainType = "fixed"
+            custom rel mjc:target
+            append rel mjc:target = </epson_vt6l/Physics/j1_joint>
+        }
+
+        def MjcActuator "j2_joint_actuator"
+        {
+            uniform double[] mjc:biasPrm = [0, -1745.3292236328125, -17.453292846679688, 0, 0, 0, 0, 0, 0, 0]
+            uniform token mjc:biasType = "affine"
+            uniform double mjc:forceRange:max = 400
+            uniform double mjc:forceRange:min = -400
+            uniform double[] mjc:gainPrm = [1745.3292236328125, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            uniform token mjc:gainType = "fixed"
+            custom rel mjc:target
+            append rel mjc:target = </epson_vt6l/Physics/j2_joint>
+        }
+
+        def MjcActuator "j3_joint_actuator"
+        {
+            uniform double[] mjc:biasPrm = [0, -1745.3292236328125, -17.453292846679688, 0, 0, 0, 0, 0, 0, 0]
+            uniform token mjc:biasType = "affine"
+            uniform double mjc:forceRange:max = 200
+            uniform double mjc:forceRange:min = -200
+            uniform double[] mjc:gainPrm = [1745.3292236328125, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            uniform token mjc:gainType = "fixed"
+            custom rel mjc:target
+            append rel mjc:target = </epson_vt6l/Physics/j3_joint>
+        }
+
+        def MjcActuator "j4_joint_actuator"
+        {
+            uniform double[] mjc:biasPrm = [0, -1745.3292236328125, -17.453292846679688, 0, 0, 0, 0, 0, 0, 0]
+            uniform token mjc:biasType = "affine"
+            uniform double mjc:forceRange:max = 60
+            uniform double mjc:forceRange:min = -60
+            uniform double[] mjc:gainPrm = [1745.3292236328125, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            uniform token mjc:gainType = "fixed"
+            custom rel mjc:target
+            append rel mjc:target = </epson_vt6l/Physics/j4_joint>
+        }
+
+        def MjcActuator "j5_joint_actuator"
+        {
+            uniform double[] mjc:biasPrm = [0, -1745.3292236328125, -17.453292846679688, 0, 0, 0, 0, 0, 0, 0]
+            uniform token mjc:biasType = "affine"
+            uniform double mjc:forceRange:max = 60
+            uniform double mjc:forceRange:min = -60
+            uniform double[] mjc:gainPrm = [1745.3292236328125, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            uniform token mjc:gainType = "fixed"
+            custom rel mjc:target
+            append rel mjc:target = </epson_vt6l/Physics/j5_joint>
+        }
+
+        def MjcActuator "j6_joint_actuator"
+        {
+            uniform double[] mjc:biasPrm = [0, -1745.3292236328125, -17.453292846679688, 0, 0, 0, 0, 0, 0, 0]
+            uniform token mjc:biasType = "affine"
+            uniform double mjc:forceRange:max = 30
+            uniform double mjc:forceRange:min = -30
+            uniform double[] mjc:gainPrm = [1745.3292236328125, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            uniform token mjc:gainType = "fixed"
+            custom rel mjc:target
+            append rel mjc:target = </epson_vt6l/Physics/j6_joint>
+        }
+    }
+}
+

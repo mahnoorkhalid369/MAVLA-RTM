@@ -1,0 +1,263 @@
+<?xml version="1.0"?>
+<!--
+  Epson VT6L proxy model for simulation.
+
+  Epson does not publish a VT6L URDF. This model uses the kinematics and meshes of
+  the Epson C8-C901 (C8L) from https://github.com/Epson-Robots/epson-robot-ros2,
+  which has a similar ~900 mm reach, combined with:
+    - VT6L joint ranges from the Epson VT6L spec sheet
+    - APPROXIMATE inertial data (total ~40 kg, the VT6L's weight); the upstream
+      URDF has no inertial data. Replace with CAD-derived values if available.
+  Joint 1 is at the base; the arm points along +Y at zero joint angles.
+-->
+<robot name="epson_vt6l_proxy">
+
+  <link name="base_link">
+    <inertial>
+      <origin xyz="0 0 0.12" rpy="0 0 0"/>
+      <mass value="13.5"/>
+      <inertia ixx="0.20" ixy="0" ixz="0" iyy="0.20" iyz="0" izz="0.15"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="1.57 0 0"/>
+      <geometry><mesh filename="meshes/base.stl" scale="0.001 0.001 0.001"/></geometry>
+      <material name="white"><color rgba="1 1 1 1"/></material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="1.57 0 0"/>
+      <geometry><mesh filename="meshes/base.stl" scale="0.001 0.001 0.001"/></geometry>
+    </collision>
+  </link>
+
+  <link name="j1_link">
+    <inertial>
+      <origin xyz="0 0.04 0.10" rpy="0 0 0"/>
+      <mass value="9.0"/>
+      <inertia ixx="0.10" ixy="0" ixz="0" iyy="0.10" iyz="0" izz="0.08"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 -0.269" rpy="1.57 0 0"/>
+      <geometry><mesh filename="meshes/j1.stl" scale="0.001 0.001 0.001"/></geometry>
+      <material name="white"><color rgba="1 1 1 1"/></material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 -0.269" rpy="1.57 0 0"/>
+      <geometry><mesh filename="meshes/j1.stl" scale="0.001 0.001 0.001"/></geometry>
+    </collision>
+  </link>
+  <joint name="j1_joint" type="revolute">
+    <origin xyz="0 0 0.269" rpy="0 0 0"/>
+    <parent link="base_link"/>
+    <child link="j1_link"/>
+    <axis xyz="0 0 1"/>
+    <!-- VT6L: +/-170 deg -->
+    <limit lower="-2.96706" upper="2.96706" velocity="5.13" effort="400"/>
+    <dynamics damping="0.0" friction="0.0"/>
+  </joint>
+
+  <link name="j2_link">
+    <inertial>
+      <origin xyz="0 0 0.20" rpy="0 0 0"/>
+      <mass value="7.0"/>
+      <inertia ixx="0.12" ixy="0" ixz="0" iyy="0.12" iyz="0" izz="0.02"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 -0.1 -0.472" rpy="1.57 0 0"/>
+      <geometry><mesh filename="meshes/j2.stl" scale="0.001 0.001 0.001"/></geometry>
+      <material name="white"><color rgba="1 1 1 1"/></material>
+    </visual>
+    <collision>
+      <origin xyz="0 -0.1 -0.472" rpy="1.57 0 0"/>
+      <geometry><mesh filename="meshes/j2.stl" scale="0.001 0.001 0.001"/></geometry>
+    </collision>
+  </link>
+  <joint name="j2_joint" type="revolute">
+    <origin xyz="0 0.1 0.203" rpy="0 0 0"/>
+    <parent link="j1_link"/>
+    <child link="j2_link"/>
+    <axis xyz="1 0 0"/>
+    <!-- VT6L: -160 .. +65 deg -->
+    <limit lower="-2.79253" upper="1.13446" velocity="5.23" effort="400"/>
+    <dynamics damping="0.0" friction="0.0"/>
+  </joint>
+
+  <link name="j3_link">
+    <inertial>
+      <origin xyz="0 0.05 0.03" rpy="0 0 0"/>
+      <mass value="5.0"/>
+      <inertia ixx="0.03" ixy="0" ixz="0" iyy="0.03" iyz="0" izz="0.02"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 -0.1 -0.872" rpy="1.57 0 0"/>
+      <geometry><mesh filename="meshes/j3.stl" scale="0.001 0.001 0.001"/></geometry>
+      <material name="white"><color rgba="1 1 1 1"/></material>
+    </visual>
+    <collision>
+      <origin xyz="0 -0.1 -0.872" rpy="1.57 0 0"/>
+      <geometry><mesh filename="meshes/j3.stl" scale="0.001 0.001 0.001"/></geometry>
+    </collision>
+  </link>
+  <joint name="j3_joint" type="revolute">
+    <origin xyz="0 0 0.4" rpy="0 0 0"/>
+    <parent link="j2_link"/>
+    <child link="j3_link"/>
+    <axis xyz="1 0 0"/>
+    <!-- VT6L: -51 .. +190 deg -->
+    <limit lower="-0.89012" upper="3.31613" velocity="6.28" effort="200"/>
+    <dynamics damping="0.0" friction="0.0"/>
+  </joint>
+
+  <link name="j4_link">
+    <inertial>
+      <origin xyz="0 0.15 0" rpy="0 0 0"/>
+      <mass value="3.0"/>
+      <inertia ixx="0.03" ixy="0" ixz="0" iyy="0.005" iyz="0" izz="0.03"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 -0.17 -0.902" rpy="1.57 0 0"/>
+      <geometry><mesh filename="meshes/j4.stl" scale="0.001 0.001 0.001"/></geometry>
+      <material name="white"><color rgba="1 1 1 1"/></material>
+    </visual>
+    <collision>
+      <origin xyz="0 -0.17 -0.902" rpy="1.57 0 0"/>
+      <geometry><mesh filename="meshes/j4.stl" scale="0.001 0.001 0.001"/></geometry>
+    </collision>
+  </link>
+  <joint name="j4_joint" type="revolute">
+    <origin xyz="0 0.07 0.03" rpy="0 0 0"/>
+    <parent link="j3_link"/>
+    <child link="j4_link"/>
+    <axis xyz="0 -1 0"/>
+    <!-- VT6L: +/-200 deg -->
+    <limit lower="-3.49066" upper="3.49066" velocity="8.37" effort="60"/>
+    <dynamics damping="0.0" friction="0.0"/>
+  </joint>
+
+  <link name="j5_link">
+    <inertial>
+      <origin xyz="0 0.03 0" rpy="0 0 0"/>
+      <mass value="2.0"/>
+      <inertia ixx="0.004" ixy="0" ixz="0" iyy="0.004" iyz="0" izz="0.004"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 -0.5 -0.902" rpy="1.57 0 0"/>
+      <geometry><mesh filename="meshes/j5.stl" scale="0.001 0.001 0.001"/></geometry>
+      <material name="blue"><color rgba="0.1 0.3 0.8 1"/></material>
+    </visual>
+    <collision>
+      <origin xyz="0 -0.5 -0.902" rpy="1.57 0 0"/>
+      <geometry><mesh filename="meshes/j5.stl" scale="0.001 0.001 0.001"/></geometry>
+    </collision>
+  </link>
+  <joint name="j5_joint" type="revolute">
+    <origin xyz="0 0.33 0" rpy="0 0 0"/>
+    <parent link="j4_link"/>
+    <child link="j5_link"/>
+    <axis xyz="1 0 0"/>
+    <!-- VT6L: +/-125 deg -->
+    <limit lower="-2.18166" upper="2.18166" velocity="7.85" effort="60"/>
+    <dynamics damping="0.0" friction="0.0"/>
+  </joint>
+
+  <link name="j6_link">
+    <inertial>
+      <origin xyz="0 0 0.01" rpy="0 0 0"/>
+      <mass value="0.5"/>
+      <inertia ixx="0.0005" ixy="0" ixz="0" iyy="0.0005" iyz="0" izz="0.0005"/>
+    </inertial>
+    <visual>
+      <origin xyz="-0.902 0 -0.580" rpy="3.141593 0 1.570796"/>
+      <geometry><mesh filename="meshes/j6.stl" scale="0.001 0.001 0.001"/></geometry>
+      <material name="grey"><color rgba="0.75 0.75 0.75 1"/></material>
+    </visual>
+    <collision>
+      <origin xyz="-0.902 0 -0.580" rpy="3.141593 0 1.570796"/>
+      <geometry><mesh filename="meshes/j6.stl" scale="0.001 0.001 0.001"/></geometry>
+    </collision>
+  </link>
+  <joint name="j6_joint" type="revolute">
+    <origin xyz="0 0.080 0" rpy="-1.570796 -1.570796 0"/>
+    <parent link="j5_link"/>
+    <child link="j6_link"/>
+    <axis xyz="0 0 -1"/>
+    <!-- VT6L: +/-360 deg -->
+    <limit lower="-6.28319" upper="6.28319" velocity="12.56" effort="30"/>
+    <dynamics damping="0.0" friction="0.0"/>
+  </joint>
+
+  <!-- Tool centre point on the flange (for IK / end-effector tracking) -->
+  <link name="tool0"/>
+  <joint name="tool0_joint" type="fixed">
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <parent link="j6_link"/>
+    <child link="tool0"/>
+  </joint>
+
+  <!--
+    Wrist camera: Intel RealSense D435-style (90 x 25 x 25 mm) on a bracket on the SIDE
+    of the J5 wrist housing (the housing top has no mounting surface on the real VT6L).
+    It sits beside the flange, outside the J4 fork (x > 0.073 in the j5 frame), with its
+    long axis vertical, toed in 30 deg so it looks into the gap between the 2F-85 finger
+    pads (the gripper is mounted so its fingers close along j5 Z, i.e. top/bottom in the
+    camera image). Mounted on j5_link: pitches with J5, does not spin with J6.
+    Frames follow the ROS / realsense-ros convention:
+      camera_link                 x forward, y left, z up (here: up = away from the wrist)
+      camera_color_optical_frame  z forward, x right, y down
+  -->
+  <link name="camera_link">
+    <inertial>
+      <origin xyz="0 0 -0.02" rpy="0 0 0"/>
+      <mass value="0.17"/>  <!-- D435 72 g + aluminium bracket -->
+      <inertia ixx="0.00013" ixy="0" ixz="0" iyy="0.00005" iyz="0" izz="0.00013"/>
+    </inertial>
+    <!-- camera body -->
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><box size="0.025 0.090 0.025"/></geometry>
+      <material name="d435_grey"><color rgba="0.20 0.20 0.22 1"/></material>
+    </visual>
+    <!-- front glass (IR stereo pair + RGB behind one black window) -->
+    <visual>
+      <origin xyz="0.0126 0 0" rpy="0 1.570796 0"/>
+      <geometry><box size="0.016 0.080 0.0005"/></geometry>
+      <material name="d435_glass"><color rgba="0.02 0.02 0.02 1"/></material>
+    </visual>
+    <!-- L-bracket from the camera's underside to the side face of the J5 housing -->
+    <visual>
+      <origin xyz="0 0 -0.0375" rpy="0 0 0"/>
+      <geometry><box size="0.020 0.040 0.050"/></geometry>
+      <material name="bracket"><color rgba="0.75 0.75 0.78 1"/></material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><box size="0.025 0.090 0.025"/></geometry>
+    </collision>
+  </link>
+  <joint name="camera_mount_joint" type="fixed">
+    <!-- j5 frame: +Y = tool direction (flange face at y = 0.08), J5 axis = X,
+         housing side face at x = 0.037. rpy = (90, 0, 90 + 30 toe-in) deg -->
+    <origin xyz="0.095 0.075 0" rpy="1.570796 0 2.094395"/>
+    <parent link="j5_link"/>
+    <child link="camera_link"/>
+  </joint>
+
+  <link name="camera_color_optical_frame"/>
+  <joint name="camera_color_optical_joint" type="fixed">
+    <origin xyz="0.0126 0 0" rpy="-1.570796 0 -1.570796"/>
+    <parent link="camera_link"/>
+    <child link="camera_color_optical_frame"/>
+  </joint>
+
+  <!--
+    Gripper: Robotiq 2F-85 (Isaac Sim asset, assets/robotiq_2f85/), attached to tool0 at
+    simulation time by vt6l_scene.py (fixed joint j6_link -> 2F-85 base_link).
+    tcp = the 2F-85 grip_frame, between the finger pads, 133.7 mm from the flange.
+  -->
+  <link name="tcp"/>
+  <joint name="tcp_joint" type="fixed">
+    <origin xyz="0 0 0.1337" rpy="0 0 0"/>
+    <parent link="tool0"/>
+    <child link="tcp"/>
+  </joint>
+
+</robot>

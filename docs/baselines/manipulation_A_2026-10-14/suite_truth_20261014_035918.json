@@ -1,0 +1,381 @@
+{
+  "poses": "truth",
+  "cases": [
+    {
+      "object": "red_cube",
+      "probe": "stack on a cube",
+      "expected": true,
+      "passed": true,
+      "grasp_state": "grasp verified",
+      "failure_class": "",
+      "failure": "",
+      "perception": null,
+      "placement": {
+        "xy_error_mm": 0.4,
+        "z_error_mm": 0.0,
+        "tilt_deg": 0.0,
+        "drift_mm_over_1s": 0.0,
+        "xy_error_vs_true_destination_mm": 0.4,
+        "final_position_mm": [
+          150.3,
+          499.8,
+          80.0
+        ],
+        "ok": true
+      },
+      "secured": {
+        "object_rise_mm": 143.9,
+        "tcp_rise_mm": 144.8,
+        "slip_during_lift_mm": 1.0,
+        "xy_offset_from_tcp_mm": 1.1,
+        "ok": true
+      },
+      "verified": {
+        "slip_during_carry_mm": 0.0,
+        "finger_drift_deg": -0.0,
+        "ok": true
+      },
+      "seconds": 22
+    },
+    {
+      "object": "brown_cube_rotated",
+      "probe": "45 deg rotation: grip yaw",
+      "expected": true,
+      "passed": true,
+      "grasp_state": "grasp verified",
+      "failure_class": "",
+      "failure": "",
+      "perception": null,
+      "placement": {
+        "xy_error_mm": 2.0,
+        "z_error_mm": 0.0,
+        "tilt_deg": 0.0,
+        "drift_mm_over_1s": 0.0,
+        "xy_error_vs_true_destination_mm": 2.0,
+        "final_position_mm": [
+          351.2,
+          318.4,
+          30.0
+        ],
+        "ok": true
+      },
+      "secured": {
+        "object_rise_mm": 144.1,
+        "tcp_rise_mm": 144.8,
+        "slip_during_lift_mm": 0.8,
+        "xy_offset_from_tcp_mm": 0.8,
+        "ok": true
+      },
+      "verified": {
+        "slip_during_carry_mm": 0.1,
+        "finger_drift_deg": 0.05,
+        "ok": true
+      },
+      "seconds": 29
+    },
+    {
+      "object": "yellow_cube",
+      "probe": "floor spot",
+      "expected": true,
+      "passed": true,
+      "grasp_state": "grasp verified",
+      "failure_class": "",
+      "failure": "",
+      "perception": null,
+      "placement": {
+        "xy_error_mm": 1.4,
+        "z_error_mm": 0.0,
+        "tilt_deg": 0.0,
+        "drift_mm_over_1s": 0.0,
+        "xy_error_vs_true_destination_mm": 1.4,
+        "final_position_mm": [
+          300.0,
+          448.6,
+          30.0
+        ],
+        "ok": true
+      },
+      "secured": {
+        "object_rise_mm": 142.2,
+        "tcp_rise_mm": 144.7,
+        "slip_during_lift_mm": 2.5,
+        "xy_offset_from_tcp_mm": 1.1,
+        "ok": true
+      },
+      "verified": {
+        "slip_during_carry_mm": 0.0,
+        "finger_drift_deg": -0.04,
+        "ok": true
+      },
+      "seconds": 24
+    },
+    {
+      "object": "orange_cube",
+      "probe": "small 35 mm cube",
+      "expected": true,
+      "passed": true,
+      "grasp_state": "grasp verified",
+      "failure_class": "",
+      "failure": "",
+      "perception": null,
+      "placement": {
+        "xy_error_mm": 0.1,
+        "z_error_mm": 0.0,
+        "tilt_deg": 0.0,
+        "drift_mm_over_1s": 0.0,
+        "xy_error_vs_true_destination_mm": 0.1,
+        "final_position_mm": [
+          -250.0,
+          419.9,
+          17.5
+        ],
+        "ok": true
+      },
+      "secured": {
+        "object_rise_mm": 122.6,
+        "tcp_rise_mm": 123.5,
+        "slip_during_lift_mm": 1.0,
+        "xy_offset_from_tcp_mm": 0.2,
+        "ok": true
+      },
+      "verified": {
+        "slip_during_carry_mm": 0.0,
+        "finger_drift_deg": -0.01,
+        "ok": true
+      },
+      "seconds": 23
+    },
+    {
+      "object": "lime_cube_stacked",
+      "probe": "take the top of a stack",
+      "expected": true,
+      "passed": true,
+      "grasp_state": "grasp verified",
+      "failure_class": "",
+      "failure": "",
+      "perception": null,
+      "placement": {
+        "xy_error_mm": 0.5,
+        "z_error_mm": 0.0,
+        "tilt_deg": 0.0,
+        "drift_mm_over_1s": 0.0,
+        "xy_error_vs_true_destination_mm": 0.5,
+        "final_position_mm": [
+          -400.4,
+          149.7,
+          20.0
+        ],
+        "ok": true
+      },
+      "secured": {
+        "object_rise_mm": 128.9,
+        "tcp_rise_mm": 129.2,
+        "slip_during_lift_mm": 0.4,
+        "xy_offset_from_tcp_mm": 0.1,
+        "ok": true
+      },
+      "verified": {
+        "slip_during_carry_mm": 0.1,
+        "finger_drift_deg": -0.04,
+        "ok": true
+      },
+      "seconds": 22
+    },
+    {
+      "object": "navy_cube_far",
+      "probe": "far reach edge (0.89 m)",
+      "expected": true,
+      "passed": true,
+      "grasp_state": "grasp verified",
+      "failure_class": "",
+      "failure": "",
+      "perception": null,
+      "placement": {
+        "xy_error_mm": 0.9,
+        "z_error_mm": 0.0,
+        "tilt_deg": 0.0,
+        "drift_mm_over_1s": 0.0,
+        "xy_error_vs_true_destination_mm": 0.9,
+        "final_position_mm": [
+          -0.4,
+          700.8,
+          22.5
+        ],
+        "ok": true
+      },
+      "secured": {
+        "object_rise_mm": 134.1,
+        "tcp_rise_mm": 134.5,
+        "slip_during_lift_mm": 0.4,
+        "xy_offset_from_tcp_mm": 0.5,
+        "ok": true
+      },
+      "verified": {
+        "slip_during_carry_mm": 0.0,
+        "finger_drift_deg": -0.02,
+        "ok": true
+      },
+      "seconds": 32
+    },
+    {
+      "object": "olive_cube_near_base",
+      "probe": "near edge (0.43 m)",
+      "expected": true,
+      "passed": true,
+      "grasp_state": "grasp verified",
+      "failure_class": "",
+      "failure": "",
+      "perception": null,
+      "placement": {
+        "xy_error_mm": 0.1,
+        "z_error_mm": 0.0,
+        "tilt_deg": 0.0,
+        "drift_mm_over_1s": 0.0,
+        "xy_error_vs_true_destination_mm": 0.1,
+        "final_position_mm": [
+          450.1,
+          0.1,
+          22.5
+        ],
+        "ok": true
+      },
+      "secured": {
+        "object_rise_mm": 134.1,
+        "tcp_rise_mm": 134.9,
+        "slip_during_lift_mm": 0.8,
+        "xy_offset_from_tcp_mm": 1.0,
+        "ok": true
+      },
+      "verified": {
+        "slip_during_carry_mm": 0.1,
+        "finger_drift_deg": 0.05,
+        "ok": true
+      },
+      "seconds": 27
+    },
+    {
+      "object": "tan_box_wide",
+      "probe": "75 mm wide: 12 mm spare",
+      "expected": true,
+      "passed": true,
+      "grasp_state": "grasp verified",
+      "failure_class": "",
+      "failure": "",
+      "perception": null,
+      "placement": {
+        "xy_error_mm": 0.2,
+        "z_error_mm": 0.0,
+        "tilt_deg": 0.0,
+        "drift_mm_over_1s": 0.0,
+        "xy_error_vs_true_destination_mm": 0.2,
+        "final_position_mm": [
+          500.1,
+          -59.9,
+          25.0
+        ],
+        "ok": true
+      },
+      "secured": {
+        "object_rise_mm": 144.0,
+        "tcp_rise_mm": 144.6,
+        "slip_during_lift_mm": 0.6,
+        "xy_offset_from_tcp_mm": 0.9,
+        "ok": true
+      },
+      "verified": {
+        "slip_during_carry_mm": 0.0,
+        "finger_drift_deg": -0.0,
+        "ok": true
+      },
+      "seconds": 26
+    },
+    {
+      "object": "purple_cylinder",
+      "probe": "round object",
+      "expected": true,
+      "passed": true,
+      "grasp_state": "grasp verified",
+      "failure_class": "",
+      "failure": "",
+      "perception": null,
+      "placement": {
+        "xy_error_mm": 0.7,
+        "z_error_mm": 0.0,
+        "tilt_deg": 0.0,
+        "drift_mm_over_1s": 0.0,
+        "xy_error_vs_true_destination_mm": 0.7,
+        "final_position_mm": [
+          500.6,
+          250.2,
+          35.0
+        ],
+        "ok": true
+      },
+      "secured": {
+        "object_rise_mm": 143.9,
+        "tcp_rise_mm": 144.8,
+        "slip_during_lift_mm": 0.9,
+        "xy_offset_from_tcp_mm": 0.4,
+        "ok": true
+      },
+      "verified": {
+        "slip_during_carry_mm": 0.1,
+        "finger_drift_deg": -0.02,
+        "ok": true
+      },
+      "seconds": 24
+    },
+    {
+      "object": "steel_cube_heavy",
+      "probe": "3 kg",
+      "expected": true,
+      "passed": true,
+      "grasp_state": "grasp verified",
+      "failure_class": "",
+      "failure": "",
+      "perception": null,
+      "placement": {
+        "xy_error_mm": 0.1,
+        "z_error_mm": 0.0,
+        "tilt_deg": 0.0,
+        "drift_mm_over_1s": 0.0,
+        "xy_error_vs_true_destination_mm": 0.1,
+        "final_position_mm": [
+          -450.1,
+          -150.0,
+          30.0
+        ],
+        "ok": true
+      },
+      "secured": {
+        "object_rise_mm": 142.3,
+        "tcp_rise_mm": 144.6,
+        "slip_during_lift_mm": 2.3,
+        "xy_offset_from_tcp_mm": 0.3,
+        "ok": true
+      },
+      "verified": {
+        "slip_during_carry_mm": 0.7,
+        "finger_drift_deg": 0.11,
+        "ok": true
+      },
+      "seconds": 37
+    },
+    {
+      "object": "pink_cube",
+      "probe": "injected 70 mm pose error: must be caught",
+      "expected": false,
+      "passed": false,
+      "grasp_state": "none",
+      "failure_class": "grasp",
+      "failure": "the fingers closed on nothing",
+      "perception": null,
+      "placement": {},
+      "secured": {},
+      "verified": {},
+      "seconds": 28
+    }
+  ],
+  "as_expected": 11,
+  "total": 11
+}

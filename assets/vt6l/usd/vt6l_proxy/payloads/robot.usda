@@ -1,0 +1,141 @@
+#usda 1.0
+(
+    customLayerData = {
+        string creator = "URDF USD Converter v0.3.2"
+    }
+    defaultPrim = "epson_vt6l_proxy"
+    endTimeCode = 1000000
+    kilogramsPerUnit = 1
+    metersPerUnit = 1
+    startTimeCode = 0
+    upAxis = "Z"
+)
+
+over "epson_vt6l_proxy" (
+    prepend apiSchemas = ["IsaacRobotAPI"]
+)
+{
+    prepend rel isaac:physics:robotJoints = [
+        </epson_vt6l_proxy/Physics/root_joint>,
+        </epson_vt6l_proxy/Physics/j1_joint>,
+        </epson_vt6l_proxy/Physics/j2_joint>,
+        </epson_vt6l_proxy/Physics/j3_joint>,
+        </epson_vt6l_proxy/Physics/j4_joint>,
+        </epson_vt6l_proxy/Physics/j5_joint>,
+        </epson_vt6l_proxy/Physics/j6_joint>,
+        </epson_vt6l_proxy/Physics/camera_mount_joint>,
+    ]
+    prepend rel isaac:physics:robotLinks = [
+        </epson_vt6l_proxy/Geometry/base_link>,
+        </epson_vt6l_proxy/Geometry/base_link/j1_link>,
+        </epson_vt6l_proxy/Geometry/base_link/j1_link/j2_link>,
+        </epson_vt6l_proxy/Geometry/base_link/j1_link/j2_link/j3_link>,
+        </epson_vt6l_proxy/Geometry/base_link/j1_link/j2_link/j3_link/j4_link>,
+        </epson_vt6l_proxy/Geometry/base_link/j1_link/j2_link/j3_link/j4_link/j5_link>,
+        </epson_vt6l_proxy/Geometry/base_link/j1_link/j2_link/j3_link/j4_link/j5_link/j6_link>,
+        </epson_vt6l_proxy/Geometry/base_link/j1_link/j2_link/j3_link/j4_link/j5_link/camera_link>,
+    ]
+    token isaac:robotType = "Manipulator"
+
+    over "Geometry"
+    {
+        over "base_link" (
+            prepend apiSchemas = ["IsaacLinkAPI"]
+        )
+        {
+            over "j1_link" (
+                prepend apiSchemas = ["IsaacLinkAPI"]
+            )
+            {
+                over "j2_link" (
+                    prepend apiSchemas = ["IsaacLinkAPI"]
+                )
+                {
+                    over "j3_link" (
+                        prepend apiSchemas = ["IsaacLinkAPI"]
+                    )
+                    {
+                        over "j4_link" (
+                            prepend apiSchemas = ["IsaacLinkAPI"]
+                        )
+                        {
+                            over "j5_link" (
+                                prepend apiSchemas = ["IsaacLinkAPI"]
+                            )
+                            {
+                                over "j6_link" (
+                                    prepend apiSchemas = ["IsaacLinkAPI"]
+                                )
+                                {
+                                }
+
+                                over "camera_link" (
+                                    prepend apiSchemas = ["IsaacLinkAPI"]
+                                )
+                                {
+                                    over "camera_color_optical_frame" (
+                                        prepend apiSchemas = ["IsaacSiteAPI"]
+                                    )
+                                    {
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    over "Physics"
+    {
+        over "root_joint" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "j1_joint" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "j2_joint" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "j3_joint" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "j4_joint" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "j5_joint" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "j6_joint" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "camera_mount_joint" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+    }
+}
+
