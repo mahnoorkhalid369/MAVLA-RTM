@@ -6,8 +6,9 @@ First thin slice of `docs/perception_redesign/ARCHITECTURE.md` (rev 3). Results 
 **Status (2026-10-14, measured in the final rehearsal, 3 runs each, fresh sim per run):**
 - "Put the red cube on the green cube." 3/3 verified successes (2.0–3.1 mm vs ground truth).
 - "Put the orange cube on the purple cylinder." 3/3 verified successes (3.7–3.9 mm).
-- "Pick up the yellow cube and put it on the tan box." 0/3: every time the agent asks which yellow
-  cube (an olive and a gold cube also look yellow) and stops. This is expected behaviour, not a crash.
+- "Pick up the yellow cube and put it on the tan box." 0/3 in the rehearsal: the agent asks which yellow
+  cube (an olive and a gold cube also look yellow). In the rehearsal a script answered "cancel"; in the
+  interactive demo you now answer the question yourself (see "Questions" below).
 - The "next to" instruction was not rehearsed.
 
 ```
@@ -70,9 +71,27 @@ One instruction, no prompt: `.venv-seg/bin/python -m agent.run --start-sim --ins
    instruction takes ~4.5 min measured, plus start-up):
    - `COMPLETED: Done (verified by the table camera): placed … mm from the planned spot …`
    - `FAILED (<class>): <reason>. I did not report success.`
-   - `CANCELLED: I asked (…) and the answer was 'cancel'.` — whenever the agent is unsure
-     (ambiguous reference, confirmation "unsure", unsupported task) it asks; in this demo the
-     question is answered "cancel" automatically and logged.
+   - `CANCELLED: <question> -> <why>` — only if you typed cancel, input ended, or nobody answered
+     within 120 s.
+
+## Questions
+
+When several objects fit a description (for the object to move or the destination), the agent stops
+before moving and asks you:
+
+```
+[agent] QUESTION (object): Several objects could be 'yellow cube'. Which one do you mean?
+    5: yellow Yellow block       at x +101 mm, y +717 mm (0.72 m from the robot), 60 x 60 x 61 mm
+    7: yellow Block              at x +2 mm, y +1146 mm (1.15 m from the robot), 50 x 50 x 51 mm
+   14: yellow Cube               at x +2 mm, y +427 mm (0.43 m from the robot), 45 x 45 x 46 mm
+  picture of the candidates: out/demo/.../images/table_001_question_5_7_14.jpg
+answer>
+```
+(example; the numbers change every run). Answer with a number (`5`, `#5`, `object 5`), words that fit
+only one candidate (`the gold one`), `nearest` / `farthest` (from the robot base), or `cancel`. An
+answer that fits none or several candidates is explained and the question is repeated. The task then
+continues with your choice (no restart). x = the robot's right, y = forward from its base.
+Wait time: 120 s (`--ask-timeout`, 0 = no limit), then it cancels; end of input also cancels.
 
 ## Where the evidence goes
 
@@ -96,5 +115,6 @@ One instruction, no prompt: `.venv-seg/bin/python -m agent.run --start-sim --ins
 - One table camera for perception and verification; objects hidden behind others or the arm are not
   measured (a hidden top face is refused, not guessed).
 - One object per instruction; no "pick and hold", no stacking more than one level in one command.
-- The scripted "cancel" answer stands in for a real user dialogue.
+- Questions are answered at the terminal only (no GUI picker); the rehearsal harness uses
+  `--ask scripted` (always "cancel") because nobody is at its terminal.
 - Mass estimation is skipped in this slice.

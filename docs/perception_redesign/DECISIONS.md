@@ -252,3 +252,26 @@ Design approved with changes; revision 1 kept as `ARCHITECTURE_rev1_2026-10-14.m
   quit, nothing left running, caller unaffected (measured).
 - **Run ended early (~12:50Z of the 20:19Z limit):** all steps done; the 20 extra layouts, ambiguity
   sets and Phase 2 wait for the user (brief: "after the demo").
+
+## 2026-10-14 — Interactive clarification bug (user report) and fix
+- **Root cause (from code):** `agent/run.py` built `Supervisor(tools, log, out)` without a responder,
+  so the default `scripted_responder` (written for the unattended rehearsal) returned the literal
+  "cancel" without printing or reading anything; `_ask` logged it as the answer -> CANCELLED. Not
+  Gemma, not input handling. Even a real answer could not have continued the task (any answer other
+  than "cancel" became FAILED "unhandled answer").
+- **Fix:** `agent/ask.py` (new): Question / Answer / Candidate, deterministic answer parsing (ids,
+  unique description words, nearest / farthest, explicit cancel words), `TerminalResponder` (one
+  shared stdin reader thread for the instruction prompt and questions; invalid answers explained and
+  re-asked; EOF and timeout = documented cancel policy, timeout = Budgets.question_timeout_s 120 s),
+  `ScriptedResponder` (rehearsal only, tagged "scripted"). `Supervisor` requires a responder (no
+  silent default). On several matches (object or destination) the user's choice is used and the task
+  continues in the same run; the VLM does not re-confirm a person's choice. Questions show ids, the
+  VLM's description, measured position, distance, size and a picture of the candidates. Model output
+  is never an answer. Unsupported instructions, "object = destination" and an unverifiable relational
+  reference are now honest FAILED messages (rephrase), not fake questions. `agent.run --ask
+  terminal|scripted` (default terminal); the rehearsal harness passes `--ask scripted`.
+- **Tests:** tests/test_agent_ask.py (new, 30 incl. parametrised) + updated tests/test_agent.py: 57
+  passed in .venv-seg; /usr/bin/python3 -m pytest 129 passed, 2 skipped. Manipulation pipeline,
+  planner, executor, safety and verification untouched; manifest OK. **Live sim test not run:** the
+  user's own demo session was running on the GPU (my attempt stopped at Gemma loading with CUDA OOM
+  before creating any ROS node; the user's session was not touched).

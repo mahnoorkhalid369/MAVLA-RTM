@@ -168,6 +168,12 @@ class Tools:
         return type(c)(id=None, ambiguous=True, candidates=ids,
                        reason=f"visual choice {c.id} vs most specific description {best}: cues disagree")
 
+    def candidate_image(self, obs: Observation, marks: list[int]) -> str:
+        """Picture for a clarification question: the candidates' isolated crops side by side, numbered."""
+        path = self.run_dir / "images" / f"{obs.frame_id}_question_{'_'.join(map(str, marks))}.jpg"
+        cv2.imwrite(str(path), cv2.cvtColor(montage({k: isolate(obs.rgb, obs.marks[k]) for k in marks}), cv2.COLOR_RGB2BGR))
+        return str(path)
+
     def confirm(self, obs: Observation, mark: int, text: str):
         c = isolate(obs.rgb, obs.marks[mark])
         cv2.imwrite(str(self.run_dir / "images" / f"{obs.frame_id}_crop_{mark}.jpg"), cv2.cvtColor(c, cv2.COLOR_RGB2BGR))

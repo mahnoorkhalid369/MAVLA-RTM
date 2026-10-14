@@ -178,9 +178,14 @@ def test_relation_check_is_deterministic():
 class StubTools:
     """Scripted outcomes for each tool: tests the state machine, budgets and honesty of the verdict."""
 
-    def __init__(self, contact=(True,), placement=(True,), resolve_ambiguous=False, exec_fail=None, task="pick_place"):
+    OBJECTS = {1: (geom(0.55, 0.15, 0.04), {"name": "cube", "colour": "yellow"}),
+               2: (geom(0.55, 0.45, 0.05), {"name": "box", "colour": "tan"}),
+               3: (geom(0.0, 0.85, 0.04, fp=(0.05, 0.05)), {"name": "cube", "colour": "gold yellow"})}
+
+    def __init__(self, contact=(True,), placement=(True,), ambiguous=None, exec_fail=None, task="pick_place"):
         self.contact, self.placement = list(contact), list(placement)
-        self.resolve_ambiguous, self.exec_fail, self.task = resolve_ambiguous, exec_fail, task
+        self.ambiguous, self.exec_fail, self.task = ambiguous or {}, exec_fail, task
+        self.confirmed, self.planned = [], []
         self.world = WorldModel()
         self.ex = SimpleNamespace(safety_events=[], spin=lambda s: None)
         self.bridge = SimpleNamespace(q=lambda: np.zeros(6))
@@ -197,9 +202,9 @@ class StubTools:
         pass
 
     def perceive(self, camera):
-        ids = {1: self.world.observe(geom(0.55, 0.15, 0.04), None), 2: self.world.observe(geom(0.55, 0.45, 0.05), None)}
-        return SimpleNamespace(marks={1: None, 2: None}, measured={1: geom(0.55, 0.15, 0.04), 2: geom(0.55, 0.45, 0.05)},
-                               object_ids=ids, descriptions={})
+        ids = self.ids = {k: self.world.observe(g, d) for k, (g, d) in self.OBJECTS.items()}
+        return SimpleNamespace(marks={k: None for k in self.OBJECTS}, measured={k: g for k, (g, _) in self.OBJECTS.items()},
+                               object_ids=ids, descriptions={k: d for k, (_, d) in self.OBJECTS.items()}, frame_id="t")
 
     def describe(self, obs):
         pass
@@ -209,12 +214,13 @@ class StubTools:
 
     def resolve(self, obs, text):
         from agent.vlm_roles import Resolution
-        if self.resolve_ambiguous:
-            return Resolution(id=None, ambiguous=True, candidates=[1, 2])
+        if text in self.ambiguous:
+            return Resolution(id=None, ambiguous=True, candidates=self.ambiguous[text])
         return Resolution(id=1 if text == "a" else 2)
 
     def confirm(self, obs, mark, text):
         from agent.vlm_roles import Confirmation
+        self.confirmed.append((mark, text))
         return Confirmation(match="yes")
 
     def relation_holds(self, *a):
@@ -222,6 +228,7 @@ class StubTools:
 
     def plan_pick_place(self, oid, rel, rid, frame, q):
         from control.skills import GripperStep, Held
+        self.planned.append((oid, rid))
         return SimpleNamespace(object_id=oid, hover=["hover"], approach=["down", GripperStep(0.5, "close")], lift=["lift"],
                                place=["carry", "lower", "open", "retreat"], held=Held(0.04, 0.02, 0, "obj_1", 0.04, 0.04),
                                grasp={}, target_centre=[0.55, 0.45, 0.07], target_top=0.09, relation=rel, reference_id=rid)
@@ -239,9 +246,10 @@ class StubTools:
         return {"check": "placement", "pass": ok, "xy_error_mm": 3.0, "z_error_mm": 1.0, "tilt_deg": 0.4}
 
 
-def run(tmp_path, tools, instruction="put a on b"):
+def run(tmp_path, tools, instruction="put a on b", responder=None):
+    from agent.ask import ScriptedResponder
     log = EventLog(tmp_path / "events.jsonl")
-    sup = Supervisor(tools, log, tmp_path)
+    sup = Supervisor(tools, log, tmp_path, responder or ScriptedResponder(["cancel"]))
     r = sup.run(instruction)
     log.close()
     return r, [json.loads(line) for line in (tmp_path / "events.jsonl").read_text().splitlines()]
@@ -275,16 +283,17 @@ def test_supervisor_execution_failure_has_no_retry(tmp_path):
     assert r["status"] == "FAILED" and r["failure"]["cls"] == "execution"
 
 
-def test_supervisor_ambiguity_asks_and_cancels(tmp_path):
-    r, ev = run(tmp_path, StubTools(resolve_ambiguous=True))
+def test_supervisor_unattended_ambiguity_is_scripted_cancel(tmp_path):
+    r, ev = run(tmp_path, StubTools(ambiguous={"a": [1, 3]}))
     assert r["status"] == "CANCELLED"
     asks = [e for e in ev if e["kind"] == "ask_user"]
-    assert len(asks) == 1 and asks[0]["answer"] == "cancel" and asks[0]["scripted"]
+    assert len(asks) == 1 and asks[0]["answer"] == "cancel" and asks[0]["source"] == "scripted"
 
 
-def test_supervisor_unsupported_task_asks(tmp_path):
-    r, _ = run(tmp_path, StubTools(task="unsupported"))
-    assert r["status"] == "CANCELLED"
+def test_supervisor_unsupported_task_fails_without_a_fake_question(tmp_path):
+    r, ev = run(tmp_path, StubTools(task="unsupported"))
+    assert r["status"] == "FAILED" and r["failure"]["cls"] == "unsupported"
+    assert not [e for e in ev if e["kind"] == "ask_user"]
 
 
 def test_parse_inconsistent_task_gets_one_retry():

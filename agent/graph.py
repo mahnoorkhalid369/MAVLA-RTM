@@ -21,6 +21,7 @@ import numpy as np
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, StateGraph
 
+from agent.ask import Answer, Candidate, Question
 from agent.config import Budgets
 from agent.vlm_roles import VLMFailure
 from control.motion import PlanningError
@@ -68,13 +69,10 @@ class AgentState(TypedDict, total=False):
     plan: dict | None
 
 
-def scripted_responder(question: str, options: list[str]) -> str:
-    """ask_user in unattended runs: always "cancel" (logged; such runs count as "asked", not success)."""
-    return "cancel"
-
-
 class Supervisor:
-    def __init__(self, tools, log: EventLog, run_dir: Path, responder=scripted_responder, budgets: Budgets | None = None) -> None:
+    def __init__(self, tools, log: EventLog, run_dir: Path, responder, budgets: Budgets | None = None) -> None:
+        """responder: agent.ask.TerminalResponder (a person) or ScriptedResponder (unattended runs).
+        Required: there is no silent default answer."""
         self.tools, self.log, self.run_dir, self.responder = tools, log, Path(run_dir), responder
         self.budgets = budgets or Budgets()
         self.ctx: dict = {}  # non-serialisable working data: observation, plan
@@ -97,7 +95,7 @@ class Supervisor:
             t = time.monotonic()
             out = fn(state)
             timeline = list(state.get("timeline", [])) + [{"state": name, "seconds": round(time.monotonic() - t, 2)}]
-            return {**out, "timeline": timeline}
+            return {**out, "timeline": timeline, "questions": list(self.ctx.get("questions", []))}
         return node
 
     def _fail(self, state, cls: str, reason: str, **extra) -> dict:
@@ -110,13 +108,32 @@ class Supervisor:
             return {"next": "RECOVERING", "retries": used, "recover": {"cls": cls, "reason": reason}}
         return {"next": "FAILED", "retries": used, "failure": {"cls": cls, "reason": reason, **extra}}
 
-    def _ask(self, state, question: str, options: list[str]) -> dict:
-        answer = self.responder(question, options)
-        q = list(state.get("questions", [])) + [{"question": question, "options": options, "answer": answer}]
-        self.log("ask_user", question=question, options=options, answer=answer, scripted=self.responder is scripted_responder)
-        if answer == "cancel" or len(q) > self.budgets.max_questions:
-            return {"next": "CANCELLED", "questions": q, "failure": {"cls": "asked", "reason": question}}
-        return {"next": "FAILED", "questions": q, "failure": {"cls": "asked", "reason": f"unhandled answer {answer!r}"}}
+    def _candidates(self, obs, marks) -> list[Candidate]:
+        out = []
+        for k in marks:
+            g, d = obs.measured[k], obs.descriptions.get(k, {}) or {}
+            desc = " ".join(str(d.get(f, "")) for f in ("colour", "name")).strip() or "(no description)"
+            out.append(Candidate(k, desc, (g["centre"][0] * 1000, g["centre"][1] * 1000), float(np.hypot(*g["centre"][:2])),
+                                 (g["footprint"][0] * 1000, g["footprint"][1] * 1000, g["height"] * 1000)))
+        return out
+
+    def _question(self, kind: str, text: str, role: str, obs, marks) -> Answer:
+        """Ask via the configured responder (a person, or a script in unattended runs) and log it."""
+        image = None
+        if hasattr(self.tools, "candidate_image"):
+            image = self.tools.candidate_image(obs, list(marks))
+        q = Question(kind, text, role, self._candidates(obs, marks), image)
+        a = self.responder(q)
+        rec = {"question": text, "question_kind": kind, "role": role, "candidates": [c.mark for c in q.candidates],
+               "answer": a.kind, "mark": a.mark, "raw": a.raw, "source": a.source, "rejected": a.attempts}
+        self.ctx.setdefault("questions", []).append(rec)
+        self.log("ask_user", **rec)
+        return a
+
+    def _cancelled(self, a: Answer, question: str) -> dict:
+        why = {"cancel": f"you answered {a.raw!r}", "eof": "end of input (nobody could answer)",
+               "timeout": f"no answer within {getattr(self.responder, 'timeout_s', 0):.0f} s"}[a.kind]
+        return {"next": "CANCELLED", "failure": {"cls": "asked", "reason": f"{question} -> {why}", "answer_source": a.source}}
 
     def _run(self, steps, label, state, next_state) -> dict:
         res = self.tools.execute(steps, label)
@@ -133,8 +150,9 @@ class Supervisor:
             return self._fail(state, "understanding", str(exc))
         self.log("task", **task.model_dump())
         if task.task != "pick_place" or task.object is None or task.reference is None or task.relation is None:
-            return {"task": task.model_dump(), **self._ask(state, f"I can only move one object onto or next to another "
-                                                                   f"({task.reason or task.task}). What should I do?", ["cancel"])}
+            return {"task": task.model_dump(), "next": "FAILED",
+                    "failure": {"cls": "unsupported", "reason": f"I can only move one object onto or next to another "
+                                f"({task.reason or task.task}); please rephrase the instruction"}}
         return {"next": "OBSERVING", "task": task.model_dump()}
 
     def _observing(self, state) -> dict:
@@ -155,36 +173,58 @@ class Supervisor:
         return {"next": "LOCALIZING"}
 
     def _resolve_one(self, state, obs, ref: dict, role: str):
-        """-> (mark, None) or (None, update dict)."""
+        """-> (mark, None) or (None, update dict). Several matches -> the user chooses (never the model)."""
         try:
             r = self.tools.resolve(obs, ref["text"])
         except VLMFailure as exc:
             return None, self._fail(state, "perception", str(exc))
         self.log("resolution", role=role, text=ref["text"], **r.model_dump())
+        user_chosen = False
+        mark = r.id
         if r.id is None:
             if not r.candidates:
                 return None, self._fail(state, "perception", f"nothing matches {ref['text']!r}", role=role)
-            return None, self._ask(state, f"Which one do you mean by {ref['text']!r}? Candidates: {r.candidates}",
-                                   [str(c) for c in r.candidates] + ["cancel"])
+            question = f"Several objects could be {ref['text']!r}. Which one do you mean?"
+            if len(self.ctx.get("questions", [])) >= self.budgets.max_questions:
+                return None, {"next": "CANCELLED", "failure": {"cls": "asked", "reason": f"{question} -> question budget "
+                                                                f"({self.budgets.max_questions}) used up"}}
+            a = self._question("choose", question, role, obs, r.candidates)
+            if a.kind != "choice":
+                return None, self._cancelled(a, question)
+            mark, user_chosen = a.mark, True
         if ref.get("relation") and ref.get("anchor"):
             try:
-                a = self.tools.resolve(obs, ref["anchor"])
+                an = self.tools.resolve(obs, ref["anchor"])
             except VLMFailure as exc:
                 return None, self._fail(state, "perception", str(exc))
-            if a.id is None or not self.tools.relation_holds(obs.measured[r.id], obs.measured[a.id], ref["relation"],
-                                                              state["task"].get("frame", "robot")):
-                return None, self._ask(state, f"I could not verify that {ref['text']!r} is {ref['relation']} {ref['anchor']!r}.",
-                                       ["cancel"])
+            if an.id is None or not self.tools.relation_holds(obs.measured[mark], obs.measured[an.id], ref["relation"],
+                                                               state["task"].get("frame", "robot")):
+                return None, {"next": "FAILED", "failure": {"cls": "perception", "reason": f"could not verify that "
+                              f"{ref['text']!r} is {ref['relation']} {ref['anchor']!r} from the measured positions"}}
+        if user_chosen:  # the person's choice is the answer; the model does not re-judge it
+            self.log("confirmation", role=role, mark=mark, text=ref["text"], match="user_selected", reason="chosen by the user")
+            return mark, None
         try:
-            c = self.tools.confirm(obs, r.id, ref["text"])
+            c = self.tools.confirm(obs, mark, ref["text"])
         except VLMFailure as exc:
             return None, self._fail(state, "perception", str(exc))
-        self.log("confirmation", role=role, mark=r.id, text=ref["text"], **c.model_dump())
+        self.log("confirmation", role=role, mark=mark, text=ref["text"], **c.model_dump())
         if c.match == "no":
-            return None, self._fail(state, "perception", f"confirm_object said no for {ref['text']!r} (mark {r.id})", role=role)
+            return None, self._fail(state, "perception", f"confirm_object said no for {ref['text']!r} (mark {mark})", role=role)
         if c.match == "unsure":
-            return None, self._ask(state, f"Is object {r.id} {ref['text']!r}? I am not sure.", ["yes", "no", "cancel"])
-        return r.id, None
+            question = f"Is object {mark} the {ref['text']!r}? I am not sure."
+            others = [k for k in (self.tools.lexical_candidates(obs, ref["text"]) if hasattr(self.tools, "lexical_candidates") else [])
+                      if k != mark]
+            a = self._question("confirm", question, role, obs, [mark] + others)
+            if a.kind == "yes":
+                return mark, None
+            if a.kind == "choice":
+                return a.mark, None
+            if a.kind == "no":
+                return None, {"next": "FAILED", "failure": {"cls": "asked", "reason": f"you said object {mark} is not "
+                              f"{ref['text']!r} and chose no other object"}}
+            return None, self._cancelled(a, question)
+        return mark, None
 
     def _localizing(self, state) -> dict:
         obs, task = self.ctx["obs"], state["task"]
@@ -195,7 +235,8 @@ class Supervisor:
         if upd:
             return upd
         if m_obj == m_ref:
-            return self._ask(state, "The object and the destination resolve to the same thing.", ["cancel"])
+            return {"next": "FAILED", "failure": {"cls": "understanding", "reason": f"the object and the destination "
+                    f"are the same object ({m_obj}); please rephrase"}}
         oid, rid = obs.object_ids[m_obj], obs.object_ids[m_ref]
         self.log("localized", object_mark=m_obj, object_id=oid, reference_mark=m_ref, reference_id=rid,
                  object=self.tools.world.objects[oid].geometry, reference=self.tools.world.objects[rid].geometry)
@@ -311,6 +352,6 @@ def honest_message(r: dict) -> str:
         return (f"Done (verified by the table camera): placed {v['xy_error_mm']} mm from the planned spot, "
                 f"top {v['z_error_mm']:+} mm, tilt {v['tilt_deg']} deg.")
     if s == "CANCELLED":
-        return f"Cancelled: I asked ({r['failure']['reason']}) and the answer was 'cancel'."
+        return f"Cancelled: {r['failure']['reason']}."
     f = r.get("failure") or {}
     return f"Failed ({f.get('cls', '?')}): {f.get('reason', 'unknown')}. I did not report success."

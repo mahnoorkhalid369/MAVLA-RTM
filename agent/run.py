@@ -42,7 +42,7 @@ def stop_sim(p: subprocess.Popen | None) -> None:
         os.killpg(p.pid, signal.SIGKILL)
 
 
-def run_one(instruction: str, out: Path, bridge, detector, vlm, executor) -> dict:
+def run_one(instruction: str, out: Path, bridge, detector, vlm, executor, responder) -> dict:
     from agent.graph import EventLog, Supervisor
     from agent.tools import Tools
     from agent.vlm_roles import Roles
@@ -51,7 +51,7 @@ def run_one(instruction: str, out: Path, bridge, detector, vlm, executor) -> dic
     log = EventLog(out / "events.jsonl")
     try:
         tools = Tools(bridge, detector, Roles(vlm, log), executor, log, out)
-        report = Supervisor(tools, log, out).run(instruction, thread_id=out.name)
+        report = Supervisor(tools, log, out, responder).run(instruction, thread_id=out.name)
     except Exception as exc:  # an unexpected error is a failure, never a success
         log("error", error=repr(exc))
         report = {"instruction": instruction, "status": "FAILED", "failure": {"cls": "internal", "reason": repr(exc)},
@@ -72,8 +72,17 @@ def main() -> int:
     ap.add_argument("--start-sim", action="store_true", help="start Isaac Sim after loading the models")
     ap.add_argument("--gui", action="store_true", help="with --start-sim: show the Isaac Sim window")
     ap.add_argument("--sim-flag", help="write this file when the models are loaded (rehearsal harness)")
+    ap.add_argument("--ask", choices=["terminal", "scripted"], default="terminal",
+                    help="who answers clarification questions: the person at this terminal (default) or, for "
+                         "unattended rehearsals only, a scripted 'cancel'")
+    ap.add_argument("--ask-timeout", type=float, default=None,
+                    help="seconds to wait for an answer before cancelling (default Budgets.question_timeout_s; 0 = no limit)")
     a = ap.parse_args()
     out = Path(a.out)
+    from agent.ask import LineReader, ScriptedResponder, TerminalResponder
+    from agent.config import Budgets
+    timeout = Budgets().question_timeout_s if a.ask_timeout is None else a.ask_timeout
+    responder = TerminalResponder(timeout_s=timeout) if a.ask == "terminal" else ScriptedResponder(["cancel"])
     out.mkdir(parents=True, exist_ok=True)
 
     from agent.vlm_roles import GemmaVLM
@@ -102,19 +111,18 @@ def main() -> int:
         executor.wait_sim(3.0)
         print("[agent] ready", flush=True)
         if a.instruction:
-            r = run_one(a.instruction, out, bridge, detector, vlm, executor)
+            r = run_one(a.instruction, out, bridge, detector, vlm, executor, responder)
             print(f"[agent] {r['status']}: {r['message']}", flush=True)
             return 0
         n = 0
         while True:
-            try:
-                text = input("instruction (empty line to quit)> ").strip()
-            except EOFError:
+            print("instruction (empty line to quit)> ", end="", flush=True)
+            text = LineReader.shared().get()  # same reader as the clarification questions (shared stdin)
+            if text is None or not text.strip():
                 break
-            if not text:
-                break
+            text = text.strip()
             n += 1
-            r = run_one(text, out / f"{n:02d}", bridge, detector, vlm, executor)
+            r = run_one(text, out / f"{n:02d}", bridge, detector, vlm, executor, responder)
             print(f"[agent] {r['status']}: {r['message']}", flush=True)
         return 0
     finally:
