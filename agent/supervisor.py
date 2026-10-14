@@ -175,8 +175,10 @@ class GoalSupervisor:
 
     def _observing_scene(self, state) -> dict:
         step, t0 = self.ts.current(), time.monotonic()
-        # park the arm out of the view only if a motion step follows (that step then reuses this observation)
-        return self._step_done(step, caps.run_observe(self.ctx, step.args, clear_view=self._later_motion(step)), t0)
+        # park the arm out of the view only if a manipulation step follows (it reuses this cleared-view observation;
+        # inspect / explore plan their own camera motion and do not need it)
+        clear = any(s.capability == "pick_place" for s in self.ts.remaining(step))
+        return self._step_done(step, caps.run_observe(self.ctx, step.args, clear_view=clear), t0)
 
     def _reporting_scene(self, state) -> dict:
         step, t0 = self.ts.current(), time.monotonic()
