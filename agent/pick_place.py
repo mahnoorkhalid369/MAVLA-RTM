@@ -51,8 +51,14 @@ class AgentState(TypedDict, total=False):
 
 
 class PickPlaceWorkflow:
+    MODES = ("pick_place", "pick", "place")
+
     def __init__(self, tools, log: EventLog, run_dir: Path, responder, budgets: Budgets | None = None,
-                 final_home: bool = True) -> None:
+                 final_home: bool = True, mode: str = "pick_place") -> None:
+        """mode: "pick_place" (validated composite), "pick" (grasp + lift + retention check, ends HOLDING, no HOME),
+        "place" (the object already held: resolve the destination only, carry, release, verify, HOME)."""
+        assert mode in self.MODES
+        self.mode = mode
         """responder: agent.ask.TerminalResponder (a person) or ScriptedResponder (unattended runs).
         Required: there is no silent default answer."""
         self.tools, self.log, self.run_dir, self.responder = tools, log, Path(run_dir), responder
@@ -153,7 +159,20 @@ class PickPlaceWorkflow:
         return {"next": "LOCALIZING"}
 
     def _resolve_one(self, state, obs, ref: dict, role: str):
-        """-> (mark, None) or (None, update dict). Several matches -> the user chooses (never the model)."""
+        """-> (mark, None) or (None, update dict). Several matches -> the user chooses (never the model).
+        "#<id>" refers to a world object directly (from the supervisor's state, no Gemma call); a reference the
+        user already clarified in this session is reused while that object is still measured."""
+        import re as _re
+        m = _re.fullmatch(r"#(\d+)", ref["text"].strip())
+        wid = int(m.group(1)) if m else self.tools.resolved_refs.get(ref["text"].strip().lower())
+        if wid is not None:
+            mark = next((k for k, v in obs.object_ids.items() if v == wid), None)
+            if mark is not None:
+                self.log("resolution", role=role, text=ref["text"], id=mark, ambiguous=False, candidates=[mark],
+                         reason=f"world object {wid} ({'reference by id' if m else 'clarified by the user earlier'})")
+                return mark, None
+            if m:
+                return None, self._fail(state, "perception", f"object {wid} is not measured in the current view", role=role)
         try:
             r = self.tools.resolve(obs, ref["text"])
         except VLMFailure as exc:
@@ -172,6 +191,8 @@ class PickPlaceWorkflow:
             if a.kind != "choice":
                 return None, self._cancelled(a, question)
             mark, user_chosen = a.mark, True
+            if obs.object_ids.get(mark) is not None:  # remember the clarification for retries / later steps
+                self.tools.resolved_refs[ref["text"].strip().lower()] = obs.object_ids[mark]
         if ref.get("relation") and ref.get("anchor"):
             try:
                 an = self.tools.resolve(obs, ref["anchor"])
@@ -208,9 +229,23 @@ class PickPlaceWorkflow:
 
     def _localizing(self, state) -> dict:
         obs, task = self.ctx["obs"], state["task"]
+        if self.mode == "place":  # the object is the held one; only the destination is resolved
+            m_ref, upd = self._resolve_one(state, obs, task["reference"], "reference")
+            if upd:
+                return upd
+            rid = obs.object_ids[m_ref]
+            self.log("localized", frame_id=obs.frame_id, object_mark=None, object_id=self.tools.held_object,
+                     reference_mark=m_ref, reference_id=rid, object=self.tools.held_geom,
+                     reference=self.tools.world.objects[rid].geometry)
+            return {"next": "PLANNING_GRASP", "object_id": self.tools.held_object, "reference_id": rid}
         m_obj, upd = self._resolve_one(state, obs, task["object"], "object")
         if upd:
             return upd
+        if self.mode == "pick":
+            oid = obs.object_ids[m_obj]
+            self.log("localized", frame_id=obs.frame_id, object_mark=m_obj, object_id=oid, reference_mark=None,
+                     reference_id=None, object=self.tools.world.objects[oid].geometry, reference={})
+            return {"next": "PLANNING_GRASP", "object_id": oid, "reference_id": None}
         m_ref, upd = self._resolve_one(state, obs, task["reference"], "reference")
         if upd:
             return upd
@@ -225,17 +260,26 @@ class PickPlaceWorkflow:
     def _planning_grasp(self, state) -> dict:
         task = state["task"]
         try:
-            plan = self.tools.plan_pick_place(state["object_id"], task["relation"], state["reference_id"],
-                                              task.get("frame", "robot"), self.tools.bridge.q())
+            q = self.tools.bridge.q()
+            if self.mode == "pick":
+                plan = self.tools.plan_pick(state["object_id"], q)
+            elif self.mode == "place":
+                plan = self.tools.plan_place_held(task["relation"], state["reference_id"], task.get("frame", "robot"), q)
+            else:
+                plan = self.tools.plan_pick_place(state["object_id"], task["relation"], state["reference_id"],
+                                                  task.get("frame", "robot"), q)
         except PlanningError as exc:
+            if self.tools.deterministic(str(exc)):  # re-observing cannot change it: no retry, report it as such
+                self.log("failure", cls="infeasible", reason=str(exc), used=0, budget=0)
+                return {"next": "FAILED", "failure": {"cls": "infeasible", "reason": str(exc)}}
             return self._fail(state, "planning", str(exc))
         self.ctx["plan"] = plan
         summary = {"grasp": plan.grasp, "target_centre_mm": [round(v * 1000, 1) for v in plan.target_centre],
                    "target_top_mm": round(plan.target_top * 1000, 1), "relation": plan.relation,
                    "held": {"height_mm": round(plan.held.height * 1000, 1), "grip_depth_mm": round(plan.held.grip_depth * 1000, 1),
                             "width_mm": round(plan.held.width * 1000, 1), "length_mm": round(plan.held.length * 1000, 1)}}
-        self.log("plan", **summary)
-        return {"next": "APPROACHING", "plan": summary}
+        self.log("plan", **summary, mode=self.mode)
+        return {"next": "TRANSPORTING" if self.mode == "place" else "APPROACHING", "plan": summary}
 
     def _approaching(self, state) -> dict:
         p = self.ctx["plan"]
@@ -252,17 +296,28 @@ class PickPlaceWorkflow:
         if not v["pass"]:
             out = self._fail(state, "grasp", "the fingers closed without stalling on the object (no contact)")
             return {**out, "verifications": vs}
-        self.tools.held_box = p.held.collision_body()
-        self.tools.world.holding = p.object_id
-        self.tools.world.objects[p.object_id].status = "held"
+        self.tools.set_held(p, p.approach[1].position)
         return {"next": "TRANSPORTING", "verifications": vs}
 
     def _transporting(self, state) -> dict:
         p = self.ctx["plan"]
-        out = self._run(p.lift + p.place[:1], "lift and carry", state, "PLACING")
+        if self.mode == "pick":  # lift only, then check retention: the goal state is "holding"
+            out = self._run(p.lift, "lift", state, "COMPLETED")
+            if out["next"] != "COMPLETED":
+                return out
+            v = self.tools.verify_contact(self.tools.held_close_target)
+            v["check"] = "retention_after_lift"
+            vs = list(state.get("verifications", [])) + [v]
+            if not v["pass"]:
+                self.tools.clear_held()
+                return {**self._fail(state, "execution", "object lost while lifting (fingers no longer stalled)"), "verifications": vs}
+            self.tools.last_referent = p.object_id
+            return {**out, "verifications": vs}
+        steps = p.place[:1] if self.mode == "place" else p.lift + p.place[:1]
+        out = self._run(steps, "carry" if self.mode == "place" else "lift and carry", state, "PLACING")
         if out["next"] != "PLACING":
             return out
-        v = self.tools.verify_contact(p.approach[1].position)  # still holding after the carry?
+        v = self.tools.verify_contact(self.tools.held_close_target)  # still holding after the carry?
         v["check"] = "contact_after_carry"
         vs = list(state.get("verifications", [])) + [v]
         if not v["pass"]:
@@ -289,6 +344,8 @@ class PickPlaceWorkflow:
             return self._fail(state, "placement", f"re-observation failed: {exc}")
         vs = list(state.get("verifications", [])) + [v]
         if v["pass"]:  # HOME once per instruction: only after the last manipulation step
+            self.tools.clear_held()
+            self.tools.last_referent = p.object_id
             return {"next": "RETURNING_HOME" if self.final_home else "COMPLETED", "verifications": vs}
         return {**self._fail(state, "placement", v.get("reason") or "placement outside tolerance (xy 10 mm, z 5 mm, tilt 5 deg)"),
                 "verifications": vs}

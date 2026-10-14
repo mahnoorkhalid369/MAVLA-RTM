@@ -187,6 +187,8 @@ class StubTools:
                  home_ok=True, home_error_deg=0.1):
         self.contact, self.placement = list(contact), list(placement)
         self.home_ok, self.home_error_deg, self.home_calls = home_ok, home_error_deg, 0
+        self.resolved_refs, self.last_referent = {}, None
+        self.held = self.held_object = self.held_geom = self.held_close_target = None
         self.ambiguous, self.exec_fail, self.task = ambiguous or {}, exec_fail, task
         self.confirmed, self.planned = [], []
         self.world = WorldModel()
@@ -246,6 +248,27 @@ class StubTools:
 
     def verify_contact(self, target):
         return {"check": "contact", "pass": self.contact.pop(0) if len(self.contact) > 1 else self.contact[0]}
+
+    deterministic = staticmethod(lambda reason: "out of reach" in reason)
+
+    def set_held(self, plan, close_target):
+        self.held, self.held_object, self.held_close_target = plan.held, plan.object_id, close_target
+        self.held_geom = dict(self.world.objects[plan.object_id].geometry) if plan.object_id in self.world.objects else geom(0.5, 0.2, 0.04)
+        self.world.holding = plan.object_id
+
+    def clear_held(self):
+        self.held = self.held_object = self.held_geom = self.held_close_target = None
+        self.world.holding = None
+
+    def plan_pick(self, oid, q):
+        p = self.plan_pick_place(oid, "hold", None, "robot", q)
+        p.place = []
+        return p
+
+    def plan_place_held(self, rel, rid, frame, q):
+        p = self.plan_pick_place(self.held_object, rel, rid, frame, q)
+        p.hover, p.approach, p.lift = [], [], []
+        return p
 
     def return_home(self):
         self.home_calls += 1
@@ -632,3 +655,63 @@ def test_partial_wrist_view_of_a_large_object_is_associated_not_new():
     big = w.observe(geom(0.02, 1.02, 0.20, fp=(0.10, 0.12)), None)
     st, oid = w.add_observation(geom(-0.014, 1.016, 0.20, fp=(0.03, 0.02)), "wrist", "w", 2)  # 34 mm off, inside the box
     assert (st, oid) == ("matched", big) and not w.objects[big].observations[-1]["used_for_geometry"]
+
+
+# ------------------------------------------------------------------------------- compositional manipulation
+def _wf(tmp_path, tools, mode, task, responder=None, final_home=True):
+    from agent.ask import ScriptedResponder
+    log = EventLog(tmp_path / f"{mode}.jsonl")
+    r = PickPlaceWorkflow(tools, log, tmp_path, responder or ScriptedResponder(["cancel"]), final_home=final_home,
+                          mode=mode).run("x", task)
+    log.close()
+    return r, [json.loads(line) for line in (tmp_path / f"{mode}.jsonl").read_text().splitlines()]
+
+
+def test_pick_only_ends_holding_without_placement_or_home(tmp_path):
+    t = StubTools()
+    r, ev = _wf(tmp_path, t, "pick", {"object": {"text": "a"}, "relation": None, "reference": None, "frame": "robot"})
+    states = [e["state"] for e in ev if e["kind"] == "state"]
+    assert r["status"] == "COMPLETED" and "PLACING" not in states and "RETURNING_HOME" not in states and t.home_calls == 0
+    assert t.held_object == t.ids[1] and t.world.holding == t.ids[1]
+    assert [v["check"] for v in r["verifications"]] == ["contact", "retention_after_lift"]
+    assert t.executed == ["approach", "close", "lift"]
+
+
+def test_pick_only_reports_a_lost_object(tmp_path):
+    t = StubTools(contact=(True, False))
+    r, _ = _wf(tmp_path, t, "pick", {"object": {"text": "a"}, "relation": None, "reference": None, "frame": "robot"})
+    assert r["status"] == "FAILED" and t.held_object is None
+
+
+def test_place_mode_uses_the_held_object_without_regrasp(tmp_path):
+    t = StubTools()
+    _wf(tmp_path, t, "pick", {"object": {"text": "a"}, "relation": None, "reference": None, "frame": "robot"})
+    t.executed.clear()
+    r, ev = _wf(tmp_path, t, "place", {"object": {"text": "#held"}, "relation": "next_to", "reference": {"text": "b"}, "frame": "robot"})
+    assert r["status"] == "COMPLETED" and "approach" not in t.executed and "close" not in t.executed
+    assert t.executed[0] == "carry" and t.held_object is None and t.home_calls == 1
+
+
+def test_id_reference_and_remembered_clarification_skip_the_model(tmp_path):
+    t = StubTools(ambiguous={"a": [1, 3]})
+    from agent.ask import ScriptedResponder
+    r, _ = _wf(tmp_path, t, "pick_place", {"object": {"text": "a"}, "relation": "on", "reference": {"text": "b"}, "frame": "robot"},
+               responder=ScriptedResponder(["3"]))
+    assert r["status"] == "COMPLETED" and t.resolved_refs["a"] == t.ids[3]
+    (tmp_path / "2").mkdir()
+    r, ev = _wf(tmp_path / "2", t, "pick_place", {"object": {"text": "a"}, "relation": "on", "reference": {"text": "#%d" % t.ids[2]}, "frame": "robot"})
+    assert not [e for e in ev if e["kind"] == "question"]  # clarified before: not asked again
+
+
+def test_deterministic_infeasibility_is_not_retried(tmp_path, monkeypatch):
+    from control.motion import PlanningError
+    t = StubTools()
+    calls = []
+
+    def boom(*a, **k):
+        calls.append(1)
+        raise PlanningError("carry above target: [302, 148, 206] mm is out of reach")
+    monkeypatch.setattr(t, "plan_pick_place", boom)
+    r, ev = _wf(tmp_path, t, "pick_place", {"object": {"text": "a"}, "relation": "on", "reference": {"text": "b"}, "frame": "robot"})
+    assert r["status"] == "FAILED" and r["failure"]["cls"] == "infeasible" and len(calls) == 1
+    assert not [e for e in ev if e["kind"] == "recovery"]

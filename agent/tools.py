@@ -101,6 +101,11 @@ class Tools:
         self.live = live  # agent.live.LiveChannel or None (viewer is optional)
         self.memory = memory  # agent.tools.DescriptionMemory shared by the instructions of one session, or None
         self.motion_count = 0  # every executed robot / gripper command increments it (observation freshness)
+        # held object (persists across instructions of a session): Held body, world id, measured geometry at the
+        # grasp, finger close target (for retention checks)
+        self.held, self.held_object, self.held_geom, self.held_close_target = None, None, None, None
+        self.resolved_refs: dict[str, int] = {}  # reference text -> world id chosen by the user (clarifications)
+        self.last_referent: int | None = None  # world id of the object the last instruction acted on
         self.view_cleared_at = -1  # motion_count right after the last successful park_for_view
         self.world = WorldModel()
         self.kin = Kinematics()
@@ -136,6 +141,15 @@ class Tools:
                 continue
             k = len(marks) + 1
             marks[k], measured[k], scores[k] = d.mask, g.to_dict(), round(float(d.score), 3)
+        if self.held_box is not None:  # the held object is not on the table: drop its measurement
+            Th, size = self.held_box
+            Tw = tool @ Th
+            half = np.asarray(size) / 2 + 0.02
+            for k in [k for k, g in measured.items() if np.all(np.abs((np.asarray(g["centre"]) - Tw[:3, 3]) @ Tw[:3, :3]) <= half)]:
+                excluded.append({"score": scores[k], "pixels": int(marks[k].sum()), "reason": "the held object"})
+                del marks[k], measured[k], scores[k]
+            order = sorted(marks)  # renumber 1..n consistently
+            marks, measured, scores = ({i + 1: d[k] for i, k in enumerate(order)} for d in (marks, measured, scores))
         snap_supports(list(measured.values()))
         self._frames += 1
         fid = f"{camera}_{self._frames:03d}"
@@ -352,6 +366,53 @@ class Tools:
                         {"yaw_deg": round(yaw, 1), "width_mm": round(width * 1000, 1), "height_mm": round(g["height"] * 1000, 1)},
                         list(map(float, target_centre)), float(target_top), relation, reference_id)
 
+    DETERMINISTIC = ("out of reach", "too narrow", "fits at most", "no free, reachable", "top face is not visible",
+                     "only ", "mm of the pads")  # PlanningError texts that re-observing cannot change
+
+    @classmethod
+    def deterministic(cls, reason: str) -> bool:
+        return any(k in reason for k in cls.DETERMINISTIC)
+
+    def plan_pick(self, object_id: int, q_start: np.ndarray, yaw_offset_deg: float = 0.0) -> PickPlan:
+        """Grasp-only plan (hover, descend + close, lift) with the same checks as plan_pick_place."""
+        o = self.world.objects[object_id]
+        g = o.geometry
+        if g["tilt_deg"] is None:
+            raise PlanningError(f"object {object_id}: its top face is not visible, so its pose is not measured well enough")
+        planner = SkillPlanner(self.kin, collision=CollisionChecker(self.obstacles()))
+        width = g["grasp_width"]
+        fp = g["footprint"]
+        length = fp[0] if abs(fp[1] - width) <= abs(fp[0] - width) else fp[1]
+        planner.check_width(width)
+        top = np.array([g["centre"][0], g["centre"][1], g["top_z"]])
+        hover, q, yaw = planner.hover(q_start, top, g["grasp_yaw_deg"] + yaw_offset_deg, g["symmetry_deg"])
+        approach, lift, q, held = planner.grasp(q, top, yaw, f"obj_{object_id}", width, length, self._support_name(g), g["height"])
+        return PickPlan(object_id, hover, approach, lift, [], held,
+                        {"yaw_deg": round(yaw, 1), "width_mm": round(width * 1000, 1), "height_mm": round(g["height"] * 1000, 1)},
+                        [float(g["centre"][0]), float(g["centre"][1]), float(g["centre"][2])], float(g["top_z"]), "hold", None)
+
+    def plan_place_held(self, relation: str, reference_id: int | None, frame: str, q_start: np.ndarray) -> PickPlan:
+        """Placement plan for the object already in the gripper (carry, lower, open, retreat)."""
+        if self.held is None or self.held_object is None:
+            raise PlanningError("nothing is held")
+        planner = SkillPlanner(self.kin, collision=CollisionChecker(self.obstacles()))
+        place, target_centre, target_top = self._plan_place(planner, q_start, self.held, self.held_geom, relation, reference_id, frame)
+        return PickPlan(self.held_object, [], [], [], place, self.held,
+                        {"yaw_deg": round(self.held.yaw_deg, 1), "width_mm": round(self.held.width * 1000, 1),
+                         "height_mm": round(self.held.height * 1000, 1)},
+                        list(map(float, target_centre)), float(target_top), relation, reference_id)
+
+    def set_held(self, plan: PickPlan, close_target: float) -> None:
+        self.held, self.held_object, self.held_close_target = plan.held, plan.object_id, close_target
+        self.held_geom = dict(self.world.objects[plan.object_id].geometry)
+        self.held_box = plan.held.collision_body()
+        self.world.holding = plan.object_id
+        self.world.objects[plan.object_id].status = "held"
+
+    def clear_held(self) -> None:
+        self.held, self.held_object, self.held_geom, self.held_close_target = None, None, None, None
+        self.held_box, self.world.holding = None, None
+
     def _plan_place(self, planner, q, held: Held, g: dict, relation: str, reference_id: int | None, frame: str):
         if relation == "on":
             r = self.world.objects[reference_id].geometry
@@ -461,7 +522,11 @@ class Tools:
                 t = np.clip(((c - cam) @ seg) / (seg @ seg), 0, 1)
                 blocked += int(np.any(np.linalg.norm(cam + t[:, None] * seg - c, axis=1) < r + 0.02))
             traj = joint_move(self.kin, q0, q, ARM_SPEED)
-            free = checker.check_path(traj.positions).ok
+            if self.held is not None:  # carrying: the held object moves with the gripper (closed opening)
+                free = checker.check_path(traj.positions, self.held.width or 0.01, self.held.collision_body(),
+                                          {(p, f"obj_{self.held_object}") for p in [x.name for x in checker.parts] + ["palm", "pads", "linkages", "held"]}).ok
+            else:
+                free = checker.check_path(traj.positions).ok
             tried.append({"j1": j1, "blocked": blocked, "path_free": free})
             if free and (best is None or blocked < best[0]):
                 best = (blocked, j1, traj)
@@ -488,7 +553,7 @@ class Tools:
         g["support_z"] = plan.target_top - plan.held.height
         g["top_z"] = plan.target_top
         o.geometry, o.status = g, "on_surface"
-        self.held_box, self.world.holding = None, None
+        self.clear_held()  # released: nothing is held any more, whatever the verification says
 
     def return_home(self) -> dict:
         """Collision-checked joint move to the validated ARM_HOME, only when nothing is held and the
