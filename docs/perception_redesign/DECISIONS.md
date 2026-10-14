@@ -211,3 +211,12 @@ Design approved with changes; revision 1 kept as `ARCHITECTURE_rev1_2026-10-14.m
   step started from a stale clock ("tracking 153 deg", step could end early before the settle wait)
   -> the agent spins the executor 0.3 s before each execute. Cycle 1 stopped after run 1 (CANCELLED,
   asked; scored, kept in `rehearsal/cycle1/`).
+- **Rehearsal fix cycle 2 (of 3), bugs in new code only:** cycle 2 runs 1-2 succeeded (truth xy 2.6 /
+  3.2 mm); run 3 FAILED honestly: the simulator's safety layer rejected the approach trajectory
+  because it started at J1 = 170.0 deg, outside [-170, 170] -- my park pose was AT the J1 limit and
+  the measured joint can sit a hair beyond it. The safety layer was right and is unchanged; park
+  poses are now >= 10 deg inside the limits (+-160 instead of +-170; test added). Also: (a) the
+  "disturbed neighbour" check flagged the support cube (its top became hidden under the placed cube,
+  ground truth: it did not move) -> only objects whose top face is visible now are compared; (b)
+  re-observations describe only objects that do not match a described world object (saves ~70 s per
+  verification; matched objects keep their description). Cycle 2 stopped after 3 scored runs.

@@ -98,6 +98,10 @@ class Tools:
             return
         obs.descriptions = {}
         for k, m in obs.marks.items():
+            known = self.world.match(obs.measured[k])  # same place / size as a described object: reuse
+            if known is not None and self.world.objects[known].description:
+                obs.descriptions[k] = dict(self.world.objects[known].description)
+                continue
             c = isolate(obs.rgb, m)
             cv2.imwrite(str(self.run_dir / "images" / f"{obs.frame_id}_obj_{k}.jpg"), cv2.cvtColor(c, cv2.COLOR_RGB2BGR))
             obs.descriptions[k] = self.roles.describe_one(c).model_dump()
@@ -110,9 +114,11 @@ class Tools:
         for k, g in obs.measured.items():
             obs.object_ids[k] = self.world.observe(g, obs.descriptions.get(k))
         moved = []
+        visible_top = {oid for oid, o in self.world.objects.items() if o.geometry.get("tilt_deg") is not None}
         for oid, c in before.items():
             now = self.world.objects[oid].geometry["centre"]
-            if oid in obs.object_ids.values() and np.hypot(now[0] - c[0], now[1] - c[1]) > self.tol.xy_m:
+            # only objects whose top face is seen now: a newly covered object's centre is not measurable
+            if oid in obs.object_ids.values() and oid in visible_top and np.hypot(now[0] - c[0], now[1] - c[1]) > self.tol.xy_m:
                 moved.append({"id": oid, "from_mm": [round(v * 1000) for v in c], "to_mm": [round(v * 1000) for v in now]})
         if moved:
             self.log("world", event="disturbed", moved=moved)
@@ -252,7 +258,9 @@ class Tools:
         self.log("verification", **v)
         return v
 
-    PARK_J1_DEG = (170.0, 135.0, -135.0, 90.0, -90.0, -170.0, 45.0, -45.0, 0.0)  # ARM_HOME turned about J1
+    # ARM_HOME turned about J1; kept >= 10 deg inside the J1 limits (+-170): a goal AT the limit can be
+    # measured a hair beyond it and the safety layer then (correctly) rejects the next trajectory
+    PARK_J1_DEG = (160.0, 135.0, -135.0, 90.0, -90.0, -160.0, 45.0, -45.0, 0.0)
 
     @staticmethod
     def workspace_points() -> list:

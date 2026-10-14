@@ -319,3 +319,10 @@ def test_describe_one_per_isolated_crop():
     assert tuple(c[h // 2, w // 2]) == (200, 200, 200) and tuple(c[2, 2]) == (60, 60, 60)  # object untouched, rest dimmed
     d = Roles(RecordedVLM(['{"name": "thing", "colour": "c"}'])).describe_one(c)
     assert d.name == "thing"
+
+
+def test_park_poses_stay_inside_joint_limits():
+    from control.kinematics import Kinematics
+    k = Kinematics()
+    for j1 in Tools.PARK_J1_DEG:
+        assert k.lower[0] + np.radians(5) < np.radians(j1) < k.upper[0] - np.radians(5)
