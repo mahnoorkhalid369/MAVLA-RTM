@@ -137,7 +137,7 @@ def one_run(k: int, n: int, out: Path, weights: str, timeout_s: float, truth: "T
     env = {**os.environ}
     t0 = time.monotonic()
     agent = subprocess.Popen([str(ROOT / ".venv-seg/bin/python"), "-u", "-m", "agent.run", "--instruction", spec[0],
-                              "--out", str(rd), "--weights", weights, "--sim-flag", str(flag), "--ask", "scripted"],
+                              "--out", str(rd), "--weights", weights, "--sim-flag", str(flag), "--ask", "scripted", "--live-dir", ""],
                              cwd=ROOT, stdout=open(rd / "agent.log", "w"), stderr=subprocess.STDOUT, env=env, start_new_session=True)
     sim = None
     rec = {"instruction": spec[0], "key": k, "run": n, "dir": str(rd)}

@@ -182,8 +182,10 @@ class StubTools:
                2: (geom(0.55, 0.45, 0.05), {"name": "box", "colour": "tan"}),
                3: (geom(0.0, 0.85, 0.04, fp=(0.05, 0.05)), {"name": "cube", "colour": "gold yellow"})}
 
-    def __init__(self, contact=(True,), placement=(True,), ambiguous=None, exec_fail=None, task="pick_place"):
+    def __init__(self, contact=(True,), placement=(True,), ambiguous=None, exec_fail=None, task="pick_place",
+                 home_ok=True, home_error_deg=0.1):
         self.contact, self.placement = list(contact), list(placement)
+        self.home_ok, self.home_error_deg, self.home_calls = home_ok, home_error_deg, 0
         self.ambiguous, self.exec_fail, self.task = ambiguous or {}, exec_fail, task
         self.confirmed, self.planned = [], []
         self.world = WorldModel()
@@ -241,6 +243,17 @@ class StubTools:
     def verify_contact(self, target):
         return {"check": "contact", "pass": self.contact.pop(0) if len(self.contact) > 1 else self.contact[0]}
 
+    def return_home(self):
+        self.home_calls += 1
+        if self.home_ok is True:
+            res = self.execute(["home"], "return HOME")
+            return {"ok": res.ok, "reason": res.reason, "result": res}
+        return {"ok": False, "reason": self.home_ok}
+
+    def verify_home(self):
+        return {"check": "home", "max_error_deg": self.home_error_deg, "tolerance_deg": 1.5, "tcp_error_mm": 0.5,
+                "pass": self.home_error_deg <= 1.5}
+
     def verify_placement(self, plan):
         ok = self.placement.pop(0) if len(self.placement) > 1 else self.placement[0]
         return {"check": "placement", "pass": ok, "xy_error_mm": 3.0, "z_error_mm": 1.0, "tilt_deg": 0.4}
@@ -260,7 +273,9 @@ def test_supervisor_happy_path_completes_only_after_verification(tmp_path):
     assert r["status"] == "COMPLETED"
     states = [e["state"] for e in ev if e["kind"] == "state"]
     assert states == ["UNDERSTANDING", "OBSERVING", "LOCALIZING", "PLANNING_GRASP", "APPROACHING", "GRASPING",
-                      "VERIFYING_GRASP", "TRANSPORTING", "PLACING", "VERIFYING_PLACEMENT", "COMPLETED"]
+                      "VERIFYING_GRASP", "TRANSPORTING", "PLACING", "RETREATING", "VERIFYING_PLACEMENT",
+                      "RETURNING_HOME", "VERIFYING_HOME", "COMPLETED"]
+    assert "back at HOME" in r["message"]
     assert (tmp_path / "checkpoints.sqlite").exists()
 
 
@@ -371,3 +386,95 @@ def test_square_footprint_width_is_the_mean_of_both_extents():
     g, _ = measure(masks[0], depth, K, table_camera_pose(), robot=None)
     assert g.symmetry_deg == 90.0 and g.extents[0] == g.extents[1] == g.grasp_width
     assert abs(g.grasp_width - 0.035) < 0.003
+
+
+
+# ----------------------------------------------------------------------------------- return to HOME
+def test_home_once_after_verified_placement(tmp_path):
+    t = StubTools()
+    r, _ = run(tmp_path, t)
+    assert r["status"] == "COMPLETED" and t.home_calls == 1 and t.executed.count("return HOME") == 1
+    assert [v["check"] for v in r["verifications"]][-1] == "home"
+
+
+def test_failed_placement_never_moves_home(tmp_path):
+    t = StubTools(placement=(False,))
+    r, _ = run(tmp_path, t)
+    assert r["status"] == "FAILED" and t.home_calls == 0 and "return HOME" not in t.executed
+
+
+def test_home_refused_is_a_clear_failure(tmp_path):
+    t = StubTools(home_ok="the robot is still holding an object")
+    r, _ = run(tmp_path, t)
+    assert r["status"] == "FAILED" and r["failure"]["cls"] == "home" and "still holding" in r["failure"]["reason"]
+    assert r["message"].startswith("Placement verified") and "did not report success" in r["message"]
+
+
+def test_home_not_reached_is_not_completed(tmp_path):
+    r, _ = run(tmp_path, StubTools(home_error_deg=2.4))
+    assert r["status"] == "FAILED" and r["failure"]["cls"] == "home" and "2.4 deg" in r["failure"]["reason"]
+
+
+def test_home_execution_failure_has_no_retry(tmp_path):
+    r, _ = run(tmp_path, StubTools(exec_fail="return HOME"))
+    assert r["status"] == "FAILED" and r["failure"]["cls"] == "execution" and "return HOME" in r["failure"]["reason"]
+
+
+def _home_tools(q, finger_deg=0.0, holding=None):
+    from control.robot import ARM_HOME
+    t, _ = tools_with([])
+    t.bridge = SimpleNamespace(q=lambda: np.array(q, float), finger=lambda: np.radians(finger_deg), wait_still=lambda: None)
+    t.world.holding = holding
+    t.executed = []
+    t.execute = lambda steps, label: t.executed.append((label, steps)) or SimpleNamespace(ok=True, reason="")
+    return t, np.array(ARM_HOME, float)
+
+
+def test_return_home_plans_a_collision_checked_move_to_the_validated_pose():
+    from control.robot import ARM_HOME
+    q = np.array(ARM_HOME, float)
+    q[0] = np.radians(135)
+    t, home = _home_tools(q)
+    r = t.return_home()
+    assert r["ok"] and t.executed[0][0] == "return HOME"
+    traj = t.executed[0][1][0].trajectory
+    assert np.allclose(traj.positions[-1], home) and np.allclose(traj.positions[0], q)
+
+
+def test_return_home_refuses_while_holding_or_closed():
+    from control.robot import ARM_HOME
+    t, _ = _home_tools(ARM_HOME, holding=3)
+    assert not t.return_home()["ok"] and not t.executed
+    t, _ = _home_tools(ARM_HOME, finger_deg=17.0)
+    r = t.return_home()
+    assert not r["ok"] and "gripper not open" in r["reason"] and not t.executed
+
+
+def test_verify_home_uses_joint_feedback_and_the_executor_tolerance():
+    from control.robot import ARM_HOME
+    q = np.array(ARM_HOME, float)
+    q[2] += np.radians(1.0)
+    t, _ = _home_tools(q)
+    v = t.verify_home()
+    assert v["pass"] and abs(v["max_error_deg"] - 1.0) < 1e-6 and v["tolerance_deg"] == 1.5 and v["tcp_error_mm"] > 0
+    q[2] += np.radians(1.0)
+    assert not _home_tools(q)[0].verify_home()["pass"]
+
+
+def test_live_channel_writes_masks_ids_and_current_run(tmp_path):
+    import cv2
+    from agent.live import LiveChannel
+    from agent.tools import Observation
+    m1, m2 = np.zeros((40, 60), bool), np.zeros((40, 60), bool)
+    m1[5:10, 5:10], m2[20:30, 30:40] = True, True
+    obs = Observation("table_001", "table", np.zeros((40, 60, 3), np.uint8), None, {1: m1, 2: m2},
+                      {1: geom(0.5, 0.1, 0.04), 2: geom(0.6, 0.2, 0.05)}, object_ids={1: 7, 2: 8},
+                      descriptions={1: {"name": "cube"}}, scores={1: 0.91, 2: 0.88})
+    live = LiveChannel(tmp_path)
+    live.start_run(tmp_path / "run", "put a on b")
+    live.perception(obs)
+    lab = cv2.imread(str(tmp_path / "labels.png"), cv2.IMREAD_UNCHANGED)
+    p = json.loads((tmp_path / "perception.json").read_text())
+    assert lab[7, 7] == 1 and lab[25, 35] == 2 and lab[0, 0] == 0
+    assert p["marks"]["1"]["object_id"] == 7 and p["marks"]["1"]["score"] == 0.91 and p["camera"] == "table"
+    assert json.loads((tmp_path / "current.json").read_text())["instruction"] == "put a on b"

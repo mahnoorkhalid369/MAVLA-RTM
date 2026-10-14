@@ -37,6 +37,7 @@ class Observation:
     object_ids: dict[int, int] = field(default_factory=dict)  # mark number -> world object id
     descriptions: dict[int, dict] = field(default_factory=dict)  # mark number -> VLM description
     excluded: list[dict] = field(default_factory=list)
+    scores: dict[int, float] = field(default_factory=dict)  # mark number -> detector confidence
 
 
 @dataclass
@@ -55,8 +56,12 @@ class PickPlan:
 
 
 class Tools:
-    def __init__(self, bridge, detector, roles, executor, log, run_dir) -> None:
+    HOME_TOLERANCE_DEG = 1.5  # per joint: RosExecutor's validated reach tolerance (a step fails beyond it)
+    OPEN_FINGER_DEG = 2.0  # finger_joint <= this = gripper open (open = 0 deg; 2 deg = 83 mm gap)
+
+    def __init__(self, bridge, detector, roles, executor, log, run_dir, live=None) -> None:
         self.bridge, self.detector, self.roles, self.ex, self.log, self.run_dir = bridge, detector, roles, executor, log, run_dir
+        self.live = live  # agent.live.LiveChannel or None (viewer is optional)
         self.world = WorldModel()
         self.kin = Kinematics()
         self.wrist_kin = Kinematics(tip="camera_color_optical_frame")
@@ -75,14 +80,14 @@ class Tools:
         checker = CollisionChecker()
         tool = Kinematics(tip="tool0").fk(frame.q)
         robot = RobotVolume(checker, frame.q, gripper_gap(frame.finger), self.held_box, tool)
-        marks, measured, excluded = {}, {}, []
+        marks, measured, excluded, scores = {}, {}, [], {}
         for d in sorted(dets, key=lambda d: -d.score):
             g, why = measure(d.mask, frame.depth, frame.K, T, robot)
             if g is None:
                 excluded.append({"score": round(d.score, 3), "pixels": int(d.mask.sum()), "reason": why})
                 continue
             k = len(marks) + 1
-            marks[k], measured[k] = d.mask, g.to_dict()
+            marks[k], measured[k], scores[k] = d.mask, g.to_dict(), round(float(d.score), 3)
         snap_supports(list(measured.values()))
         self._frames += 1
         fid = f"{camera}_{self._frames:03d}"
@@ -91,7 +96,10 @@ class Tools:
         self.log("tool", tool="perceive", camera=camera, frame_id=fid, detections=len(dets), objects=len(marks),
                  excluded=excluded, measured={k: {kk: v[kk] for kk in ("centre", "top_z", "height", "footprint", "grasp_yaw_deg", "grasp_width")}
                                               for k, v in measured.items()})
-        return Observation(fid, camera, frame.rgb, som, marks, measured, excluded=excluded)
+        obs = Observation(fid, camera, frame.rgb, som, marks, measured, excluded=excluded, scores=scores)
+        if self.live:
+            self.live.perception(obs)
+        return obs
 
     def describe(self, obs: Observation) -> None:
         """The VLM's own words for every measured object, each from its own isolated crop."""
@@ -108,6 +116,8 @@ class Tools:
             obs.descriptions[k] = self.roles.describe_one(c).model_dump()
         img = draw_names(obs.som, obs.marks, {k: f"{v.get('colour', '')} {v.get('name', '')}" for k, v in obs.descriptions.items()})
         cv2.imwrite(str(self.run_dir / "images" / f"{obs.frame_id}_names.jpg"), cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
+        if self.live:
+            self.live.perception(obs)
 
     def update_world(self, obs: Observation) -> list[dict]:
         """Store every measured object; returns neighbours that moved (whole-scene re-perception)."""
@@ -123,6 +133,8 @@ class Tools:
                 moved.append({"id": oid, "from_mm": [round(v * 1000) for v in c], "to_mm": [round(v * 1000) for v in now]})
         if moved:
             self.log("world", event="disturbed", moved=moved)
+        if self.live:
+            self.live.perception(obs)
         return moved
 
     STOPWORDS = {"the", "a", "an", "of", "and", "that", "this", "is", "one", "with"}  # English function words
@@ -288,6 +300,7 @@ class Tools:
     # ------------------------------------------------------------------- acting
     def execute(self, steps, label: str):
         t0 = time.monotonic()
+        self.log("tool", tool="execute_start", label=label, steps=[getattr(x, "label", str(x)) for x in steps])
         # RosExecutor (frozen) reads its sim clock only while spinning: refresh it after the VLM pauses,
         # otherwise its first step starts from a stale clock (wrong tracking numbers, early step end)
         self.ex.spin(0.3)
@@ -354,6 +367,41 @@ class Tools:
         g["top_z"] = plan.target_top
         o.geometry, o.status = g, "on_surface"
         self.held_box, self.world.holding = None, None
+
+    def return_home(self) -> dict:
+        """Collision-checked joint move to the validated ARM_HOME, only when nothing is held and the
+        gripper is open. Returns {"ok", "reason", "result"}; executes through RosExecutor."""
+        from control.skills import MoveStep
+        finger = float(np.degrees(self.bridge.finger()))
+        if self.world.holding is not None or self.held_box is not None:
+            out = {"ok": False, "reason": "the robot is still holding an object"}
+        elif finger > self.OPEN_FINGER_DEG:
+            out = {"ok": False, "reason": f"gripper not open (finger {finger:.1f} deg > {self.OPEN_FINGER_DEG} deg)"}
+        else:
+            q0 = self.bridge.q()
+            traj = joint_move(self.kin, q0, np.array(ARM_HOME, float), ARM_SPEED)
+            res = CollisionChecker(self.obstacles()).check_path(traj.positions)
+            if not res.ok:
+                out = {"ok": False, "reason": "HOME path collides: " + "; ".join(map(str, res.contacts[:3]))}
+            else:
+                self.log("tool", tool="return_home", ok=True, planned_s=round(float(traj.duration), 1))
+                r = self.execute([MoveStep(traj, "return HOME")], "return HOME")
+                return {"ok": r.ok, "reason": r.reason, "result": r}
+        self.log("tool", tool="return_home", ok=False, reason=out["reason"])
+        return out
+
+    def verify_home(self) -> dict:
+        """HOME from joint-state feedback: every joint within HOME_TOLERANCE_DEG of ARM_HOME."""
+        self.bridge.wait_still()
+        q = self.bridge.q()
+        home = np.array(ARM_HOME, float)
+        err = np.degrees(np.abs(q - home))
+        tcp = float(np.linalg.norm(self.kin.fk(q)[:3, 3] - self.kin.fk(home)[:3, 3]))
+        v = {"check": "home", "joint_error_deg": [round(float(x), 3) for x in err], "max_error_deg": round(float(err.max()), 3),
+             "tolerance_deg": self.HOME_TOLERANCE_DEG, "tcp_error_mm": round(tcp * 1000, 2),
+             "pass": bool(err.max() <= self.HOME_TOLERANCE_DEG)}
+        self.log("verification", **v)
+        return v
 
     def verify_placement(self, plan: PickPlan) -> dict:
         """Re-observe the whole table (whole-scene re-perception) and check the placed object's pose."""

@@ -1,7 +1,8 @@
 """Supervisor: a LangGraph state machine over the agent tools (ARCHITECTURE.md rev 3, demo slice).
 
 IDLE -> UNDERSTANDING -> OBSERVING -> LOCALIZING -> PLANNING_GRASP -> APPROACHING -> GRASPING ->
-VERIFYING_GRASP -> TRANSPORTING -> PLACING -> VERIFYING_PLACEMENT -> COMPLETED
+VERIFYING_GRASP -> TRANSPORTING -> PLACING -> RETREATING -> VERIFYING_PLACEMENT -> RETURNING_HOME ->
+VERIFYING_HOME -> COMPLETED
                                           any -> RECOVERING (budgeted) | FAILED | CANCELLED
 
 The LLM only parses, names, resolves and confirms; motions come from SkillPlanner (collision-checked)
@@ -27,20 +28,28 @@ from agent.vlm_roles import VLMFailure
 from control.motion import PlanningError
 
 STATES = ["UNDERSTANDING", "OBSERVING", "LOCALIZING", "PLANNING_GRASP", "APPROACHING", "GRASPING",
-          "VERIFYING_GRASP", "TRANSPORTING", "PLACING", "VERIFYING_PLACEMENT", "RECOVERING"]
+          "VERIFYING_GRASP", "TRANSPORTING", "PLACING", "RETREATING", "VERIFYING_PLACEMENT", "RETURNING_HOME",
+          "VERIFYING_HOME", "RECOVERING"]
 TERMINAL = ["COMPLETED", "FAILED", "CANCELLED"]
 
 
 class EventLog:
     """JSON-lines event log: one object per line with time, kind and fields."""
 
-    def __init__(self, path: Path) -> None:
-        self.path, self.t0 = Path(path), time.monotonic()
+    def __init__(self, path: Path, echo: bool = False) -> None:
+        """echo: also print a readable line per event to the terminal (agent.events.format_event)."""
+        self.path, self.t0, self.echo = Path(path), time.monotonic(), echo
         self.f = open(self.path, "a", buffering=1)
 
     def __call__(self, kind: str, **fields) -> None:
         rec = {"t": round(time.monotonic() - self.t0, 3), "wall": time.strftime("%H:%M:%S"), "kind": kind, **fields}
-        self.f.write(json.dumps(rec, default=_jsonable) + "\n")
+        line = json.dumps(rec, default=_jsonable)
+        self.f.write(line + "\n")
+        if self.echo:
+            from agent.events import format_event
+            ev = format_event(json.loads(line))
+            if ev is not None:
+                print(str(ev), flush=True)
 
     def close(self) -> None:
         self.f.close()
@@ -123,6 +132,7 @@ class Supervisor:
         if hasattr(self.tools, "candidate_image"):
             image = self.tools.candidate_image(obs, list(marks))
         q = Question(kind, text, role, self._candidates(obs, marks), image)
+        self.log("question", question=text, question_kind=kind, role=role, candidates=[c.mark for c in q.candidates], image=image)
         a = self.responder(q)
         rec = {"question": text, "question_kind": kind, "role": role, "candidates": [c.mark for c in q.candidates],
                "answer": a.kind, "mark": a.mark, "raw": a.raw, "source": a.source, "rejected": a.attempts}
@@ -291,7 +301,11 @@ class Supervisor:
 
     def _placing(self, state) -> dict:
         p = self.ctx["plan"]
-        return self._run(p.place[1:], "lower, release, retreat", state, "VERIFYING_PLACEMENT")
+        return self._run(p.place[1:-1], "lower and release", state, "RETREATING")
+
+    def _retreating(self, state) -> dict:
+        p = self.ctx["plan"]  # the planner's own collision-checked straight retreat above the released object
+        return self._run(p.place[-1:], "retreat", state, "VERIFYING_PLACEMENT")
 
     def _verifying_placement(self, state) -> dict:
         p = self.ctx["plan"]
@@ -305,9 +319,27 @@ class Supervisor:
             return self._fail(state, "placement", f"re-observation failed: {exc}")
         vs = list(state.get("verifications", [])) + [v]
         if v["pass"]:
-            return {"next": "COMPLETED", "verifications": vs}
+            return {"next": "RETURNING_HOME", "verifications": vs}
         return {**self._fail(state, "placement", v.get("reason") or "placement outside tolerance (xy 10 mm, z 5 mm, tilt 5 deg)"),
                 "verifications": vs}
+
+    def _returning_home(self, state) -> dict:
+        """Once per instruction, after a VERIFIED placement only (failures never move the arm home)."""
+        r = self.tools.return_home()
+        if r["ok"]:
+            return {"next": "VERIFYING_HOME"}
+        if r.get("result") is not None:  # it moved and the executor / safety layer reported a failure
+            return self._fail(state, "execution", f"return HOME: {r['reason']}",
+                              safety_events=list(self.tools.ex.safety_events[-3:]))
+        return {"next": "FAILED", "failure": {"cls": "home", "reason": f"HOME not attempted: {r['reason']}"}}
+
+    def _verifying_home(self, state) -> dict:
+        v = self.tools.verify_home()
+        vs = list(state.get("verifications", [])) + [v]
+        if v["pass"]:
+            return {"next": "COMPLETED", "verifications": vs}
+        return {"next": "FAILED", "verifications": vs, "failure": {"cls": "home", "reason": f"HOME not reached: max joint "
+                f"error {v['max_error_deg']} deg > {v['tolerance_deg']} deg"}}
 
     def _recovering(self, state) -> dict:
         r = state["recover"]
@@ -347,11 +379,16 @@ class Supervisor:
 
 def honest_message(r: dict) -> str:
     s = r["status"]
+    vs = r.get("verifications") or []
+    place = [x for x in vs if x.get("check") == "placement" and x.get("pass")]
+    home = [x for x in vs if x.get("check") == "home"]
+    placed = (f"placed {place[-1]['xy_error_mm']} mm from the planned spot, top {place[-1]['z_error_mm']:+} mm, "
+              f"tilt {place[-1]['tilt_deg']} deg") if place else ""
     if s == "COMPLETED":
-        v = [x for x in r["verifications"] if x.get("check") == "placement"][-1]
-        return (f"Done (verified by the table camera): placed {v['xy_error_mm']} mm from the planned spot, "
-                f"top {v['z_error_mm']:+} mm, tilt {v['tilt_deg']} deg.")
+        return (f"Done (verified by the table camera): {placed}; back at HOME (max joint error "
+                f"{home[-1]['max_error_deg']} deg).")
     if s == "CANCELLED":
         return f"Cancelled: {r['failure']['reason']}."
     f = r.get("failure") or {}
-    return f"Failed ({f.get('cls', '?')}): {f.get('reason', 'unknown')}. I did not report success."
+    pre = f"Placement verified ({placed}), but " if place else ""
+    return f"{pre}Failed ({f.get('cls', '?')}): {f.get('reason', 'unknown')}. I did not report success."

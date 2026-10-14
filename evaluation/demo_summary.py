@@ -16,7 +16,8 @@ from pathlib import Path
 AGENT_OF_STATE = {"UNDERSTANDING": "supervisor/parser (VLM)", "OBSERVING": "perception", "LOCALIZING": "perception (VLM)",
                   "PLANNING_GRASP": "grasp+motion planner", "APPROACHING": "executor", "GRASPING": "executor",
                   "VERIFYING_GRASP": "verifier", "TRANSPORTING": "executor", "PLACING": "executor",
-                  "VERIFYING_PLACEMENT": "verifier", "RECOVERING": "supervisor"}
+                  "VERIFYING_PLACEMENT": "verifier", "RETREATING": "executor", "RETURNING_HOME": "executor",
+                  "VERIFYING_HOME": "verifier", "RECOVERING": "supervisor"}
 
 
 def wilson(k: int, n: int, z: float = 1.96) -> tuple[float, float]:

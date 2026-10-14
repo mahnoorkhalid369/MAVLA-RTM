@@ -1,0 +1,384 @@
+#!/usr/bin/env python3
+"""Demo viewer (optional, read-only): live camera + the agent's latest perception result + live logs.
+
+Runs as its own process with the system Python and ROS 2 (like ros_nodes/camera_viewer.py). It never
+reads stdin and never writes anything the agent reads: closing it cannot affect the robot task.
+
+  image   live table (or wrist) camera at the camera's frame rate, with the masks / ids of the latest
+          perception result on top (one result per observation: the detector does NOT run here)
+  panel   task, supervisor state, target / destination, budgets, pending question, robot / HOME status
+  logs    every event of the active run, formatted by agent.events (same lines as the terminal)
+
+    source /opt/ros/jazzy/setup.bash && export ROS_DOMAIN_ID=42
+    python3 agent/viewer.py                      # window; keys: q close viewer, c camera, arrows / PgUp / PgDn scroll logs
+    python3 agent/viewer.py --snapshot-every 5   # also save the window to <live-dir>/viewer.png every 5 s
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+import threading
+import time
+from collections import deque
+from pathlib import Path
+
+import cv2
+import numpy as np
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from agent.events import format_event  # noqa: E402
+
+W, H = 1600, 900
+IMG_W, IMG_H = 1056, 594
+PANEL_X = IMG_W + 12
+LOG_Y0, STATUS_H = IMG_H + 8, 30
+FONT = cv2.FONT_HERSHEY_SIMPLEX
+BG, FG, MUTED = (32, 28, 24), (235, 235, 230), (160, 160, 150)
+LEVEL_COLOUR = {"info": FG, "warn": (60, 180, 255), "error": (80, 80, 255), "success": (120, 220, 120), "question": (255, 200, 80)}
+TARGET_C, DEST_C, CAND_C = (90, 230, 90), (255, 170, 60), (60, 200, 255)  # BGR: green, blue, orange
+MOTION_STATES = {"APPROACHING", "GRASPING", "TRANSPORTING", "PLACING", "RETREATING", "RETURNING_HOME", "RECOVERING"}
+
+
+def mark_colour(k: int) -> tuple[int, int, int]:
+    hue = (k * 47) % 180
+    c = cv2.cvtColor(np.uint8([[[hue, 200, 230]]]), cv2.COLOR_HSV2BGR)[0, 0]
+    return int(c[0]), int(c[1]), int(c[2])
+
+
+class RunState:
+    """Everything the panel shows, derived only from the run's logged events."""
+
+    def __init__(self) -> None:
+        self.reset("")
+
+    def reset(self, instruction: str) -> None:
+        self.instruction, self.state, self.status = instruction, "-", "WAITING"
+        self.target = self.dest = None  # (mark, world id, frame id)
+        self.question = None  # (text, candidates) while a question waits for the user
+        self.retries, self.budgets_used = {}, {}
+        self.moving, self.home, self.last_plan = False, "PENDING", None
+        self.lines: deque = deque(maxlen=2000)
+
+    def apply(self, e: dict, frame_id: str | None) -> None:
+        k = e.get("kind")
+        if k == "state":
+            self.state = e["state"]
+            if self.state in ("COMPLETED", "FAILED", "CANCELLED"):
+                self.status = self.state
+            elif self.status not in ("COMPLETED", "FAILED", "CANCELLED"):
+                self.status = "RUNNING"
+            if self.state in ("RETURNING_HOME",):
+                self.home = "MOVING"
+        elif k == "localized":
+            self.target = (e.get("object_mark"), e.get("object_id"))
+            self.dest = (e.get("reference_mark"), e.get("reference_id"))
+        elif k == "question":
+            self.question = (e.get("question"), e.get("candidates") or [])
+            self.status = "WAITING FOR USER"
+        elif k == "ask_user":
+            self.question = None
+            self.status = "RUNNING"
+        elif k == "failure":
+            self.budgets_used[e.get("cls")] = f"{e.get('used')}/{e.get('budget')}"
+        elif k == "tool" and e.get("tool") == "execute_start":
+            self.moving = True
+        elif k == "tool" and e.get("tool") == "execute":
+            self.moving = False
+        elif k == "verification" and e.get("check") == "home":
+            self.home = "VERIFIED" if e.get("pass") else "NOT REACHED"
+        elif k == "plan":
+            self.last_plan = e
+        ln = format_event(e)
+        if ln is not None:
+            self.lines.append(ln)
+
+
+class Viewer:
+    def __init__(self, live_dir: Path, snapshot_every: float = 0.0) -> None:
+        self.live_dir, self.snapshot_every = Path(live_dir), snapshot_every
+        self.frames: dict = {}  # camera -> (bgr, stamp)
+        self.fps: dict = {c: deque(maxlen=30) for c in ("table", "wrist")}
+        self.lock = threading.Lock()
+        self.run_file = None
+        self.ev_pos = 0
+        self.rs = RunState()
+        self.perc, self.perc_mtime, self.labels, self.lab_mtime, self.contours = None, 0, None, 0, {}
+        self.perc_updates: deque = deque(maxlen=10)
+        self.camera_mode = "auto"
+        self.scroll = 0
+        self.last_snap = 0.0
+
+    # ------------------------------------------------------------------ inputs (read-only)
+    def on_image(self, cam: str, m) -> None:
+        try:
+            a = np.frombuffer(m.data, np.uint8).reshape(m.height, m.width, -1)[..., :3]
+            bgr = cv2.cvtColor(a, cv2.COLOR_RGB2BGR) if m.encoding.lower().startswith("rgb") else a.copy()
+        except ValueError:
+            return
+        with self.lock:
+            self.frames[cam] = (bgr, time.time())
+            self.fps[cam].append(time.time())
+
+    def poll_files(self) -> None:
+        cur = self.live_dir / "current.json"
+        try:
+            c = json.loads(cur.read_text())
+        except (OSError, ValueError):
+            c = None
+        if c and c.get("events") != self.run_file:
+            self.run_file, self.ev_pos = c.get("events"), 0
+            self.rs.reset(c.get("instruction", ""))
+            self.scroll = 0
+        if self.run_file:
+            try:
+                with open(self.run_file) as f:
+                    f.seek(self.ev_pos)
+                    while True:
+                        line = f.readline()
+                        if not line or not line.endswith("\n"):
+                            break
+                        self.ev_pos = f.tell()
+                        try:
+                            self.rs.apply(json.loads(line), self.perc and self.perc.get("frame_id"))
+                        except ValueError:
+                            pass
+            except OSError:
+                pass
+        p = self.live_dir / "perception.json"
+        try:
+            mt = p.stat().st_mtime
+            if mt != self.perc_mtime:
+                new = json.loads(p.read_text())
+                if not self.perc or new.get("frame_id") != self.perc.get("frame_id"):
+                    self.perc_updates.append(time.time())
+                self.perc, self.perc_mtime = new, mt
+        except (OSError, ValueError):
+            pass
+        lp = self.live_dir / "labels.png"
+        try:
+            mt = lp.stat().st_mtime
+            if mt != self.lab_mtime:
+                lab = cv2.imread(str(lp), cv2.IMREAD_UNCHANGED)
+                if lab is not None:
+                    self.labels, self.lab_mtime = lab, mt
+                    self.contours = {}
+                    for k in np.unique(lab):
+                        if k:
+                            cs, _ = cv2.findContours((lab == k).astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                            self.contours[int(k)] = cs
+        except OSError:
+            pass
+
+    # ---------------------------------------------------------------------- drawing
+    def active_camera(self) -> str:
+        if self.camera_mode != "auto":
+            return self.camera_mode
+        return (self.perc or {}).get("camera", "table")
+
+    def highlight(self) -> dict[int, tuple]:
+        """mark -> (colour, label) for target / destination / question candidates in the shown result."""
+        out = {}
+        marks = (self.perc or {}).get("marks", {})
+        by_world = {v.get("object_id"): int(k) for k, v in marks.items() if v.get("object_id") is not None}
+        for sel, col, name in ((self.rs.target, TARGET_C, "TARGET"), (self.rs.dest, DEST_C, "DESTINATION")):
+            if sel and sel[1] in by_world:
+                out[by_world[sel[1]]] = (col, name)
+        if self.rs.question:
+            for k in self.rs.question[1]:
+                out.setdefault(int(k), (CAND_C, "?"))
+        return out
+
+    def draw_image(self, canvas) -> None:
+        cam = self.active_camera()
+        with self.lock:
+            fr = self.frames.get(cam)
+        if fr is None:
+            canvas[0:IMG_H, 0:IMG_W] = (20, 20, 20)
+            cv2.putText(canvas, f"waiting for the {cam} camera ...", (40, IMG_H // 2), FONT, 0.8, MUTED, 2)
+            return
+        img = fr[0].copy()
+        h, w = img.shape[:2]
+        perc = self.perc or {}
+        if self.labels is not None and perc.get("camera") == cam and self.labels.shape[:2] == (h, w):
+            hl = self.highlight()
+            over = img.copy()
+            for k in self.contours:
+                over[self.labels == k] = mark_colour(k)
+            img = cv2.addWeighted(over, 0.35, img, 0.65, 0)
+            for k, cs in self.contours.items():
+                col, name = hl.get(k, (mark_colour(k), None))
+                cv2.drawContours(img, cs, -1, col, 4 if name else 1)
+                x, y, bw, bh = cv2.boundingRect(np.vstack(cs))
+                info = perc.get("marks", {}).get(str(k), {})
+                d = info.get("description") or {}
+                tag = f"{k}" + (f" {name}" if name and name != "?" else "")
+                cv2.rectangle(img, (x, max(0, y - 22)), (x + 12 * len(tag) + 6, y), (0, 0, 0), -1)
+                cv2.putText(img, tag, (x + 3, y - 5), FONT, 0.55, col if name else (255, 255, 255), 1 + bool(name), cv2.LINE_AA)
+        canvas[0:IMG_H, 0:IMG_W] = cv2.resize(img, (IMG_W, IMG_H), interpolation=cv2.INTER_AREA)
+        now = time.time()
+        f = self.fps[cam]
+        fps = (len(f) - 1) / (f[-1] - f[0]) if len(f) > 1 and f[-1] > f[0] else 0.0
+        age = f"{now - perc['time']:.0f} s ago" if perc.get("time") else "none yet"
+        txt = (f"{cam} camera live {fps:4.1f} fps | detections: frame {perc.get('frame_id', '-')} ({age}, "
+               f"{len(self.perc_updates)} updates this run) | YOLO runs only when the agent observes")
+        cv2.rectangle(canvas, (0, IMG_H - 26), (IMG_W, IMG_H), (0, 0, 0), -1)
+        cv2.putText(canvas, txt, (8, IMG_H - 8), FONT, 0.45, (220, 220, 220), 1, cv2.LINE_AA)
+
+    def _obj_line(self, sel, label) -> list[tuple]:
+        if not sel or sel[0] is None:
+            return [(f"{label}: -", MUTED)]
+        marks = (self.perc or {}).get("marks", {})
+        by_world = {v.get("object_id"): k for k, v in marks.items()}
+        info = marks.get(str(by_world.get(sel[1], sel[0])), {})
+        d = info.get("description") or {}
+        c = info.get("centre") or [0, 0, 0]
+        s = info.get("score")
+        return [(f"{label}: object {sel[0]} (world id {sel[1]})", TARGET_C if label == "TARGET" else DEST_C),
+                (f"  {d.get('colour', '')} {d.get('name', '')}"[:44], FG),
+                (f"  at x {c[0] * 1000:+.0f}, y {c[1] * 1000:+.0f}, z {c[2] * 1000:.0f} mm" + (f", conf {s:.2f}" if s else ""), MUTED)]
+
+    def draw_panel(self, canvas) -> None:
+        x, y = PANEL_X, 28
+        rs = self.rs
+
+        def put(t, col=FG, scale=0.55, th=1, dy=24):
+            nonlocal y
+            cv2.putText(canvas, t, (x, y), FONT, scale, col, th, cv2.LINE_AA)
+            y += dy
+        put("CURRENT TASK", MUTED, 0.5)
+        words, line = (rs.instruction or "(waiting for an instruction)").split(), ""
+        for wd in words:
+            if len(line) + len(wd) > 40:
+                put(line, FG, 0.6, 1)
+                line = ""
+            line += wd + " "
+        put(line, FG, 0.6, 1, 34)
+        put("SUPERVISOR STATE", MUTED, 0.5)
+        put(rs.state, LEVEL_COLOUR["success"] if rs.state == "COMPLETED" else FG, 0.75, 2, 36)
+        for t, c in self._obj_line(rs.target, "TARGET") + self._obj_line(rs.dest, "DESTINATION"):
+            put(t, c, 0.5, 1, 22)
+        y += 8
+        if rs.last_plan:
+            g = rs.last_plan.get("grasp") or {}
+            put(f"grasp yaw {g.get('yaw_deg')} deg, width {g.get('width_mm')} mm, h {g.get('height_mm')} mm", MUTED, 0.45, 1, 22)
+        if rs.budgets_used:
+            put("retries used: " + ", ".join(f"{k} {v}" for k, v in rs.budgets_used.items()), LEVEL_COLOUR["warn"], 0.45, 1, 22)
+        if rs.question:
+            y += 6
+            put("QUESTION (answer in the terminal):", CAND_C, 0.5, 2)
+            put(rs.question[0][:46], CAND_C, 0.45, 1, 20)
+            put(f"candidates: {rs.question[1]}", CAND_C, 0.45, 1, 20)
+        y = IMG_H - 50
+        put("outline: TARGET  DESTINATION  candidates", MUTED, 0.42, 1, 0)
+        cv2.line(canvas, (x + 72, IMG_H - 46), (x + 128, IMG_H - 46), TARGET_C, 3)
+        cv2.line(canvas, (x + 136, IMG_H - 46), (x + 236, IMG_H - 46), DEST_C, 3)
+        cv2.line(canvas, (x + 244, IMG_H - 46), (x + 330, IMG_H - 46), CAND_C, 3)
+
+    def draw_logs(self, canvas) -> None:
+        y0, y1 = LOG_Y0, H - STATUS_H - 4
+        cv2.putText(canvas, "LIVE AGENT LOGS" + ("  (scrolled: End to follow)" if self.scroll else ""), (10, y0 + 14), FONT, 0.5, MUTED, 1)
+        n = (y1 - y0 - 24) // 19
+        lines = list(self.rs.lines)
+        end = max(0, len(lines) - self.scroll)
+        for i, ln in enumerate(lines[max(0, end - n):end]):
+            cv2.putText(canvas, str(ln)[:190], (10, y0 + 38 + 19 * i), FONT, 0.45, LEVEL_COLOUR.get(ln.level, FG), 1, cv2.LINE_AA)
+
+    def draw_status(self, canvas) -> None:
+        rs = self.rs
+        cv2.rectangle(canvas, (0, H - STATUS_H), (W, H), (12, 12, 12), -1)
+        col = {"COMPLETED": LEVEL_COLOUR["success"], "FAILED": LEVEL_COLOUR["error"], "CANCELLED": LEVEL_COLOUR["warn"],
+               "WAITING FOR USER": CAND_C}.get(rs.status, FG)
+        items = [(f"Task: {rs.status}", col), (f"Robot: {'MOVING' if rs.moving else 'STILL'}", FG),
+                 (f"HOME: {rs.home}", LEVEL_COLOUR["success"] if rs.home == "VERIFIED" else FG),
+                 (f"camera view: {self.active_camera()} ({self.camera_mode})", MUTED), ("keys: q close viewer | c camera | arrows/PgUp/PgDn/End logs", MUTED)]
+        x = 10
+        for t, c in items:
+            cv2.putText(canvas, t, (x, H - 9), FONT, 0.5, c, 1, cv2.LINE_AA)
+            x += cv2.getTextSize(t, FONT, 0.5, 1)[0][0] + 28
+
+    def render(self) -> np.ndarray:
+        canvas = np.full((H, W, 3), BG, np.uint8)
+        self.draw_image(canvas)
+        self.draw_panel(canvas)
+        cv2.line(canvas, (0, IMG_H + 2), (W, IMG_H + 2), (70, 70, 70), 1)
+        self.draw_logs(canvas)
+        self.draw_status(canvas)
+        return canvas
+
+    def key(self, k: int) -> bool:
+        """False = close the viewer."""
+        if k in (ord("q"), 27):
+            return False
+        if k == ord("c"):
+            self.camera_mode = {"auto": "table", "table": "wrist", "wrist": "auto"}[self.camera_mode]
+        elif k in (82, 0x260000, ord("k")):  # up
+            self.scroll = min(self.scroll + 1, max(0, len(self.rs.lines) - 1))
+        elif k in (84, 0x280000, ord("j")):  # down
+            self.scroll = max(0, self.scroll - 1)
+        elif k in (85, 0x210000):  # page up
+            self.scroll = min(self.scroll + 10, max(0, len(self.rs.lines) - 1))
+        elif k in (86, 0x220000):  # page down
+            self.scroll = max(0, self.scroll - 10)
+        elif k in (87, 0x230000):  # end
+            self.scroll = 0
+        return True
+
+    def maybe_snapshot(self, canvas) -> None:
+        if self.snapshot_every > 0 and time.time() - self.last_snap >= self.snapshot_every:
+            cv2.imwrite(str(self.live_dir / "viewer.png"), canvas)
+            self.last_snap = time.time()
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--live-dir", default=str(ROOT / "out/demo/live"))
+    ap.add_argument("--snapshot-every", type=float, default=0.0, help="save the window to <live-dir>/viewer.png every N s")
+    ap.add_argument("--no-window", action="store_true", help="no window (with --snapshot-every: headless check)")
+    a, _ = ap.parse_known_args()
+    import rclpy
+    from rclpy.executors import SingleThreadedExecutor
+    from rclpy.qos import qos_profile_sensor_data
+    from sensor_msgs.msg import Image
+
+    v = Viewer(Path(a.live_dir), a.snapshot_every)
+    rclpy.init()
+    node = rclpy.create_node("demo_viewer")
+    node.create_subscription(Image, "table_camera/color/image_raw", lambda m: v.on_image("table", m), qos_profile_sensor_data)
+    node.create_subscription(Image, "camera/color/image_raw", lambda m: v.on_image("wrist", m), qos_profile_sensor_data)
+    ex = SingleThreadedExecutor()
+    ex.add_node(node)
+    threading.Thread(target=ex.spin, daemon=True).start()
+    title = "Multi-agent robot demo (read-only viewer)"
+    if not a.no_window:
+        cv2.namedWindow(title, cv2.WINDOW_NORMAL)
+        cv2.resizeWindow(title, W, H)
+    try:
+        while True:
+            v.poll_files()
+            canvas = v.render()
+            v.maybe_snapshot(canvas)
+            if a.no_window:
+                time.sleep(0.1)
+                continue
+            cv2.imshow(title, canvas)
+            k = cv2.waitKeyEx(66)
+            if k != -1 and not v.key(k):
+                break
+            if cv2.getWindowProperty(title, cv2.WND_PROP_VISIBLE) < 1:
+                break
+    except KeyboardInterrupt:
+        pass
+    finally:
+        cv2.destroyAllWindows()
+        ex.shutdown()
+        node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
