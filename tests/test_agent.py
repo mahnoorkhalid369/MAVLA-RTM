@@ -193,6 +193,9 @@ class StubTools:
     def park_for_view(self, xy):
         return {"ok": True}
 
+    def assume_placed(self, plan):
+        pass
+
     def perceive(self, camera):
         ids = {1: self.world.observe(geom(0.55, 0.15, 0.04), None), 2: self.world.observe(geom(0.55, 0.45, 0.05), None)}
         return SimpleNamespace(marks={1: None, 2: None}, measured={1: geom(0.55, 0.15, 0.04), 2: geom(0.55, 0.45, 0.05)},
@@ -292,3 +295,15 @@ def test_parse_inconsistent_task_gets_one_retry():
     t = Roles(vlm).parse("put a on b")
     assert t.task == "pick_place" and t.object.anchor is None
     assert "pick_place" in vlm.calls[1]  # the retry carries the validation error
+
+
+def test_park_pose_choice_counts_blocked_camera_rays():
+    t, _ = tools_with([])
+    from control.robot import ARM_HOME
+    executed = []
+    t.bridge = SimpleNamespace(q=lambda: np.asarray(ARM_HOME, float))
+    t.execute = lambda steps, label: executed.append(steps[0].label) or SimpleNamespace(ok=True)
+    r = t.park_for_view(None)
+    assert r["ok"] and r["blocked"] == min(x["blocked"] for x in r["tried"] if x["path_free"])
+    r = t.park_for_view((0.6, 0.25))  # a point near the camera's view centre must end unblocked
+    assert r["ok"] and r["blocked"] == 0

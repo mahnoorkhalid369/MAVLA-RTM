@@ -31,7 +31,7 @@ class Measured:
     grasp_yaw_deg: float
     grasp_width: float
     symmetry_deg: float
-    tilt_deg: float  # top-face normal vs vertical
+    tilt_deg: float | None  # top-face normal vs vertical; None if no top face is visible
     points: int
     mask_pixels: int
     excluded_robot: int = 0
@@ -129,21 +129,26 @@ def measure(mask: np.ndarray, depth: np.ndarray, K, T: np.ndarray, robot: RobotV
     top_z = float(np.percentile(pts[:, 2], 98))
     layer = pts[:, 2] > top_z - TOP_LAYER
     face = pts[layer & (nz > UP_NORMAL)]  # the upward-facing top surface (side faces excluded)
-    if len(face) < 10:
-        face = pts[layer]
-    yaw, fp = footprint_yaw(pts[layer][:, :2])
-    centre_xy, ext = _rect_frame(pts[layer][:, :2], yaw)
-    g_yaw, g_width, sym = grasp_pose(pts[layer][:, :2], yaw, fp)
+    top_visible = len(face) >= 10
+    # outline from the top face when it is visible (the upper side-face points lean towards the camera)
+    xy = face[:, :2] if top_visible else pts[layer][:, :2]
+    yaw, fp = footprint_yaw(xy)
+    centre_xy, ext = _rect_frame(xy, yaw)
+    g_yaw, g_width, sym = grasp_pose(xy, yaw, fp)
     # the eroded mask edge lost MASK_ERODE_PX pixels on each side: add that width back (pixel size at the face)
-    cam_dist = float(np.median(np.linalg.norm(face - T[:3, 3], axis=1)))
+    cam_dist = float(np.median(np.linalg.norm(pts[layer] - T[:3, 3], axis=1)))
     pad = 2 * MASK_ERODE_PX * cam_dist / K[0]
     ext, fp, g_width = ext + pad, (fp[0] + pad, fp[1] + pad), g_width + pad
+    if yaw is None:  # round: a percentile range under-measures a disc; use the radius around the centre
+        d = 2 * float(np.percentile(np.linalg.norm(xy - centre_xy, axis=1), 99)) + pad
+        ext, fp, g_width = np.array([d, d]), (d, d), d
     bottom = float(np.percentile(pts[:, 2], 2))
     support_z = GROUND_Z if bottom < GROUND_Z + SUPPORT_SNAP else bottom  # refined by snap_supports
     height = top_z - support_z
-    P = face - face.mean(axis=0)  # top-face tilt: plane fit of the upward-facing points
-    normal = np.linalg.svd(P, full_matrices=False)[2][-1] if len(face) >= 3 else np.array([0, 0, 1.0])
-    tilt = float(np.degrees(np.arccos(min(1.0, abs(normal[2])))))
+    tilt = None  # unknown when the top face is hidden (never guessed)
+    if top_visible:  # plane fit of the upward-facing points
+        normal = np.linalg.svd(face - face.mean(axis=0), full_matrices=False)[2][-1]
+        tilt = float(np.degrees(np.arccos(min(1.0, abs(normal[2])))))
     return Measured([float(centre_xy[0]), float(centre_xy[1]), float(support_z + height / 2)], top_z, float(height),
                     float(support_z), yaw, [float(ext[0]), float(ext[1])], [float(max(fp)), float(min(fp))], float(g_yaw),
                     float(g_width), float(sym), tilt, int(len(pts)), n_mask, int(rob.sum()), int(fix.sum()), bottom), "ok"

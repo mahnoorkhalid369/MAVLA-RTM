@@ -16,7 +16,7 @@ import numpy as np
 
 from agent.config import FIXTURES, Relations, Tolerances, unit
 from agent.geometry import RobotVolume, measure, snap_supports
-from agent.somark import crop, draw_marks
+from agent.somark import crop, draw_marks, draw_names
 from agent.world import WorldModel
 from control.collision import Box, CollisionChecker
 from control.kinematics import Kinematics
@@ -97,6 +97,8 @@ class Tools:
             return
         d = self.roles.describe(obs.som, list(obs.marks))
         obs.descriptions = {o.id: o.model_dump(exclude={"id"}) for o in d.objects}
+        img = draw_names(obs.som, obs.marks, {k: v.get("name", "") for k, v in obs.descriptions.items()})
+        cv2.imwrite(str(self.run_dir / "images" / f"{obs.frame_id}_names.jpg"), cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
 
     def update_world(self, obs: Observation) -> list[dict]:
         """Store every measured object; returns neighbours that moved (whole-scene re-perception)."""
@@ -164,6 +166,9 @@ class Tools:
                         q_start: np.ndarray, yaw_offset_deg: float = 0.0) -> PickPlan:
         o = self.world.objects[object_id]
         g = o.geometry
+        for oid in (object_id, reference_id if relation == "on" else None):
+            if oid is not None and self.world.objects[oid].geometry["tilt_deg"] is None:
+                raise PlanningError(f"object {oid}: its top face is not visible, so its pose is not measured well enough")
         planner = SkillPlanner(self.kin, collision=CollisionChecker(self.obstacles()))
         width = g["grasp_width"]
         # extent along the fingers' faces = the footprint side that is not the grasp width
@@ -240,30 +245,54 @@ class Tools:
         self.log("verification", **v)
         return v
 
-    def park_for_view(self, target_xy) -> dict:
-        """Move the arm to a pose that leaves the table camera's view of target_xy clear (collision-checked)."""
+    PARK_J1_DEG = (170.0, 135.0, -135.0, 90.0, -90.0, -170.0, 45.0, -45.0, 0.0)  # ARM_HOME turned about J1
+
+    @staticmethod
+    def workspace_points() -> list:
+        """Floor points on the reliable reach ring (0.45-0.90 m), every 30 deg, for the first look."""
+        return [(r * np.cos(np.radians(a)), r * np.sin(np.radians(a))) for r in (0.5, 0.7, 0.9) for a in range(0, 360, 30)]
+
+    def park_for_view(self, target_xy=None) -> dict:
+        """Move the arm to a collision-free pose (ARM_HOME turned about J1) from which the table camera
+        sees target_xy (must be unblocked), or, with target_xy None, the pose blocking the fewest
+        workspace points. The camera ray test uses the robot's collision spheres (+2 cm)."""
         q0 = self.bridge.q()
         cam = table_camera_pose()[:3, 3]
         checker = CollisionChecker(self.obstacles())
-        tried = []
-        for j1 in (170.0, 90.0, -90.0, 0.0, -170.0):
+        targets = [tuple(target_xy)] if target_xy is not None else self.workspace_points()
+        tried, best = [], None
+        for j1 in self.PARK_J1_DEG:
             q = np.asarray(ARM_HOME, float).copy()
             q[0] = np.radians(j1)
             c, r, idx, names = checker.spheres(q)
-            p = np.array([target_xy[0], target_xy[1], 0.05])
-            seg = p - cam
-            t = np.clip(((c - cam) @ seg) / (seg @ seg), 0, 1)
-            dist = np.linalg.norm(cam + t[:, None] * seg - c, axis=1)
-            blocked = bool(np.any(dist < r + 0.02))
+            blocked = 0
+            for x, y in targets:
+                seg = np.array([x, y, 0.03]) - cam
+                t = np.clip(((c - cam) @ seg) / (seg @ seg), 0, 1)
+                blocked += int(np.any(np.linalg.norm(cam + t[:, None] * seg - c, axis=1) < r + 0.02))
             traj = joint_move(self.kin, q0, q, ARM_SPEED)
             free = checker.check_path(traj.positions).ok
-            tried.append({"j1": j1, "view_blocked": blocked, "path_free": free})
-            if not blocked and free:
-                from control.skills import MoveStep
-                res = self.execute([MoveStep(traj, f"park J1 {j1:+.0f} for a clear view")], "park")
-                return {"ok": res.ok, "j1": j1, "tried": tried}
-        self.log("tool", tool="park_for_view", ok=False, tried=tried)
-        return {"ok": False, "tried": tried}
+            tried.append({"j1": j1, "blocked": blocked, "path_free": free})
+            if free and (best is None or blocked < best[0]):
+                best = (blocked, j1, traj)
+        if best is None or (target_xy is not None and best[0] > 0):
+            self.log("tool", tool="park_for_view", ok=False, tried=tried)
+            return {"ok": False, "tried": tried}
+        from control.skills import MoveStep
+        blocked, j1, traj = best
+        res = self.execute([MoveStep(traj, f"park J1 {j1:+.0f} (view blocked for {blocked}/{len(targets)} points)")], "park")
+        return {"ok": res.ok, "j1": j1, "blocked": blocked, "tried": tried}
+
+    def assume_placed(self, plan: PickPlan) -> None:
+        """Before re-observing: count the released object as an obstacle at its PLANNED pose (it is no
+        longer in the gripper; its measured pose follows from the re-observation)."""
+        o = self.world.objects[plan.object_id]
+        g = dict(o.geometry)
+        g["centre"] = list(plan.target_centre)
+        g["support_z"] = plan.target_top - plan.held.height
+        g["top_z"] = plan.target_top
+        o.geometry, o.status = g, "on_surface"
+        self.held_box, self.world.holding = None, None
 
     def verify_placement(self, plan: PickPlan) -> dict:
         """Re-observe the whole table (whole-scene re-perception) and check the placed object's pose."""
@@ -283,8 +312,10 @@ class Tools:
         else:
             g = obs.measured[best]
             xy, dz, tilt = best_d, g["top_z"] - plan.target_top, g["tilt_deg"]
+            if tilt is None:  # top face not visible: cannot verify the pose
+                tilt = float("inf")
             v.update({"measured_centre_mm": [round(x * 1000, 1) for x in g["centre"]], "xy_error_mm": round(xy * 1000, 1),
-                      "z_error_mm": round(dz * 1000, 1), "tilt_deg": round(tilt, 2),
+                      "z_error_mm": round(dz * 1000, 1), "tilt_deg": None if tilt == float("inf") else round(tilt, 2),
                       "pass": xy <= self.tol.xy_m and abs(dz) <= self.tol.z_m and tilt <= self.tol.tilt_deg})
             o.geometry, o.status = g, "on_surface"
         self.describe(obs)

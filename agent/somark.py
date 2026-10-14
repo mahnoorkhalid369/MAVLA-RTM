@@ -45,3 +45,17 @@ def crop(rgb: np.ndarray, mask: np.ndarray, margin: float = 0.6, min_side: int =
     if s > 1.0:
         out = cv2.resize(out, None, fx=s, fy=s, interpolation=cv2.INTER_CUBIC)
     return out
+
+
+def draw_names(som: np.ndarray, masks: dict[int, np.ndarray], names: dict[int, str]) -> np.ndarray:
+    """For the report: the set-of-mark image with the VLM's name for each mark under the object."""
+    out = som.copy()
+    for k, m in masks.items():
+        ys, xs = np.nonzero(m)
+        text = f"{k}: {names.get(k, '?')}"[:40]
+        (w, h), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
+        u0 = int(np.clip(xs.mean() - w // 2, 0, out.shape[1] - w - 4))
+        v = int(min(ys.max() + h + 6, out.shape[0] - 4))
+        cv2.rectangle(out, (u0 - 2, v - h - 3), (u0 + w + 2, v + 3), (0, 0, 0), -1)
+        cv2.putText(out, text, (u0, v), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 0), 1, cv2.LINE_AA)
+    return out

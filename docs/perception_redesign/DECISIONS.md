@@ -186,3 +186,14 @@ Design approved with changes; revision 1 kept as `ARCHITECTURE_rev1_2026-10-14.m
   3 s of sim time before the first motion.
 - **YOLO round budgets:** round 1 = 1.75 h (time-limited Ultralytics training, epochs fitted to the
   time, cosine LR), leaving <= 2.25 h for rounds 2-3 within the 4 h cap.
+- **Geometry checked on real simulator depth (today's capture, ground-truth masks; ground truth used
+  only to MEASURE the error, `out/demo/2026-10-14/geometry_check_today.json`):** before -> after the
+  method fixes, boxes: centre xy 3-7 -> 1.7-4.6 mm, width +0.5..+3.8 -> -1.8..+1.0 mm; cylinders width
+  -4..-5 -> -0.1..+0.9 mm (thin 25 mm cylinder -4.4 mm); top +1.5 mm on every object (same sign:
+  likely my offline intrinsics/pose for the capture; the live run uses camera_info). Fixes are method
+  changes, not tuned constants: outline from the up-facing top-face pixels (upper side-face points
+  leaned the centre towards the camera); round footprints measured by radius (a percentile range
+  under-measures a disc). Hidden top face (blue cube under the lime cube: centre 25 mm off) -> tilt
+  is now `None` (unknown, never guessed); planning refuses to pick it or place on it, and placement
+  verification fails if the placed object's top face is not visible. These do not loosen any
+  tolerance; they make an unmeasurable case fail instead of passing on a guess.

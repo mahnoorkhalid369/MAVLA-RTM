@@ -138,7 +138,7 @@ class Supervisor:
         return {"next": "OBSERVING", "task": task.model_dump()}
 
     def _observing(self, state) -> dict:
-        p = self.tools.park_for_view(self.ctx.get("view_xy", (0.0, 0.25)))
+        p = self.tools.park_for_view(None)  # whole workspace: least-blocking pose
         if not p["ok"]:
             return self._fail(state, "perception", "no collision-free pose that leaves the table camera's view clear")
         try:
@@ -209,7 +209,6 @@ class Supervisor:
         except PlanningError as exc:
             return self._fail(state, "planning", str(exc))
         self.ctx["plan"] = plan
-        self.ctx["view_xy"] = tuple(plan.target_centre[:2])
         summary = {"grasp": plan.grasp, "target_centre_mm": [round(v * 1000, 1) for v in plan.target_centre],
                    "target_top_mm": round(plan.target_top * 1000, 1), "relation": plan.relation,
                    "held": {"height_mm": round(plan.held.height * 1000, 1), "grip_depth_mm": round(plan.held.grip_depth * 1000, 1),
@@ -255,6 +254,7 @@ class Supervisor:
 
     def _verifying_placement(self, state) -> dict:
         p = self.ctx["plan"]
+        self.tools.assume_placed(p)
         park = self.tools.park_for_view(p.target_centre[:2])
         if not park["ok"]:
             return self._fail(state, "placement", "no pose with a clear camera view of the placed object")
