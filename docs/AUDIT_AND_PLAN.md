@@ -325,3 +325,8 @@ Active work is tracked in `docs/perception_redesign/PROGRESS.md` (read first), d
   (synthetic dataset) in progress (train 0-3999 of 6000 rendered, measured 07:57 UTC); Milestones 5,
   7, 8, 9, 10 are re-planned in ARCHITECTURE.md §12 (estimates). Frozen manipulation baseline A
   unchanged (manifest verified 2026-10-14).
+
+- 2026-10-14 (later): architecture revision 2 after review (`docs/perception_redesign/ARCHITECTURE.md`;
+  rev 1 kept): wrong-object confirmation and a "confident wrong resolution" metric (≤ 2 %), statistics
+  with trial counts and Wilson intervals, mass estimate as a plausibility check until validated,
+  no stopgap demo, joint efforts via a new sim entry point importing the frozen code.

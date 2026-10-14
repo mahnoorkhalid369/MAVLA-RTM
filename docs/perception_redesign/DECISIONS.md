@@ -89,3 +89,25 @@ coordinates (not metric, not verifiable).
 **Decision.** Prefer Apache-2.0 / MIT / BSD or the Gemma licence for models; AGPL or research-only
 only if a permissive option is clearly worse on measured results, recorded here with the restriction.
 Phase 2 compares a permissive segmentation model with Ultralytics YOLO-seg (AGPL-3.0) before deciding.
+
+## 2026-10-14 — Architecture revision 2 (review decisions)
+Design approved with changes; revision 1 kept as `ARCHITECTURE_rev1_2026-10-14.md`.
+- **Wrong-object protection.** §6's checks only show the plan was executed, not that the right
+  object was chosen. Added: an independent confirmation call (`confirm_object`: crop + reference text
+  only, never the resolver's answer) before any motion, disagreement → ask the user; a "confident
+  wrong resolution" metric with threshold ≤ 2 % on ≥ 400 references; a failure row naming the
+  confirmation check as the detector. Rejected: relying on post-hoc verification (cannot detect it).
+- **Held object survives robot exclusion** (its tool-frame box, as in the collision model).
+- **Statistics.** Minimum trials per metric and per instruction type, 95 % Wilson intervals,
+  thresholds for naming (≥ 90 %) and tool choice (≥ 95 %), reference accuracy (≥ 97 %) tied to task
+  success (a place needs two correct references: ≈ p²). The interval column states what each trial
+  count can show (computed).
+- **Mass estimate = plausibility check only** (light vs over the payload limit) until its accuracy is
+  measured on 0.1 kg and 3 kg (≥ 10 lifts each), because the simulated gripper's internal forces act on
+  the arm's joints (measured, AUDIT §6.2).
+- **Whole-scene re-perception after each sub-task**; **visibility reasoning**: occluded / out of view
+  give no evidence; `missing` only after 2 "visible but absent" observations.
+- **Joint efforts:** a new sim entry point that imports the frozen code (no copy, no baseline change).
+- **Recovery budgets and tolerances** approved as proposed. **No stopgap demo.**
+- **Known limitation recorded:** no Epson CAD → simplified arm in robot exclusion and in the training
+  images; sim-to-real impact and mitigations in ARCHITECTURE §13.

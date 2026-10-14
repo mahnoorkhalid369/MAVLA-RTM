@@ -1,6 +1,14 @@
-# VT6L multi-agent manipulation system — architecture (design, 2026-10-14)
+# VT6L multi-agent manipulation system — architecture (design, revision 2, 2026-10-14)
 
-Status: **design for review, nothing implemented.** Evidence labels: **measured** (we ran it),
+Status: **design for review, nothing implemented.** Revision 1 (approved with changes) is kept as
+`ARCHITECTURE_rev1_2026-10-14.md`.
+
+**Changes in revision 2** (review of 2026-10-14): wrong-object protection — confirmation step,
+"confident wrong resolution" metric, failure row (§1.4, §1.5, §2, §3, §4, §10); held object kept
+through robot exclusion (§3); trial counts, confidence intervals and thresholds tied to task
+success (§4, §10); mass estimate is a plausibility check until validated (§6); whole-scene
+re-perception after each sub-task (§3, §6); visibility reasoning for "missing" (§3); CAD /
+sim-to-real limitation and decisions (§9, §11, §13). Evidence labels: **measured** (we ran it),
 **from files** (read in the code / docs), **unverified** (not checked; estimates are marked).
 Supersedes the agent design implied by `ros_nodes/vlm_agent_node.py`; the frozen manipulation
 baseline (`docs/baselines/manipulation_A_2026-10-14/`) is reused, never modified.
@@ -86,6 +94,8 @@ Reference: {text, resolved_id | None, candidates[], confidence, needs_clarificat
 
 | Failure | Detected by | Handled by |
 |---|---|---|
+| **Wrong object resolved** (a confident, wrong reference) | Perception's **confirmation check** (§3 step 8): an independent VLM call on the chosen object's crop, before any motion; the §6 checks cannot catch it (they verify the plan was executed, not that the plan targets the right object) | Disagreement or "unsure" → Supervisor asks the user (counts against the question limit); no motion until resolved. Residual risk measured by the "confident wrong resolution" rate (§4, §10) |
+| Neighbour disturbed during a sub-task | Perception's whole-scene re-perception after the sub-task (§3 step 9) | Memory updated; if the disturbed object is in a later sub-task, the Supervisor re-plans that sub-task; logged |
 | Malformed / schema-invalid VLM output | VLM interface (validation) | 1 retry with the error, then the calling agent fails with class `perception` (descriptions) or `understanding` (plan) |
 | Instruction not understood / ambiguous reference | Supervisor / Perception (Reference.needs_clarification) | Supervisor asks the user (≤ N questions, timeout) → else FAILED (reason) |
 | Object not in view / memory | Perception (unresolved) | Exploration (bounded views) → else ask user → else FAILED |
@@ -105,14 +115,14 @@ Reference: {text, resolved_id | None, candidates[], confidence, needs_clarificat
 | UNDERSTANDING | Supervisor (VLM role) | OBSERVING; or ask user; FAILED |
 | OBSERVING | Perception (table camera, + wrist if needed) | LOCALIZING if all references resolved; else SEARCHING |
 | SEARCHING | Exploration (+ Perception per view) | LOCALIZING; ask user; FAILED |
-| LOCALIZING | Perception (fresh measurement of target / reference) | PLANNING_GRASP |
+| LOCALIZING | Perception (fresh measurement of target / reference) + **confirmation check** of each resolved object (§3 step 8) | PLANNING_GRASP; ask user on disagreement |
 | PLANNING_GRASP | Grasp planner + Motion planner | APPROACHING; RECOVERING |
 | APPROACHING | Execution (hover, descend) | GRASPING; RECOVERING |
 | GRASPING | Execution (close) | VERIFYING_GRASP |
 | VERIFYING_GRASP | Verify (stall + lift + re-observation + mass) | TRANSPORTING; RECOVERING |
 | TRANSPORTING | Motion planner + Execution (carry) | PLACING |
 | PLACING | Motion planner (placement pose from §5) + Execution (lower, release, retreat) | VERIFYING_PLACEMENT |
-| VERIFYING_PLACEMENT | Verify (re-observation) | next sub-task / COMPLETED; RECOVERING |
+| VERIFYING_PLACEMENT | Verify (re-observation) + Perception (whole-scene re-perception, §3 step 9) | next sub-task / COMPLETED; RECOVERING |
 | RECOVERING | Verify/recover (+ the agent that owns the retried step) | the retried state; FAILED |
 | COMPLETED / FAILED / CANCELLED | Supervisor (report with evidence) | IDLE |
 
@@ -124,6 +134,7 @@ Reference: {text, resolved_id | None, candidates[], confidence, needs_clarificat
 | `describe_objects(frame_id)` | numbered set-of-mark image → {mask_id: Description} (strict JSON) | `vlm/model.py: VisionLanguageModel.generate` | prompt, schema, set-of-mark rendering, retry logic |
 | `update_memory(observation, descriptions)` | → object_id per mask (match by 3-D position / footprint / height, description as tie-breaker) | idea of `perception/world_memory.py: observe` (distance + height gates) | new memory module: persistent ids, descriptions, uncertainty, no colour lists |
 | `resolve_reference(text, frame)` | → Reference {resolved_id \| None, candidates, needs_clarification} | VLM | prompt over the numbered image + memory summary |
+| `confirm_object(object_id, reference_text)` | crop of the object (mask outline, context margin) + the instruction's reference text → {match: yes \| no \| unsure, reason} | `VisionLanguageModel.generate` | independent "verifier" role: sees only the crop and the reference text, never the resolver's answer or reasoning |
 | `propose_views(reference)` / `look(view)` | → [View] scored / Observation | `vlm_agent_node.py: look / explore` view logic, `control/robot.py: VIEW_POSES` | coverage map, reachability + collision scoring, view ranking hook for the VLM |
 | `plan_grasp(object_id)` | → GraspPlan | `control/skills.py: hover / grasp` geometry (yaw symmetry, `fingertip_below_tcp`, contact length) | adapter from ObjectRecord.geometry (replaces the catalogue's `grasp_for`) |
 | `plan_place(object_id, relation, reference_id, frame)` | → PlacePlan {pose, yaw} or failure | `SkillPlanner.place`, `CollisionChecker` | relation geometry (§5) |
@@ -148,17 +159,39 @@ Reference: {text, resolved_id | None, candidates[], confidence, needs_clarificat
    geometry at the current joint state (`control/collision.py` spheres / boxes, inflated 1 cm) or
    inside configured fixture volumes (camera stand, microphone: physical configuration) are removed;
    a mask that is mostly robot / fixture is dropped with the reason logged. No fixed xy circles.
+   **Held object:** while `robot.holding` is set, the held object's volume (its measured box in the
+   tool frame — the same body `CollisionChecker.held_box_in_tool` adds to the collision model) is
+   **excluded from the exclusion**: points inside it are kept and attributed to the held object, so
+   the lift check can see it in the gripper.
 5. **Description**: the frame with numbered mask outlines (set-of-mark) → one VLM call per frame →
    strict JSON `{"objects": [{"mask_id": int, "name": str, "colour": str, "shape": str,
    "material": str, "notes": str}]}`; ids must match the drawn ids; retry once on invalid JSON,
    else the frame is "undescribed" (geometry is still stored).
 6. **World memory**: match each measured object to a record (3-D gates on centre / height /
    footprint; descriptions only break ties), update geometry with uncertainty, append the
-   description, assign a new persistent id otherwise; objects not seen where they should be visible
-   become `missing` after N observations.
+   description, assign a new persistent id otherwise.
+   **Visibility reasoning (occluded ≠ missing).** For every remembered object not matched in a frame,
+   project its stored box into that camera and classify the frame as:
+   - *out of view*: the projected box is outside the image (or behind the camera) → no evidence;
+   - *occluded*: within the projected box, the measured depth is clearly closer than the box's
+     expected depth (≥ 2 cm in front) on most pixels, or the pixels belong to the robot model at the
+     current joint state → no evidence; status `occluded`, last pose kept, uncertainty grows;
+   - *visible but absent*: the expected surface is seen at the expected depth (support visible
+     where the object should stand) and no mask overlaps the projected footprint → one "absent"
+     observation.
+   Status becomes `missing` only after **2 "visible but absent" observations** (from different
+   frames; one may be from the wrist camera); any later match restores it.
 7. **References**: the VLM resolves "the red cube", "the one next to it" against the numbered image +
    memory summary → object id or `needs_clarification` with candidates. **Ambiguous / unresolved →
    ask the user or re-observe with the wrist camera; never a silent guess.**
+8. **Confirmation before acting** (wrong-object protection): for every resolved object a task acts
+   on (the object to pick and every reference object of a placement), an **independent** VLM call
+   (`confirm_object`) sees only the object's crop and the reference text and answers match / no /
+   unsure. Anything but "match" → ask the user; no motion before agreement. Logged with both answers.
+9. **Whole-scene re-perception after each sub-task**: after every placement (and after any recovery
+   that moved the arm through the scene), the full table view is re-perceived, every remembered
+   object's measured pose is compared with its stored pose, and moved neighbours (beyond the xy
+   10 mm / z 5 mm tolerances) are logged as disturbed and updated in memory.
 
 ## 4. VLM integration
 - **Interface** `VLM.call(role, images, text, schema) -> validated object` (in-process
@@ -170,12 +203,30 @@ Reference: {text, resolved_id | None, candidates[], confidence, needs_clarificat
   descriptions), resolver (reference → id), explorer (rank candidate views), recovery chooser (pick
   one of the allowed actions). Each role has a fixed tool list; tool choice is part of the schema.
 - **Thinking**: off for describer / resolver (latency), configurable for supervisor.
-- **Reliability metrics** (measured on recorded frames and instruction sets, CPU-free replay in tests):
-  JSON validity rate, schema-retry rate, tool-choice accuracy (vs labelled expected tool), naming
-  accuracy (per object, does the description identify the GT object — judged per object), reference
-  resolution accuracy (incl. "ask" correctness on ambiguous cases), latency per call.
-- **Acceptance (proposed)**: JSON validity ≥ 98 % after one retry; reference resolution ≥ 90 % on
-  unambiguous, "ask" ≥ 90 % on ambiguous; if Gemma 4 E2B misses these, evaluate a fallback.
+- **Reliability metrics** (measured on recorded frames and instruction sets; replayed without a GPU in
+  tests): JSON validity rate, schema-retry rate, tool-choice accuracy (vs labelled expected tool),
+  naming accuracy (per object: does the description identify the ground-truth object — judged per
+  object), reference-resolution accuracy, **confident wrong resolution rate** (a wrong id returned
+  without asking, and not caught by the confirmation check), "ask" correctness on ambiguous
+  instructions, confirmation-check agreement, latency per call.
+- **Thresholds, trials and confidence** (proposed; every rate reported with a **95 % Wilson interval**;
+  a threshold counts as met when the point estimate meets it, and the interval is reported with it):
+
+  | Metric | Threshold | Trials (minimum) | 95 % Wilson interval if exactly at the threshold (computed) |
+  |---|---|---|---|
+  | JSON validity after ≤ 1 retry | ≥ 98 % | 300 VLM calls per role | 294/300: [95.7, 99.1] % |
+  | Tool-choice accuracy | ≥ 95 % | 200 labelled decisions | 190/200: [91.0, 97.3] % |
+  | Naming accuracy (per object) | ≥ 90 % | 300 objects (per test set) | 270/300: [86.1, 92.9] % |
+  | Reference resolution, unambiguous | ≥ 97 % | 200 references (per test set) | 194/200: [93.6, 98.6] % |
+  | **Confident wrong resolution** | **≤ 2 %** (point estimate; CI upper bound reported) | **400 references** | 8/400: [1.0, 3.9] % (4/200 would give [0.8, 5.0] %: 200 trials cannot show < 4 %) |
+  | "Ask" correctness, ambiguous | ≥ 90 % | 60 ambiguous instructions (ambiguity set) | 54/60: [79.9, 95.3] % |
+
+- **Relation to task success.** A pick needs one correct reference; a place needs **two** (object +
+  reference). With per-reference accuracy p and manipulation success m (Baseline A: 10/10 known-pose
+  picks, measured), expected task success ≈ p·m (pick) and ≈ p²·m (place): p = 0.97 gives ≈ 0.97 and
+  ≈ 0.94. The confident-wrong rate bounds the **unsafe** outcome (acting on a wrong object) per
+  reference; for a place task ≈ 2 × that rate (≤ 4 % at the threshold), which is why the threshold is
+  strict and the confirmation check exists. End-to-end targets (§10) are derived from these numbers.
 - **Fallback candidates** (licences and memory **unverified**, to check before download): Gemma 3 4B
   (Gemma licence), Qwen2.5-VL-7B (Apache-2.0 per its model card — verify; 4-bit ~6 GB est.),
   SmolVLM2 (Apache-2.0, small; likely weaker). Selection by the metrics above, never by adding rules.
@@ -200,13 +251,20 @@ Reference: {text, resolved_id | None, candidates[], confidence, needs_clarificat
   measured in the suite); measured pad gap vs measured object width (calibrated gap; known limitation:
   the simulated linkage flexes under load, so the gap is evidence, not proof — measured 2026-10-14).
 - **Lift**: after lifting 3 cm, re-perceive the pick area (table camera; wrist if occluded): the
-  object's mask / points are gone from the support and the gripper region shows the object; mass =
-  Δ(joint efforts) projected to a vertical force (needs efforts on `/joint_states`); over the payload
-  limit → set down, report.
+  object's mask / points are gone from the support and the gripper region shows the object (the held
+  object survives robot exclusion, §3 step 4).
+- **Mass — plausibility check only until validated.** Estimate = Δ(joint efforts) before / after the
+  lift projected to a vertical force (efforts published by the new sim entry point, §13). Known
+  confound (measured, AUDIT §6.2): the simulated gripper's internal squeeze forces act on the arm's
+  joints (J5 offset ~0.35° while holding). **Before use:** measure accuracy against known masses —
+  0.1 kg and 3 kg blocks, ≥ 10 lifts each, at the operating speed — and report bias and spread. Until
+  that passes, the estimate is used only to separate "light" from "over the payload limit"
+  (6 kg max, 3 kg rated: Epson manual); over-limit → set down at the pick spot, report.
 - **Placement**: after release + settle, re-perceive: the object's measured centre / top height
   within tolerance (xy 10 mm, z 5 mm, tilt 5°, the same numbers as Baseline A) of the planned pose,
   stable over 1 s.
-- **Recovery budgets** (per task, configurable): perception 2, planning 2, grasp 1, execution 0,
+- **After each sub-task**: whole-scene re-perception (§3 step 9); disturbed neighbours updated.
+- **Recovery budgets** (per task, configurable; approved): perception 2, planning 2, grasp 1, execution 0,
   placement 1; then FAILED with class, agent, evidence. COMPLETED only after VERIFYING_PLACEMENT passes.
 
 ## 7. Environments, threading, GPU
@@ -252,7 +310,7 @@ Reference: {text, resolved_id | None, candidates[], confidence, needs_clarificat
 | `sim/scene_objects.obstacle_boxes` (objects) | **Replaced** by boxes from measured geometry; fixture volumes kept as physical configuration |
 | Prompts listing colours / shapes (`DETECT_PROMPT`, few-shot "<colour> <shape>") | **Removed** from the new prompts |
 | Text-command interpreter rules (`control/instructions.py`) | **Kept** (robot jog commands, not object knowledge) |
-| Joint efforts on `/joint_states` | **Missing**; needed for mass. `sim/run_live.py` / `sim/ros_control.py` are frozen → **decision needed**: new sibling sim entry point (no baseline change) vs editing them (then re-run the three validations) |
+| Joint efforts on `/joint_states` | **Missing**; needed for mass. **Decided:** a new sim entry point that **imports** the frozen code (`sim/run_live.py`, `sim/ros_control.py`, `sim/scene.py`) rather than copying it, and adds an efforts publisher; the frozen files and the baseline stay unchanged |
 
 ## 10. Evaluation plan
 Sets, always reported **separately**: (a) evaluation layouts (today's scene + 20 re-arranged layouts
@@ -264,10 +322,15 @@ resolution and the ask-the-user path.
   exclusion false positives.
 - **VLM**: JSON validity, retry rate, tool-choice accuracy, naming accuracy, reference resolution
   accuracy and "ask" correctness; latency.
-- **End to end** per instruction type (pick, place on, each relation, multi-step, ambiguous,
-  missing object): success rate, failures by class and which agent caught them, recoveries used,
-  questions asked, re-observation time (counted), time per stage, peak GPU memory.
+- **End to end** per instruction type (pick, place on, each relation (5), multi-step, ambiguous,
+  missing object = 10 types): **≥ 30 trials per type and per test set** (eval layouts, novel objects;
+  ambiguity set for the ambiguous type), each with a 95 % Wilson interval (at 90 % success, computed: 27/30 → [74.4, 96.5] % — the interval is the honest statement of what 30 trials can show; types that matter for a claim get more trials). Reported: success rate,
+  **confident wrong resolutions** (acted on a wrong object), questions asked and whether each was
+  warranted, failures by class and which agent caught them, recoveries used, disturbed neighbours,
+  re-observation time (counted), time per stage, peak GPU memory. Proposed targets derived from §4:
+  pick ≥ 95 %, place / relations ≥ 90 %, acting on a wrong object ≤ 2 % of tasks.
 - **Manipulation**: the 11 known-pose cases with the new pipeline vs frozen Baseline A, case by case.
+- **Mass estimate validation** (§6): bias and spread on 0.1 kg and 3 kg, ≥ 10 lifts each.
 - Ground truth only in the scorer; the replay of recorded runs makes VLM / perception metrics
   repeatable.
 
@@ -277,7 +340,7 @@ resolution and the ask-the-user path.
 | YOLO-World (Ultralytics) | open-vocabulary boxes from text | AGPL-3.0 (Ultralytics) | licence; boxes only (masks via SAM); text prompts reintroduce class words |
 | OWLv2 (transformers) | open-vocabulary boxes | Apache-2.0 | slower; boxes only |
 | Grounding DINO + SAM / SAM 2 | boxes from text + masks | Apache-2.0 | two models on the GPU; latency |
-**Recommendation:** don't build the demo on a stopgap — it would need text queries (object words)
+**Decision (2026-10-14): no stopgap demo.** Original recommendation: don't build the demo on a stopgap — it would need text queries (object words)
 and a second set of models while the dataset finishes in hours (§12). If a demo is needed before
 Phase 2 ends, OWLv2 + SAM 2 (both Apache-2.0, unverified) is the least restrictive, used class-agnostic
 ("object") behind the same `Detector` interface and removed afterwards.
@@ -295,8 +358,25 @@ Phase 2 ends, OWLv2 + SAM 2 (both Apache-2.0, unverified) is the least restricti
 | 8 | Voice | speech-to-text (model choice by measured WER + GPU), connection to the supervisor | WER on recorded speech; end-to-end voice tasks | 7 | 1–1.5 d |
 Total ≈ 13–16 working days (estimate).
 
-## 13. Open decisions for review
-1. Joint efforts for mass estimation: new sim entry point (recommended) vs editing frozen files.
-2. Recovery budgets and tolerances (proposed values in §6).
-3. VLM acceptance thresholds (§4).
-4. Whether a stopgap demo is wanted (§11).
+## 13. Decisions taken and known limitations
+**Decided (review of 2026-10-14):**
+1. Joint efforts: a new sim entry point that imports the frozen code (no copy, no baseline change).
+2. Recovery budgets and tolerances (§6): approved as proposed.
+3. VLM thresholds: revised per §4 (trials, confidence intervals, naming and tool-choice thresholds,
+   relation to task success, confident-wrong ≤ 2 %).
+4. No stopgap demo (§11).
+
+**Known limitation — no Epson VT6L CAD** (from files: AUDIT_AND_PLAN §1; the URDF's shapes are
+boxes and cylinders sized from the manual's drawings):
+- *Robot exclusion* (§3 step 4) uses the simplified collision shapes, inflated 1 cm: where the real
+  housings are larger, robot pixels can survive exclusion and appear as objects; where they are
+  smaller, object pixels near the arm can be removed. Measured in Phase 3 as "exclusion false
+  positives / negatives" on the evaluation layouts.
+- *Training images* render the same simplified arm (from files: `datagen/generate.py` uses the
+  imported URDF): the detector learns "simplified arm = background". A real VT6L (white, rounded
+  housings, cables) is out of distribution; it may be segmented as objects, and real objects next to
+  it may be missed.
+- *Sim-to-real impact*: both effects only matter on real images or a CAD-accurate model. Mitigations
+  (not planned yet): Epson CAD (STEP) when available → re-import, re-render the arm, re-train; on the
+  real robot, rely on robot-model + TF exclusion with measured inflation, and fine-tune the detector on
+  real images with the arm in view.

@@ -4,7 +4,7 @@ Goal: perception and grounding with no hardcoded object knowledge (see the brief
 the inventory in HARDCODING_INVENTORY.md). Evidence labels: measured / from files / unverified.
 
 ## Active phase
-**Phase 1 — synthetic training data** (full run in progress) + **architecture design written, awaiting review** (`ARCHITECTURE.md`)
+**Phase 1 — synthetic training data** (full run in progress) + **architecture revision 2 written, awaiting review** (`ARCHITECTURE.md`; rev 1 approved with changes, kept)
 
 ## Phases (the merged plan is ARCHITECTURE.md §12; this table tracks the data / perception track)
 | # | Phase | Status | Evidence |
@@ -62,11 +62,14 @@ the inventory in HARDCODING_INVENTORY.md). Evidence labels: measured / from file
 - Full run status at 07:57 UTC (measured): train 0-3999 done (4 chunks; 0.89 / 0.91 / 1.22 / ~1.5
   s per image — slowing, cause unknown), train 4000-5999, val, test_novel pending.
 
+- 2026-10-14: architecture rev 1 approved with changes; rev 2 written (wrong-object confirmation +
+  metric, held-object exclusion, trials / Wilson intervals / thresholds, mass as plausibility check,
+  whole-scene re-perception, visibility reasoning, CAD limitation); decisions logged.
+
 ## Next
-- Wait for the user's review of ARCHITECTURE.md (no implementation before approval).
+- Wait for the user's review of ARCHITECTURE.md rev 2 (no implementation before approval).
 - Let the full run finish; then `/usr/bin/python3 datagen/verify_dataset.py data/perception/synthetic_v1`,
   report Phase 1, commit "Phase 1 complete".
-- Open decisions in ARCHITECTURE.md §13 (joint efforts for mass: frozen sim files).
 - The user's simulation session is stopped; tell the user to restart it (./launch/run.sh) when done.
 
 ## Open questions
