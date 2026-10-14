@@ -270,7 +270,7 @@ Design approved with changes; revision 1 kept as `ARCHITECTURE_rev1_2026-10-14.m
   is never an answer. Unsupported instructions, "object = destination" and an unverifiable relational
   reference are now honest FAILED messages (rephrase), not fake questions. `agent.run --ask
   terminal|scripted` (default terminal); the rehearsal harness passes `--ask scripted`.
-- **Tests:** tests/test_agent_ask.py (new, 30 incl. parametrised) + updated tests/test_agent.py: 57
+- **Tests:** tests/test_agent_ask.py (new, 32 incl. parametrised) + updated tests/test_agent.py: 57
   passed in .venv-seg; /usr/bin/python3 -m pytest 129 passed, 2 skipped. Manipulation pipeline,
   planner, executor, safety and verification untouched; manifest OK. **Live sim test not run:** the
   user's own demo session was running on the GPU (my attempt stopped at Gemma loading with CUDA OOM
