@@ -47,3 +47,45 @@ exposure). Evaluation layouts (incl. today's scene) and exact copies of the 21 e
 are excluded from training; a separate novel-object test set uses shapes never used in training.
 Assets: procedural shapes + NVIDIA's official Isaac Sim asset server only, source and licence
 recorded per asset.
+
+## 2026-10-14 — No classical detector in the new system, not even as an interim
+**Decision.** The new pipeline detects with a class-agnostic learned segmentation model only;
+`perception/classical_detector.py` stays frozen as a comparison baseline and is never called by
+the agents. **Reasoning.** It identifies objects through the catalogue and colour names (hardcoded
+object knowledge); an interim use would leak that knowledge into the agents and the evaluation.
+**Rejected.** Classical candidates + VLM choice for an early demo (audit option D4).
+
+## 2026-10-14 — LangGraph as the agent framework
+**Decision.** A LangGraph `StateGraph` supervisor (states = the AUDIT_AND_PLAN task states) with
+agent subgraphs; local only (no LangSmith / cloud tracing); SQLite checkpointer + our own JSON-lines
+event log. **Reasoning.** Explicit, typed state machine with checkpoints, interrupts for asking the
+user, and replay — the deterministic execution layer the plan requires, without a cloud service.
+**Rejected.** Hand-written loop in the ROS node (today's agent: implicit states, no checkpoints, no
+replay); frameworks built around hosted LLM APIs.
+
+## 2026-10-14 — Multi-agent split: which agents use the LLM
+**Decision.** LLM roles (one shared VLM, sequential calls): Supervisor (interpretation, decomposition,
+clarification), Perception's describer and reference resolver, Exploration's view ranking, Recovery's
+choice among allowed actions. Deterministic: Grasp planner, Motion planner, Execution, verification
+checks, the state machine, budgets and safety. **Reasoning.** LLM only where judgment is needed;
+anything involving physics, safety or pass/fail must be measured and reproducible. The LLM never
+issues motion. **Rejected.** LLM tool-calling of motion primitives (Code-as-Policies style); separate
+models per agent (GPU budget).
+
+## 2026-10-14 — Interfaces for the VLM and the detector; one agent process
+**Decision.** Agent process in `.venv-vlm` (LangGraph + VLM + detector inference), ROS 2 on a
+background MultiThreadedExecutor thread, tools wait on futures; VLM and detector behind interfaces so
+they can move to a separate inference server without agent changes. **Reasoning.** One torch / GPU
+context; removes the spin-inside-a-tool deadlock risk; keeps a later split cheap.
+
+## 2026-10-14 — Spatial relations: the VLM names them, geometry places them
+**Decision.** Relations on / next to / left of / right of / in front of / behind with an explicit
+frame (default robot frame, stated in every reply; other frames only when named; ask if ambiguous).
+The VLM fills relation + reference + frame; a deterministic planner computes the pose from measured
+footprints with a free-space check through the collision checker. **Rejected.** The VLM outputting
+coordinates (not metric, not verifiable).
+
+## 2026-10-14 — Licences
+**Decision.** Prefer Apache-2.0 / MIT / BSD or the Gemma licence for models; AGPL or research-only
+only if a permissive option is clearly worse on measured results, recorded here with the restriction.
+Phase 2 compares a permissive segmentation model with Ultralytics YOLO-seg (AGPL-3.0) before deciding.

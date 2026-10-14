@@ -309,3 +309,19 @@ validations before comparing new results with this baseline.
 Hardware-side items (not blocking simulation work): Epson CAD for link shapes and inertia; J1/J4/J6
 positive directions on a controller; the lab camera arrangement; the upper-arm/forearm exclusion
 assumption.
+
+
+## 8. 2026-10-14 — Perception redesign and multi-agent architecture (dated entry)
+
+Active work is tracked in `docs/perception_redesign/PROGRESS.md` (read first), decisions in
+`docs/perception_redesign/DECISIONS.md`, the design in `docs/perception_redesign/ARCHITECTURE.md`.
+- **Reversal of section 3's decision** that the language model only parses language: the VLM now
+  also describes detected objects and resolves references, under strict JSON validation; geometry,
+  motion and verification stay deterministic (DECISIONS.md, 2026-10-14).
+- No classical detector in the new system; class-agnostic learned segmentation trained on synthetic
+  data; LangGraph supervisor with seven agents; sensor-only verification (ground truth for
+  evaluation only).
+- Milestone table update: Milestone 2 (perception) is being rebuilt on the new design — Phase 1
+  (synthetic dataset) in progress (train 0-3999 of 6000 rendered, measured 07:57 UTC); Milestones 5,
+  7, 8, 9, 10 are re-planned in ARCHITECTURE.md §12 (estimates). Frozen manipulation baseline A
+  unchanged (manifest verified 2026-10-14).
