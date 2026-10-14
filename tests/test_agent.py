@@ -492,7 +492,7 @@ def _obs_with(n):
     for k in range(1, n + 1):
         m = np.zeros((80, 200), bool)
         m[10:20, 15 * k:15 * k + 8] = True
-        marks[k], measured[k] = m, geom(0.4 + 0.02 * k, 0.3, 0.04)
+        marks[k], measured[k] = m, geom(0.3 + 0.1 * k, 0.3, 0.04)
     return Observation("table_001", "table", rgb, rgb, marks, measured)
 
 
