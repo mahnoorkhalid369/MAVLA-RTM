@@ -1,0 +1,31 @@
+{
+  "name": "synthetic_v1",
+  "seed": 20261014,
+  "splits": {"train": 6000, "val": 1000, "test_novel": 500},
+  "render": {"resolution": [1280, 720], "hfov_deg": 69.4, "rt_subframes": 4, "jpeg_quality": 95},
+  "families": {
+    "train": ["box", "cylinder", "sphere", "capsule", "cone", "plate", "l_shape", "ycb_train", "ycb_train"],
+    "novel": ["torus", "hex_prism", "tri_prism", "pyramid", "ycb_novel"]
+  },
+  "ycb": {
+    "train": ["002_master_chef_can", "003_cracker_box", "004_sugar_box", "005_tomato_soup_can", "006_mustard_bottle",
+              "007_tuna_fish_can", "008_pudding_box", "009_gelatin_box", "010_potted_meat_can", "019_pitcher_base",
+              "021_bleach_cleanser", "036_wood_block", "040_large_marker", "052_extra_large_clamp", "061_foam_brick"],
+    "novel": ["011_banana", "024_bowl", "025_mug", "035_power_drill", "037_scissors", "051_large_clamp"],
+    "scale": [0.85, 1.15]
+  },
+  "objects": {"count": [3, 25], "size_range_m": [0.02, 0.18], "stack_probability": 0.15, "held_probability": 0.10},
+  "materials": {"metallic_probability": 0.3, "textured_object_probability": 0.2, "ycb_keep_material_probability": 0.7,
+                "texture_pool": 80},
+  "floor": {"kinds": ["noise", "checker", "stripes", "grid", "tape_markings", "wood", "speckle", "concrete", "blue_grid", "plain"],
+            "texture_pool": 120, "uv_scale": [0.5, 6.0], "size_m": 6.0},
+  "lights": {"dome_intensity": [300, 2500], "extra": [0, 3], "extra_intensity": [2000, 60000]},
+  "views": {"table": 0.8, "table_jitter": {"pos_m": 0.05, "rot_deg": 3.0},
+            "wrist": {"radius_m": [0.3, 0.8], "height_m": [0.25, 0.75], "look_out_m": [0.1, 0.45], "roll_deg": [-20, 20]}},
+  "workspace": {"r_min": 0.25, "r_max": 1.25, "frame_margin_px": 60,
+                "keep_clear": [[0.0, 0.0, 0.22], [1.5, 0.25, 0.2]]},
+  "rgb_effects": {"noise_sigma": [0.0, 6.0], "blur_probability": 0.3, "blur_px": [0.5, 3.0],
+                  "exposure": [0.6, 1.4], "gamma": [0.85, 1.15]},
+  "eval_exclusion": {"size_tol_m": 0.003, "colour_tol": 0.1},
+  "min_visible_pixels": 30
+}
