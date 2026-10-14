@@ -34,7 +34,7 @@ flowchart LR
 | **Perception** | `capabilities.run_observe / run_describe_scene / run_answer / run_locate` over `Tools` (YOLO11s-seg, depth geometry, Gemma descriptions with session cache, resolution + cross-check + confirm) | fresh observations, grounded scene report, answers (marked unverified), locating a described object | claim identity as fact (descriptions are hypotheses) |
 | **Manipulation** | `capabilities.run_pick_place` → `agent/pick_place.py` `PickPlaceWorkflow`; `run_return_home` | the validated pick-and-place skill (grounding, clarification, grasp, carry, place, retreat, HOME) | bypass collision checking or the executor |
 | **Verification** | in the skill (contact stall, camera placement xy/z/tilt, HOME joints) + supervisor VERIFYING_STEP / VERIFYING_GOAL | evidence per step; goal = every step verified | accept the LLM's word as success |
-| **Exploration** | **proposed** (`explore` is declared with `implemented=False`) | — | — |
+| **Exploration** | `agent/exploration.py` (viewpoint planner) + `capabilities.run_inspect / run_explore` (since 2026-10-14, see ACTIVE_PERCEPTION.md) | wrist-camera viewpoints for a close look or a look behind objects; collision-checked; HOME after | move without a validated plan; claim a find |
 
 ## 3. Supervisor state machine (implemented)
 
@@ -106,7 +106,8 @@ taken with the arm parked out of the camera's view.
 | locate | read_only | fresh observation (auto) | object id + measured position | resolution + cross-check + crop confirmation | implemented |
 | pick_place | motion | gripper empty; references resolvable (asks if ambiguous) | object at destination; HOME after last motion step | contact, placement (10 mm / 5 mm / 5°), HOME (1.5°) | implemented (validated skill) |
 | return_home | motion | nothing held; gripper open | arm at HOME | joint feedback 1.5° | implemented |
-| explore | motion | — | — | — | **proposed** (reported as unsupported) |
+| inspect | motion | target visible + confirmed; nothing held | close-up measurement + description; HOME | viewpoint reached (joints), association | implemented |
+| explore | motion | nothing held | wrist views of occlusion shadows; HOME | finding decided by locate | implemented |
 
 Enforcement that does not depend on the LLM: the plan schema is an enum of these names (anything else is
 invalid → one retry → failure); step arguments are validated per capability; every motion is planned by

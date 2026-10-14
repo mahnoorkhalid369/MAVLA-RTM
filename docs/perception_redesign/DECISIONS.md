@@ -360,3 +360,24 @@ Design approved with changes; revision 1 kept as `ARCHITECTURE_rev1_2026-10-14.m
 - **Measured:** live A/B regression back to back, no regression (446.7 / 257.2 s vs 455.5 / 303.0 s under
   similar load; same Gemma call counts; correct objects; placement and HOME verified); observation-only goals
   work end to end with zero robot motion. Unchanged: legacy agent, vlm/model.py, frozen baseline (manifest OK).
+
+## 2026-10-14 — Global-to-local active perception (branch feature/active-perception; tag before-active-perception)
+- **Prerequisites measured before any exploratory motion:** wrist camera = URDF frame on the J5 housing,
+  validated against ground truth without moving (reprojection 20/20 table, 4/4 wrist; wrist error ~1 mm).
+  The visual-only camera bracket was being measured as a floating object (blocked every path) → robot
+  exclusion includes visual-only robot parts.
+- **Viewpoint planning:** deterministic candidates + camera look-at IK (5-joint camera chain), whole-region
+  line of sight (10 mm clearance; single-point checks allowed grazing views that hid the target behind an
+  edge), collision-checked path, executor + safety layer, reach from joint feedback. Bounded: ≤ 2 viewpoints per
+  exploration, one exploration subtask per instruction, HOME at the end.
+- **World model:** per-camera observations; association matched / partial view / new / ambiguous; wrist
+  geometry adopted only if its top was seen and its footprint agrees within 10 mm.
+- **Exploration is never success:** a plan ending in explore gets a locate (completion rule); a newly seen
+  object counts only if its description fits and confirm_object on its crop says yes (descriptions use other
+  words, e.g. "green shape" for the cylinder); generic references ("the object behind the box") take the single
+  newly seen complete object. Planner validation: hiding prepositions (behind / under / …) require explore.near.
+- **Test scenes without touching frozen files:** `sim/run_scenario.py` + `sim/scenarios/*.json` (YCB meshes from
+  the already downloaded NVIDIA assets; fruit proxies are spheres and labelled as proxies).
+- **Measured:** hidden targets found 2/2 (≤ 1 mm), absent banana honestly not found, inspect 0.7 mm vs 3.6 mm,
+  categories 12/12 localized (Gemma names weak for mug / bowl), one wrong unverified shape answer, manipulation
+  regression none (267.5 / 187.8 s, same Gemma call counts). Details: docs/architecture/ACTIVE_PERCEPTION.md.
