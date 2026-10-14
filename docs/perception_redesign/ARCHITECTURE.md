@@ -1,7 +1,12 @@
-# VT6L multi-agent manipulation system — architecture (design, revision 2, 2026-10-14)
+# VT6L multi-agent manipulation system — architecture (design, revision 3, 2026-10-14)
 
-Status: **design for review, nothing implemented.** Revision 1 (approved with changes) is kept as
-`ARCHITECTURE_rev1_2026-10-14.md`.
+Status: **approved design (revision 3), implementation starting with Phases 1–2.** Revisions 1 and 2
+are kept as `ARCHITECTURE_rev1_2026-10-14.md` and `ARCHITECTURE_rev2_2026-10-14.md`.
+
+**Changes in revision 3** (approval of rev 2, 2026-10-14): correlated-error metric for the
+confirmation check and a second-model fallback (§4, §10); relational references confirmed by
+attributes from the crop + the relation checked deterministically from measured positions (§3); the
+held-object collision box comes from measured geometry, never the catalogue (§2, §6).
 
 **Changes in revision 2** (review of 2026-10-14): wrong-object protection — confirmation step,
 "confident wrong resolution" metric, failure row (§1.4, §1.5, §2, §3, §4, §10); held object kept
@@ -136,7 +141,7 @@ Reference: {text, resolved_id | None, candidates[], confidence, needs_clarificat
 | `resolve_reference(text, frame)` | → Reference {resolved_id \| None, candidates, needs_clarification} | VLM | prompt over the numbered image + memory summary |
 | `confirm_object(object_id, reference_text)` | crop of the object (mask outline, context margin) + the instruction's reference text → {match: yes \| no \| unsure, reason} | `VisionLanguageModel.generate` | independent "verifier" role: sees only the crop and the reference text, never the resolver's answer or reasoning |
 | `propose_views(reference)` / `look(view)` | → [View] scored / Observation | `vlm_agent_node.py: look / explore` view logic, `control/robot.py: VIEW_POSES` | coverage map, reachability + collision scoring, view ranking hook for the VLM |
-| `plan_grasp(object_id)` | → GraspPlan | `control/skills.py: hover / grasp` geometry (yaw symmetry, `fingertip_below_tcp`, contact length) | adapter from ObjectRecord.geometry (replaces the catalogue's `grasp_for`) |
+| `plan_grasp(object_id)` | → GraspPlan (incl. the held-object box for collision checking: grasp width, footprint length and height **from the ObjectRecord's measured geometry**, never the catalogue) | `control/skills.py: hover / grasp` geometry (yaw symmetry, `fingertip_below_tcp`, contact length) | adapter from ObjectRecord.geometry (replaces the catalogue's `grasp_for`) |
 | `plan_place(object_id, relation, reference_id, frame)` | → PlacePlan {pose, yaw} or failure | `SkillPlanner.place`, `CollisionChecker` | relation geometry (§5) |
 | `plan_motion(plan)` | → [Step] | `SkillPlanner(..., collision=CollisionChecker(boxes from WorldModel))` incl. via-home fallback | obstacle boxes from measured geometry (replaces `sim/scene_objects.obstacle_boxes`); fixtures from configuration |
 | `execute(steps)` | → ExecutionResult | `execution/ros_executor.py: RosExecutor.execute` | runs on the shared ROS thread (§7) |
@@ -186,8 +191,19 @@ Reference: {text, resolved_id | None, candidates[], confidence, needs_clarificat
    ask the user or re-observe with the wrist camera; never a silent guess.**
 8. **Confirmation before acting** (wrong-object protection): for every resolved object a task acts
    on (the object to pick and every reference object of a placement), an **independent** VLM call
-   (`confirm_object`) sees only the object's crop and the reference text and answers match / no /
-   unsure. Anything but "match" → ask the user; no motion before agreement. Logged with both answers.
+   (`confirm_object`) sees only the object's crop and the reference's **attribute part** and answers
+   match / no / unsure. Anything but "match" → ask the user; no motion before agreement. Logged with
+   both answers.
+   **Relational references** ("the cube next to the blue cylinder") — **decision: attributes from the
+   crop, relation from geometry.** The supervisor's schema splits a reference into
+   `{attributes: "cube", relation: next_to, anchor: {attributes: "blue cylinder"}, frame}`. The target
+   and the anchor are each resolved and each confirmed on their own crop (attributes only); the
+   relation is then **checked deterministically** from their measured positions in the stated frame,
+   with the same definitions as placement (§5): direction within ±45° of the relation's axis,
+   gap between footprints ≤ 0.15 m for next_to / directional relations, the target's bottom on the
+   anchor's top (±1 cm) for "on". A failed relation check → ask the user. Rejected: one crop
+   containing both objects (the VLM would again judge the relation — not metric, and correlated with
+   the resolver).
 9. **Whole-scene re-perception after each sub-task**: after every placement (and after any recovery
    that moved the arm through the scene), the full table view is re-perceived, every remembered
    object's measured pose is compared with its stored pose, and moved neighbours (beyond the xy
@@ -219,8 +235,15 @@ Reference: {text, resolved_id | None, candidates[], confidence, needs_clarificat
   | Naming accuracy (per object) | ≥ 90 % | 300 objects (per test set) | 270/300: [86.1, 92.9] % |
   | Reference resolution, unambiguous | ≥ 97 % | 200 references (per test set) | 194/200: [93.6, 98.6] % |
   | **Confident wrong resolution** | **≤ 2 %** (point estimate; CI upper bound reported) | **400 references** | 8/400: [1.0, 3.9] % (4/200 would give [0.8, 5.0] %: 200 trials cannot show < 4 %) |
+  | **Joint failure** (resolver wrong AND confirmation "match") | **≤ 2 %** (else evaluate a second confirmation model) | the same 400 references | 8/400: [1.0, 3.9] % |
   | "Ask" correctness, ambiguous | ≥ 90 % | 60 ambiguous instructions (ambiguity set) | 54/60: [79.9, 95.3] % |
 
+- **Correlated errors.** `confirm_object` uses the same model as the resolver, so their errors can
+  correlate. The quantity that matters is the **joint failure rate**: resolver wrong **and**
+  confirmation "match" = wrong objects that reach the robot. Measured on the same 400-reference set
+  (wrong-resolver cases constructed and natural), with its Wilson interval. **If it exceeds 2 %**,
+  evaluate a **second model** for confirmation (from the fallback list below, licence-checked), and
+  report the joint rate with each candidate.
 - **Relation to task success.** A pick needs one correct reference; a place needs **two** (object +
   reference). With per-reference accuracy p and manipulation success m (Baseline A: 10/10 known-pose
   picks, measured), expected task success ≈ p·m (pick) and ≈ p²·m (place): p = 0.97 gives ≈ 0.97 and
@@ -252,7 +275,9 @@ Reference: {text, resolved_id | None, candidates[], confidence, needs_clarificat
   the simulated linkage flexes under load, so the gap is evidence, not proof — measured 2026-10-14).
 - **Lift**: after lifting 3 cm, re-perceive the pick area (table camera; wrist if occluded): the
   object's mask / points are gone from the support and the gripper region shows the object (the held
-  object survives robot exclusion, §3 step 4).
+  object survives robot exclusion, §3 step 4). The held-object box used for collision checking and
+  for exclusion is built from the **measured** grasp width, footprint length and height of the
+  ObjectRecord (`Held(width, length, height)` in `control/skills.py`), never from the catalogue.
 - **Mass — plausibility check only until validated.** Estimate = Δ(joint efforts) before / after the
   lift projected to a vertical force (efforts published by the new sim entry point, §13). Known
   confound (measured, AUDIT §6.2): the simulated gripper's internal squeeze forces act on the arm's
@@ -331,6 +356,8 @@ resolution and the ask-the-user path.
   pick ≥ 95 %, place / relations ≥ 90 %, acting on a wrong object ≤ 2 % of tasks.
 - **Manipulation**: the 11 known-pose cases with the new pipeline vs frozen Baseline A, case by case.
 - **Mass estimate validation** (§6): bias and spread on 0.1 kg and 3 kg, ≥ 10 lifts each.
+- **Joint failure rate** of resolver + confirmation (§4) on the 400-reference set; relational
+  references reported separately (relation-check accuracy vs ground truth positions).
 - Ground truth only in the scorer; the replay of recorded runs makes VLM / perception metrics
   repeatable.
 

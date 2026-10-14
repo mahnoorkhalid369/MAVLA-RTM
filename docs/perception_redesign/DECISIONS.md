@@ -111,3 +111,14 @@ Design approved with changes; revision 1 kept as `ARCHITECTURE_rev1_2026-10-14.m
 - **Recovery budgets and tolerances** approved as proposed. **No stopgap demo.**
 - **Known limitation recorded:** no Epson CAD → simplified arm in robot exclusion and in the training
   images; sim-to-real impact and mitigations in ARCHITECTURE §13.
+
+## 2026-10-14 — Architecture revision 3 (approved rev 2 + additions)
+- **Correlated errors:** the confirmation call uses the same model as the resolver; the decisive
+  metric is the joint failure rate (resolver wrong AND confirmation "match") on the 400-reference set;
+  above 2 % → evaluate a second model for confirmation.
+- **Relational references:** confirm attributes from each object's own crop; check the relation
+  deterministically from measured positions in the stated frame (same definitions as placement).
+  Rejected: a crop containing both objects (the VLM would judge the relation again — not metric,
+  correlated with the resolver).
+- **Held-object box** for collision checking / exclusion from measured geometry (ObjectRecord), never
+  the catalogue.
