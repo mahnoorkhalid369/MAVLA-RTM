@@ -50,9 +50,24 @@ def annotations_from_ids(ids: np.ndarray, image_id: int, next_ann_id: int, uid_i
     return anns, next_ann_id
 
 
+def merge_parts(polys: list[np.ndarray]) -> np.ndarray:
+    """One polygon from several parts of one mask: each part is joined to the polygon so far by a
+    zero-width bridge between their closest points (as Ultralytics' COCO converter does), so a YOLO
+    instance stays ONE object even when an occluder splits its visible mask."""
+    merged = np.asarray(polys[0], float)
+    for q in polys[1:]:
+        q = np.asarray(q, float)
+        d = np.linalg.norm(merged[:, None, :] - q[None, :, :], axis=-1)
+        i, j = np.unravel_index(int(np.argmin(d)), d.shape)
+        q_loop = np.concatenate([q[j:], q[:j + 1]])  # walk the whole part and come back to its start
+        merged = np.concatenate([merged[:i + 1], q_loop, merged[i:]])
+    return merged
+
+
 def coco_to_yolo(coco_json: Path, out_dir: Path, images_dir: Path | None = None) -> int:
     """Write YOLO-seg labels (one .txt per image: 'class x1 y1 x2 y2 ...' normalised) from a COCO file.
-    Multi-part masks become one line per part. Returns the number of label lines."""
+    One line per instance: a multi-part mask is merged into one polygon (merge_parts). Returns the
+    number of label lines."""
     coco = json.loads(Path(coco_json).read_text())
     out_dir.mkdir(parents=True, exist_ok=True)
     by_image: dict[int, list[dict]] = {}
@@ -63,9 +78,11 @@ def coco_to_yolo(coco_json: Path, out_dir: Path, images_dir: Path | None = None)
         w, h = img["width"], img["height"]
         lines = []
         for a in by_image.get(img["id"], []):
-            for poly in a["segmentation"]:
-                xy = np.asarray(poly, float).reshape(-1, 2) / [w, h]
-                lines.append("0 " + " ".join(f"{v:.6f}" for v in xy.ravel()))
+            parts = [np.asarray(poly, float).reshape(-1, 2) for poly in a["segmentation"] if len(poly) >= 6]
+            if not parts:
+                continue
+            xy = merge_parts(parts) / [w, h]
+            lines.append("0 " + " ".join(f"{v:.6f}" for v in xy.ravel()))
         (out_dir / (Path(img["file_name"]).stem + ".txt")).write_text("\n".join(lines) + ("\n" if lines else ""))
         lines_total += len(lines)
     return lines_total

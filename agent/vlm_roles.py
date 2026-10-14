@@ -112,16 +112,23 @@ def _json(text: str):
 
 PARSE_SYSTEM = """You turn a robot instruction into JSON. The robot can pick one object and place it.
 Copy the words the user uses for each object (do not invent or translate them).
+task: "pick_place" when the user says where the object should go (on / next to / left of / right of /
+in front of / behind another object); "pick" only when the user asks to pick something up and gives
+NO destination; "unsupported" for anything else.
 Answer with ONE JSON object only:
 {"task": "pick_place" | "pick" | "unsupported",
- "object": {"text": "<words for the object to move>", "relation": null | "<relation>", "anchor": null | "<words>"},
+ "object": {"text": "<words for the object to move>", "relation": null, "anchor": null},
  "relation": "on" | "next_to" | "left_of" | "right_of" | "in_front_of" | "behind" | null,
  "reference": {"text": "<words for the destination object>", "relation": null, "anchor": null} | null,
  "frame": "robot" | "camera",
  "reason": "<short>"}
-Use object.relation / object.anchor only when the user identifies the object to move by its position
-relative to another object (e.g. "the <A> next to the <B>": text "<A>", relation "next_to",
-anchor "<B>"). frame is "camera" only if the user explicitly says so; otherwise "robot"."""
+"relation" and "reference" (top level) say WHERE to put the object. Keep object.relation and
+object.anchor null, EXCEPT when the user picks out the object to move by where it is now (e.g. "the
+<A> that is next to the <B>": object text "<A>", object relation "next_to", object anchor "<B>").
+frame is "camera" only if the user explicitly says so; otherwise "robot".
+Example: "put the <A> on the <B>" -> {"task": "pick_place", "object": {"text": "<A>", "relation": null,
+"anchor": null}, "relation": "on", "reference": {"text": "<B>", "relation": null, "anchor": null},
+"frame": "robot", "reason": "move <A> onto <B>"}"""
 
 DESCRIBE_PROMPT = """Each object in the image is outlined and numbered. The numbers are: {ids}.
 For EVERY number, describe the object inside that outline as you see it. Answer with ONE JSON object only:
@@ -164,7 +171,16 @@ class Roles:
         raise VLMFailure(f"{role}: invalid answer after one retry ({error})")
 
     def parse(self, instruction: str) -> TaskSpec:
-        return self._call("parse", TaskSpec, f"Instruction: {instruction}", system=PARSE_SYSTEM)
+        def check(t: TaskSpec):  # structural consistency only (no object knowledge)
+            if t.task == "pick" and t.relation is not None and t.reference is not None:
+                raise ValueError('a destination is given, so task must be "pick_place"')
+            if t.task == "pick_place" and (t.object is None or t.relation is None or t.reference is None):
+                raise ValueError('"pick_place" needs object, relation and reference')
+            if t.object is not None and t.reference is not None and t.object.anchor and \
+                    t.object.anchor.strip().lower() == t.reference.text.strip().lower() and t.object.relation == t.relation:
+                raise ValueError("object.relation / object.anchor repeat the destination; keep them null "
+                                 "unless the user describes where the object to move is now")
+        return self._call("parse", TaskSpec, f"Instruction: {instruction}", system=PARSE_SYSTEM, check=check)
 
     def describe(self, som_image: np.ndarray, ids: list[int]) -> Descriptions:
         def check(d: Descriptions):
@@ -172,7 +188,7 @@ class Roles:
             if got != sorted(ids):
                 raise ValueError(f"ids {got} do not match the drawn ids {sorted(ids)}")
         return self._call("describe", Descriptions, DESCRIBE_PROMPT.format(ids=", ".join(map(str, ids))), image=som_image, check=check,
-                          max_new_tokens=60 * len(ids) + 100)
+                          max_new_tokens=80 * len(ids) + 300)
 
     def resolve(self, som_image: np.ndarray, descriptions: list[dict], text: str, ids: list[int]) -> Resolution:
         def check(r: Resolution):

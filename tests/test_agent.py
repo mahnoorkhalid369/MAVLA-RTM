@@ -282,3 +282,13 @@ def test_supervisor_ambiguity_asks_and_cancels(tmp_path):
 def test_supervisor_unsupported_task_asks(tmp_path):
     r, _ = run(tmp_path, StubTools(task="unsupported"))
     assert r["status"] == "CANCELLED"
+
+
+def test_parse_inconsistent_task_gets_one_retry():
+    bad = json.dumps({"task": "pick", "object": {"text": "a", "relation": "on", "anchor": "b"}, "relation": "on",
+                      "reference": {"text": "b"}})
+    good = json.dumps({"task": "pick_place", "object": {"text": "a"}, "relation": "on", "reference": {"text": "b"}})
+    vlm = RecordedVLM([bad, good])
+    t = Roles(vlm).parse("put a on b")
+    assert t.task == "pick_place" and t.object.anchor is None
+    assert "pick_place" in vlm.calls[1]  # the retry carries the validation error

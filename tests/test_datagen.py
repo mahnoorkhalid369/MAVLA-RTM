@@ -125,3 +125,25 @@ def test_rgb_effects_are_deterministic_and_bounded():
 def test_world_extent_of_a_tipped_object():
     o = ObjectSpec(1, "box", None, (0.1, 0.04, 0.02), (0, 1), 0.0, (0, 0, 0), Material((1, 1, 1), 0.5, 0.0))
     assert np.allclose(sorted(world_extent(o)), [0.02, 0.04, 0.1]) and world_extent(o)[2] == pytest.approx(0.1)
+
+
+def test_yolo_merges_mask_parts_into_one_instance(tmp_path):
+    """An occluder splitting a mask must not make two YOLO instances."""
+    import json
+
+    import cv2
+    from datagen.coco import merge_parts
+
+    m = np.zeros((60, 80), np.uint8)
+    m[10:30, 5:25] = 1
+    m[10:30, 50:70] = 1
+    parts = mask_polygons(m)
+    assert len(parts) == 2
+    poly = merge_parts([np.asarray(p, float).reshape(-1, 2) for p in parts])
+    r = np.zeros_like(m)
+    cv2.fillPoly(r, [np.round(poly).astype(np.int32)], 1)
+    assert (r & m).sum() >= 0.9 * m.sum() and (r & ~m.astype(bool)).sum() < 0.1 * m.sum()
+    coco = {"images": [{"id": 1, "file_name": "a.png", "width": 80, "height": 60}],
+            "annotations": [{"image_id": 1, "segmentation": parts}]}
+    (tmp_path / "c.json").write_text(json.dumps(coco))
+    assert coco_to_yolo(tmp_path / "c.json", tmp_path / "labels") == 1

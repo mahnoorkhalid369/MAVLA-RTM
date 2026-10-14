@@ -43,6 +43,12 @@ def _fixtures() -> list[FixtureBox]:
 
 FIXTURES = _fixtures()
 
+# Robot base column (fixed robot geometry, configuration): the simplified collision spheres are smaller
+# than the rendered base + J1 housing, so depth points inside this box are robot, never an object.
+# Used for perception exclusion ONLY (not a planning obstacle: the arm itself is inside it). The base
+# plate is 0.240 x 0.285 m (URDF); the closest workspace position is 0.34 m from the base axis.
+ROBOT_BASE_EXCLUSION = FixtureBox("robot_base_column", (0.0, 0.0, 0.25), (0.15, 0.16, 0.25))
+
 
 @dataclass
 class Tolerances:

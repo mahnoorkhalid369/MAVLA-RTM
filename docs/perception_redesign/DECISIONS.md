@@ -165,3 +165,24 @@ Design approved with changes; revision 1 kept as `ARCHITECTURE_rev1_2026-10-14.m
 - **Directional placement search:** candidate spots in the reliable pick/place ring 0.45-0.90 m
   (grasp-feasibility map), gap 20 mm, +10 mm steps to +100 mm, directions rotated 0/+-15/+-30 deg;
   `next_to` tries the four sides, closest to mid-reach (0.65 m) first.
+- **YOLO labels: one polygon per instance** (conversion fix, allowed by the brief): the converter wrote
+  one YOLO instance per mask fragment (+5.5 % lines: 83,502 vs 79,104 annotations in train), which
+  would teach the detector to split occluded objects. Fragments are now joined by zero-width bridges
+  (as Ultralytics' own COCO converter does); labels regenerated: 79,104 / 12,909 / 6,569 lines =
+  annotations (measured). No image excluded, no chunk regenerated. Test added (tests/test_datagen.py).
+- **Today's scene recaptured** with the double-render capture (20 of 21 objects visible, 1 image;
+  first capture kept as `eval_layouts/today_capture1_single_render`). With 16 boxes and 3 cylinders,
+  "recall >= 95 %" means every box and every cylinder must be found (15/16 = 93.8 %).
+- **Smoke tests before training (pretrained detector, measured):** (1) Gemma parsed "put X on Y" as
+  task "pick" and duplicated the destination in object.relation/anchor -> clearer task definitions in
+  the prompt + a structural consistency check that triggers the one allowed retry (no object
+  knowledge); (2) describe answers were truncated (Gemma listed un-numbered objects past the token
+  limit) -> budget 80 tokens per mark + 300; the exact-ids check stays strict; (3) the robot base was
+  detected and measured as an object (the simplified collision spheres are smaller than the rendered
+  base) -> a fixed robot-base exclusion box (0.30 x 0.32 x 0.50 m, perception only, not a planning
+  obstacle; nearest workspace object 0.34 m from the base axis); (4) the first trajectory after sim
+  start ran up to 94 deg behind its plan in time (DDS discovery; the simulator replays the trajectory
+  from receipt, so the joint path is unchanged) -> the agent waits for the trajectory subscriber and
+  3 s of sim time before the first motion.
+- **YOLO round budgets:** round 1 = 1.75 h (time-limited Ultralytics training, epochs fitted to the
+  time, cosine LR), leaving <= 2.25 h for rounds 2-3 within the 4 h cap.

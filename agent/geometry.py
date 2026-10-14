@@ -14,7 +14,7 @@ from dataclasses import asdict, dataclass
 import cv2
 import numpy as np
 
-from agent.config import (ABOVE_SUPPORT, FIXTURE_INFLATE, FIXTURES, GROUND_Z, MASK_ERODE_PX, MIN_POINTS, ROBOT_INFLATE,
+from agent.config import (ABOVE_SUPPORT, FIXTURE_INFLATE, FIXTURES, GROUND_Z, ROBOT_BASE_EXCLUSION, MASK_ERODE_PX, MIN_POINTS, ROBOT_INFLATE,
                           SUPPORT_SNAP, TOP_LAYER, UP_NORMAL)
 from perception.grounding import footprint_yaw, grasp_pose
 
@@ -68,7 +68,7 @@ class RobotVolume:
 
 def in_fixtures(pts: np.ndarray) -> np.ndarray:
     out = np.zeros(len(pts), bool)
-    for f in FIXTURES:
+    for f in FIXTURES + [ROBOT_BASE_EXCLUSION]:
         out |= np.all(np.abs(pts - np.asarray(f.centre)) <= np.asarray(f.half) + FIXTURE_INFLATE, axis=1)
     return out
 

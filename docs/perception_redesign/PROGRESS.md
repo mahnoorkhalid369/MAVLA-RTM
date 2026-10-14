@@ -10,6 +10,16 @@ the inventory in HARDCODING_INVENTORY.md). Evidence labels: measured / from file
 instructions) -> 5 DEMO.md, DEMO_REPORT.md, out/demo/<date>/.
 **Phase 1 — synthetic training data** (full run in progress) + architecture **revision 3 approved** (`ARCHITECTURE.md`; revs 1-2 kept). Then Phase 2 (stop after the comparison)
 
+## Autonomous run log (UTC, measured unless marked)
+- 08:49 dataset generation finished: 6,000 train / 1,000 val / 500 test_novel; verify_dataset: no
+  problems, 0 area mismatches, objects with a mask 94.4 / 95.6 / 95.0 %, 2.82 GB, peak GPU 2.9 GB.
+  YOLO labels fixed to one polygon per instance (DECISIONS). Rendering slowdown (0.89 -> 1.5 s/img
+  mid train_2000, later back to ~0.9 s): CPU-bound (GPU 7 % util); cause unverified (likely CPU clock).
+- 08:50 today's scene recaptured (20/21 objects, 1 image).
+- 08:51-08:54 two agent smoke tests with the sim (pretrained detector): plumbing works end to end;
+  4 bugs fixed (DECISIONS). Commit after this entry.
+- ~08:58 YOLO round 1 started (1.75 h budget), sim stopped.
+
 ## Phases (the merged plan is ARCHITECTURE.md §12; this table tracks the data / perception track)
 | # | Phase | Status | Evidence |
 |---|---|---|---|

@@ -95,6 +95,11 @@ def main() -> int:
         if not (bridge.ready(600) and executor.wait_ready(120)):
             print("[agent] simulator not ready: stopping", flush=True)
             return 2
+        # DDS discovery: the first trajectory is delayed if the simulator has not matched our publisher yet
+        end = time.monotonic() + 60
+        while executor.traj_pub.get_subscription_count() == 0 and time.monotonic() < end:
+            executor.spin(0.2)
+        executor.wait_sim(3.0)
         print("[agent] ready", flush=True)
         if a.instruction:
             r = run_one(a.instruction, out, bridge, detector, vlm, executor)

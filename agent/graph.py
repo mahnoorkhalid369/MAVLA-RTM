@@ -138,7 +138,7 @@ class Supervisor:
         return {"next": "OBSERVING", "task": task.model_dump()}
 
     def _observing(self, state) -> dict:
-        p = self.tools.park_for_view(self.ctx.get("view_xy", (0.65, 0.25)))
+        p = self.tools.park_for_view(self.ctx.get("view_xy", (0.0, 0.25)))
         if not p["ok"]:
             return self._fail(state, "perception", "no collision-free pose that leaves the table camera's view clear")
         try:
