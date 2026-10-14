@@ -80,7 +80,17 @@ def format_event(e: dict) -> Line | None:  # noqa: C901 (a flat dispatch on the 
             return Line(w, "EXECUTION", f"{e.get('label')}: FAILED at {e.get('failed_step')!r}: {e.get('reason')}", "error")
         if t == "park_for_view" and not e.get("ok"):
             return Line(w, "MANIPULATION", "no collision-free pose with a clear camera view", "error")
+        if t == "describe_reused":
+            return None  # summarised by the "described N objects" line
+        if t == "shortlist":
+            if not e.get("ok"):
+                return Line(w, "GEMMA", f"shortlist failed ({e.get('reason')}): describing every object", "warn")
+            lists = "; ".join(f"{k!r}: {v}" for k, v in (e.get("lists") or {}).items())
+            extra = f" (empty for {e.get('fallback_all')}: describing every object)" if e.get("fallback_all") else ""
+            return Line(w, "GEMMA", f"one call over {e.get('objects')} objects shortlisted {lists} in {e.get('seconds')} s{extra}")
         if t == "return_home":
+            if e.get("ok") and e.get("note"):
+                return Line(w, "SAFETY", f"HOME: {e.get('note')}; no further motion")
             if e.get("ok"):
                 return Line(w, "SAFETY", f"HOME path collision-checked: free ({e.get('planned_s')} s planned)")
             return Line(w, "SAFETY", f"HOME not attempted: {e.get('reason')}", "error")

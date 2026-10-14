@@ -39,6 +39,37 @@ class GemmaVLM:
     def generate(self, text, image=None, system=None, max_new_tokens=None, thinking=None) -> str:
         return self.model.generate(text, image=image, system=system, max_new_tokens=max_new_tokens, thinking=thinking)
 
+    def _generate_batch_disabled(self, text: str, images: list, max_new_tokens: int) -> list[str]:
+        """DISABLED (benchmarked 2026-10-14): batched multimodal generation with left padding returned
+        invalid / pad-only rows for 7 of 9 crops and was not faster than single calls. Kept for reference;
+        describe_many falls back to one call per crop because GemmaVLM has no `generate_batch`."""
+        import torch
+
+        m = self.model
+        msgs = [[{"role": "user", "content": [{"type": "image", "image": m._image(img)}, {"type": "text", "text": text}]}]
+                for img in images]
+        tok = m.processor.tokenizer
+        old_side = tok.padding_side
+        tok.padding_side = "left"
+        try:
+            inputs = m.processor.apply_chat_template(msgs, tokenize=True, return_dict=True, return_tensors="pt",
+                                                     add_generation_prompt=True, enable_thinking=False,
+                                                     processor_kwargs={"padding": True}).to(m.model.device)
+            with torch.inference_mode():
+                out = m.model.generate(**inputs, max_new_tokens=max_new_tokens, do_sample=False)
+        finally:
+            tok.padding_side = old_side
+        n = inputs["input_ids"].shape[-1]
+        answers = []
+        pad = tok.pad_token_id
+        for i, row in enumerate(out):
+            raw = m.processor.decode(row[n:], skip_special_tokens=False)
+            prompt = inputs["input_ids"][i]
+            prompt = prompt[prompt != pad] if pad is not None else prompt  # this row's prompt without left padding
+            parsed = m.processor.parse_response(raw, prefix=prompt[None])
+            answers.append(str(parsed.get("content") if isinstance(parsed, dict) else parsed).strip())
+        return answers
+
 
 class RecordedVLM:
     """Replays recorded answers in order (tests: no GPU)."""
@@ -84,6 +115,10 @@ class ObjectDescription(BaseModel):
 
 class Descriptions(BaseModel):
     objects: list[Description]
+
+
+class Shortlist(BaseModel):
+    lists: dict[str, list[int]]
 
 
 class Resolution(BaseModel):
@@ -141,6 +176,12 @@ DESCRIBE_PROMPT = """Each object in the image is outlined and numbered. The numb
 For EVERY number, describe the object inside that outline as you see it. Answer with ONE JSON object only:
 {{"objects": [{{"id": <number>, "name": "<short name>", "colour": "<colour>", "shape": "<shape>", "material": "<material>"}}, ...]}}
 Include every number exactly once and no other numbers."""
+
+SHORTLIST_PROMPT = """The picture shows {n} objects, each in its own tile with its number written above it.
+For each phrase below, list EVERY numbered object that could be what the phrase describes. Include
+doubtful ones; leave out only objects that clearly do not fit. A list may be empty.
+{phrases}
+Answer with ONE JSON object only: {{"lists": {{{keys}}}}}"""
 
 DESCRIBE_ONE_PROMPT = """This picture shows one object at full brightness; everything around it is dimmed.
 Describe that object as you see it. Answer with ONE JSON object only:
@@ -211,6 +252,58 @@ class Roles:
                 raise ValueError(f"ids {got} do not match the drawn ids {sorted(ids)}")
         return self._call("describe", Descriptions, DESCRIBE_PROMPT.format(ids=", ".join(map(str, ids))), image=som_image, check=check,
                           max_new_tokens=80 * len(ids) + 300)
+
+    def shortlist(self, grid_image: np.ndarray, phrases: dict[str, str], ids: list[int]) -> dict[str, list[int]]:
+        """One call for all objects: per phrase, the numbered objects that could match (high recall)."""
+        def check(sl: Shortlist):
+            if set(sl.lists) != set(phrases):
+                raise ValueError(f"keys {sorted(sl.lists)} must be exactly {sorted(phrases)}")
+            bad = sorted({i for v in sl.lists.values() for i in v} - set(ids))
+            if bad:
+                raise ValueError(f"numbers {bad} are not in the picture")
+        text = SHORTLIST_PROMPT.format(n=len(ids), phrases="\n".join(f'{k}: "{v}"' for k, v in phrases.items()),
+                                       keys=", ".join(f'"{k}": [<numbers>]' for k in phrases))
+        return self._call("shortlist", Shortlist, text, image=grid_image, check=check, max_new_tokens=60 + 40 * len(phrases)).lists
+
+    def describe_many(self, crops: dict[int, np.ndarray], batch: int = 8) -> dict[int, ObjectDescription]:
+        """describe_one for many crops: batched calls with the identical prompt (if the VLM supports it);
+        an answer that fails validation gets the usual single retry on its own."""
+        if not hasattr(self.vlm, "generate_batch"):
+            return {k: self.describe_one(c) for k, c in crops.items()}
+        out, keys = {}, list(crops)
+        for i in range(0, len(keys), batch):
+            ks = keys[i:i + batch]
+            t0 = time.monotonic()
+            raws = self.vlm.generate_batch(DESCRIBE_ONE_PROMPT, [crops[k] for k in ks], max_new_tokens=120)
+            dt = (time.monotonic() - t0) / len(ks)
+            for k, raw in zip(ks, raws):
+                try:
+                    out[k] = ObjectDescription.model_validate(_json(raw))
+                    if self.log:
+                        self.log("vlm", role="describe", attempt=1, prompt=DESCRIBE_ONE_PROMPT, answer=raw, valid=True,
+                                 seconds=round(dt, 2), batched=len(ks))
+                except (ValueError, ValidationError, json.JSONDecodeError) as exc:
+                    if self.log:
+                        self.log("vlm", role="describe", attempt=1, prompt=DESCRIBE_ONE_PROMPT, answer=raw, valid=False,
+                                 error=str(exc).splitlines()[0][:200], seconds=round(dt, 2), batched=len(ks))
+                    out[k] = self._retry_one(crops[k], str(exc).splitlines()[0][:200])  # the one retry
+        return out
+
+    def _retry_one(self, crop, error: str) -> ObjectDescription:
+        prompt = f"{DESCRIBE_ONE_PROMPT}\n\nYour previous answer was not valid ({error}). Answer again with only the JSON."
+        t0 = time.monotonic()
+        raw = self.vlm.generate(prompt, image=crop, max_new_tokens=120, thinking=self.thinking)
+        try:
+            d = ObjectDescription.model_validate(_json(raw))
+            ok, err = True, None
+        except (ValueError, ValidationError, json.JSONDecodeError) as exc:
+            d, ok, err = None, False, str(exc).splitlines()[0][:200]
+        if self.log:
+            self.log("vlm", role="describe", attempt=2, prompt=prompt, answer=raw, valid=ok, error=err,
+                     seconds=round(time.monotonic() - t0, 2))
+        if d is None:
+            raise VLMFailure(f"describe: invalid answer after one retry ({err})")
+        return d
 
     def describe_one(self, crop_image: np.ndarray) -> ObjectDescription:
         return self._call("describe", ObjectDescription, DESCRIBE_ONE_PROMPT, image=crop_image, max_new_tokens=120)

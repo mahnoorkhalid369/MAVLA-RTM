@@ -208,8 +208,11 @@ class StubTools:
         return SimpleNamespace(marks={k: None for k in self.OBJECTS}, measured={k: g for k, (g, _) in self.OBJECTS.items()},
                                object_ids=ids, descriptions={k: d for k, (_, d) in self.OBJECTS.items()}, frame_id="t")
 
-    def describe(self, obs):
+    def describe(self, obs, marks=None):
         pass
+
+    def shortlist(self, obs, texts):
+        self.shortlisted = texts
 
     def update_world(self, obs):
         return []
@@ -478,3 +481,117 @@ def test_live_channel_writes_masks_ids_and_current_run(tmp_path):
     assert lab[7, 7] == 1 and lab[25, 35] == 2 and lab[0, 0] == 0
     assert p["marks"]["1"]["object_id"] == 7 and p["marks"]["1"]["score"] == 0.91 and p["camera"] == "table"
     assert json.loads((tmp_path / "current.json").read_text())["instruction"] == "put a on b"
+
+
+
+# ------------------------------------------------------------------- latency: fewer VLM calls / moves
+def _obs_with(n):
+    from agent.tools import Observation
+    rgb = np.zeros((80, 200, 3), np.uint8)
+    marks, measured = {}, {}
+    for k in range(1, n + 1):
+        m = np.zeros((80, 200), bool)
+        m[10:20, 15 * k:15 * k + 8] = True
+        marks[k], measured[k] = m, geom(0.4 + 0.02 * k, 0.3, 0.04)
+    return Observation("table_001", "table", rgb, rgb, marks, measured)
+
+
+def test_shortlist_describes_only_candidates(tmp_path):
+    t, _ = tools_with([])
+    t.run_dir = tmp_path
+    (tmp_path / "images").mkdir()
+    obs = _obs_with(6)
+    vlm = RecordedVLM(['{"lists": {"A": [2, 5], "B": [4]}}', '{"name": "cube", "colour": "red"}',
+                       '{"name": "cube", "colour": "orange"}', '{"name": "box", "colour": "tan"}'])
+    t.roles = Roles(vlm)
+    t.shortlist(obs, ["red cube", "tan box", None])
+    assert len(vlm.calls) == 4  # 1 batched shortlist + 3 crops instead of 6 crops
+    assert obs.shortlists == {"red cube": [2, 5], "tan box": [4]} and sorted(obs.descriptions) == [2, 4, 5]
+    assert t.pool(obs, "red cube") == [2, 5] and t.pool(obs, "something else") == list(obs.marks)
+
+
+def test_shortlist_empty_or_failed_falls_back_to_all(tmp_path):
+    t, _ = tools_with([])
+    t.run_dir = tmp_path
+    (tmp_path / "images").mkdir()
+    obs = _obs_with(3)
+    d = '{"name": "x"}'
+    t.roles = Roles(RecordedVLM(['{"lists": {"A": []}}', d, d, d]))
+    t.shortlist(obs, ["odd thing"])
+    assert sorted(obs.descriptions) == [1, 2, 3]
+    obs = _obs_with(3)
+    t.roles = Roles(RecordedVLM(['nope', '{"lists": {"A": [9]}}', d, d, d]))  # invalid twice -> fallback
+    t.shortlist(obs, ["odd thing"])
+    assert sorted(obs.descriptions) == [1, 2, 3]
+
+
+def test_resolution_only_sees_the_shortlist(tmp_path):
+    t, _ = tools_with([])
+    t.run_dir = tmp_path
+    (tmp_path / "images").mkdir()
+    obs = _obs_with(6)
+    obs.shortlists = {"red cube": [2, 5]}
+    obs.descriptions = {2: {"name": "cube", "colour": "red"}, 5: {"name": "cube", "colour": "dark red"}}
+    vlm = RecordedVLM(['{"id": 2}', '{"id": 2, "ambiguous": false, "candidates": [2]}'])
+    t.roles = Roles(vlm)
+    r = t.resolve(obs, "red cube")
+    assert r.id == 2 and "1:" not in vlm.calls[0] and "2:" in vlm.calls[0] and "5:" in vlm.calls[0]
+    vlm2 = RecordedVLM(['{"id": 4}', '{"id": null, "ambiguous": true, "candidates": [2]}',
+                        '{"id": null, "ambiguous": true, "candidates": [2, 5]}'])
+    t.roles = Roles(vlm2)
+    assert t.resolve(obs, "red cube").id is None  # an object outside the shortlist is rejected (retry asked)
+
+
+def test_describe_many_batches_and_retries_invalid_items_once():
+    class BatchVLM(RecordedVLM):
+        def __init__(self, batch_answers, single):
+            super().__init__(single)
+            self.batches = list(batch_answers)
+
+        def generate_batch(self, text, images, max_new_tokens):
+            return [self.batches.pop(0) for _ in images]
+    img = np.zeros((10, 10, 3), np.uint8)
+    vlm = BatchVLM(['{"name": "a"}', 'garbage', '{"name": "c"}'], ['{"name": "b"}'])
+    d = Roles(vlm).describe_many({1: img, 2: img, 3: img})
+    assert {k: v.name for k, v in d.items()} == {1: "a", 2: "b", 3: "c"} and len(vlm.calls) == 1  # one retry for #2
+    vlm = BatchVLM(['bad'], ['still bad'])
+    with pytest.raises(VLMFailure):
+        Roles(vlm).describe_many({1: img})
+
+
+def test_placement_view_prefers_home_and_home_then_skips_the_move():
+    from control.robot import ARM_HOME
+    t, _ = _home_tools(np.array(ARM_HOME, float))
+    r = t.park_for_view((0.72, -0.08))  # in front of the camera: HOME does not block the view
+    assert r["ok"] and r["j1"] == 0.0
+    r = t.return_home()
+    assert r["ok"] and r["reason"] == "already at HOME" and not [x for x in t.executed if x[0] == "return HOME"]
+
+
+def test_description_memory_reuses_only_unchanged_objects():
+    from agent.tools import DescriptionMemory
+    m = DescriptionMemory()
+    g, c = geom(0.5, 0.3, 0.04), np.array([200.0, 30.0, 30.0])
+    m.store(g, c, {"name": "cube", "colour": "red"})
+    assert m.lookup(geom(0.505, 0.302, 0.041), c + 5)["colour"] == "red"      # same object, measurement noise
+    assert m.lookup(geom(0.6, 0.3, 0.04), c) is None                           # moved
+    assert m.lookup(g, np.array([30.0, 200.0, 30.0])) is None                  # different appearance at the same place
+    assert m.lookup(geom(0.5, 0.3, 0.09), c) is None                           # something stacked / taller
+
+
+def test_describe_uses_session_memory_and_stores_new(tmp_path):
+    from agent.tools import DescriptionMemory
+    t, _ = tools_with([])
+    t.run_dir = tmp_path
+    (tmp_path / "images").mkdir()
+    t.memory = DescriptionMemory()
+    obs = _obs_with(3)
+    t.roles = Roles(RecordedVLM(['{"name": "a"}', '{"name": "b"}', '{"name": "c"}']))
+    t.describe(obs)
+    obs2 = _obs_with(3)
+    t2, _ = tools_with([])
+    t2.run_dir, t2.memory = tmp_path, t.memory
+    vlm = RecordedVLM([])
+    t2.roles = Roles(vlm)
+    t2.describe(obs2)  # next instruction, same scene: no VLM call
+    assert not vlm.calls and [obs2.descriptions[k]["name"] for k in (1, 2, 3)] == ["a", "b", "c"]

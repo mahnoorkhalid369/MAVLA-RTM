@@ -42,7 +42,7 @@ def stop_sim(p: subprocess.Popen | None) -> None:
         os.killpg(p.pid, signal.SIGKILL)
 
 
-def run_one(instruction: str, out: Path, bridge, detector, vlm, executor, responder, live=None) -> dict:
+def run_one(instruction: str, out: Path, bridge, detector, vlm, executor, responder, live=None, memory=None) -> dict:
     from agent.graph import EventLog, Supervisor
     from agent.tools import Tools
     from agent.vlm_roles import Roles
@@ -52,7 +52,7 @@ def run_one(instruction: str, out: Path, bridge, detector, vlm, executor, respon
     if live:
         live.start_run(out, instruction)
     try:
-        tools = Tools(bridge, detector, Roles(vlm, log), executor, log, out, live)
+        tools = Tools(bridge, detector, Roles(vlm, log), executor, log, out, live, memory)
         report = Supervisor(tools, log, out, responder).run(instruction, thread_id=out.name)
     except Exception as exc:  # an unexpected error is a failure, never a success
         log("error", error=repr(exc))
@@ -77,6 +77,7 @@ def main() -> int:
     ap.add_argument("--ask", choices=["terminal", "scripted"], default="terminal",
                     help="who answers clarification questions: the person at this terminal (default) or, for "
                          "unattended rehearsals only, a scripted 'cancel'")
+    ap.add_argument("--no-reuse", action="store_true", help="describe every object again for each instruction")
     ap.add_argument("--live-dir", default=str(ROOT / "out/demo/live"),
                     help="where the optional demo viewer reads the latest perception and the active run ('' = off)")
     ap.add_argument("--ask-timeout", type=float, default=None,
@@ -88,7 +89,9 @@ def main() -> int:
     timeout = Budgets().question_timeout_s if a.ask_timeout is None else a.ask_timeout
     responder = TerminalResponder(timeout_s=timeout) if a.ask == "terminal" else ScriptedResponder(["cancel"])
     from agent.live import LiveChannel
+    from agent.tools import DescriptionMemory
     live = LiveChannel(a.live_dir) if a.live_dir else None
+    memory = None if a.no_reuse else DescriptionMemory()  # descriptions reused across this session's instructions
     out.mkdir(parents=True, exist_ok=True)
 
     from agent.vlm_roles import GemmaVLM
@@ -117,7 +120,7 @@ def main() -> int:
         executor.wait_sim(3.0)
         print("[agent] ready", flush=True)
         if a.instruction:
-            r = run_one(a.instruction, out, bridge, detector, vlm, executor, responder, live)
+            r = run_one(a.instruction, out, bridge, detector, vlm, executor, responder, live, memory)
             print(f"[agent] {r['status']}: {r['message']}", flush=True)
             return 0
         n = 0
@@ -128,7 +131,7 @@ def main() -> int:
                 break
             text = text.strip()
             n += 1
-            r = run_one(text, out / f"{n:02d}", bridge, detector, vlm, executor, responder, live)
+            r = run_one(text, out / f"{n:02d}", bridge, detector, vlm, executor, responder, live, memory)
             print(f"[agent] {r['status']}: {r['message']}", flush=True)
         return 0
     finally:

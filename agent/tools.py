@@ -17,13 +17,46 @@ import numpy as np
 
 from agent.config import FIXTURES, Relations, Tolerances, unit
 from agent.geometry import RobotVolume, measure, snap_supports
-from agent.somark import draw_marks, draw_names, isolate, montage
+from agent.somark import draw_marks, draw_names, grid, isolate, montage
 from agent.world import WorldModel
 from control.collision import Box, CollisionChecker
 from control.kinematics import Kinematics
 from control.motion import PlanningError, joint_move
 from control.robot import ARM_HOME, ARM_SPEED, gripper_gap, table_camera_pose
 from control.skills import Held, SkillPlanner
+
+
+def mean_rgb(rgb: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    return rgb[mask.astype(bool)].reshape(-1, 3).mean(axis=0) if mask.any() else np.zeros(3)
+
+
+class DescriptionMemory:
+    """VLM descriptions kept across the instructions of one session. A description is reused only for a
+    measurement at the same place with the same size (WorldModel gates: 30 mm, top 20 mm, footprint 20 mm)
+    AND the same mean colour inside the mask (every channel within COLOUR_TOL of 255): anything that
+    moved, was covered or looks different is described again."""
+
+    COLOUR_TOL = 20.0
+
+    def __init__(self) -> None:
+        self.entries: list[tuple[dict, np.ndarray, dict]] = []
+
+    @staticmethod
+    def _same_place(a: dict, b: dict) -> bool:
+        from agent.world import SAME_FOOTPRINT, SAME_TOP, SAME_XY
+        return (np.hypot(a["centre"][0] - b["centre"][0], a["centre"][1] - b["centre"][1]) < SAME_XY
+                and abs(a["top_z"] - b["top_z"]) < SAME_TOP and abs(a["footprint"][0] - b["footprint"][0]) < SAME_FOOTPRINT)
+
+    def lookup(self, g: dict, colour: np.ndarray) -> dict | None:
+        for eg, ec, d in self.entries:
+            if self._same_place(eg, g) and np.all(np.abs(ec - colour) <= self.COLOUR_TOL):
+                return dict(d)
+        return None
+
+    def store(self, g: dict, colour: np.ndarray, description: dict) -> None:
+        colour = np.asarray(colour, float)
+        self.entries = [e for e in self.entries if not (self._same_place(e[0], g) and np.all(np.abs(e[1] - colour) <= self.COLOUR_TOL))]
+        self.entries.append((dict(g), colour, dict(description)))
 
 
 @dataclass
@@ -38,6 +71,7 @@ class Observation:
     descriptions: dict[int, dict] = field(default_factory=dict)  # mark number -> VLM description
     excluded: list[dict] = field(default_factory=list)
     scores: dict[int, float] = field(default_factory=dict)  # mark number -> detector confidence
+    shortlists: dict[str, list[int]] = field(default_factory=dict)  # reference text -> candidate marks
 
 
 @dataclass
@@ -59,9 +93,10 @@ class Tools:
     HOME_TOLERANCE_DEG = 1.5  # per joint: RosExecutor's validated reach tolerance (a step fails beyond it)
     OPEN_FINGER_DEG = 2.0  # finger_joint <= this = gripper open (open = 0 deg; 2 deg = 83 mm gap)
 
-    def __init__(self, bridge, detector, roles, executor, log, run_dir, live=None) -> None:
+    def __init__(self, bridge, detector, roles, executor, log, run_dir, live=None, memory=None) -> None:
         self.bridge, self.detector, self.roles, self.ex, self.log, self.run_dir = bridge, detector, roles, executor, log, run_dir
         self.live = live  # agent.live.LiveChannel or None (viewer is optional)
+        self.memory = memory  # agent.tools.DescriptionMemory shared by the instructions of one session, or None
         self.world = WorldModel()
         self.kin = Kinematics()
         self.wrist_kin = Kinematics(tip="camera_color_optical_frame")
@@ -101,29 +136,76 @@ class Tools:
             self.live.perception(obs)
         return obs
 
-    def describe(self, obs: Observation) -> None:
-        """The VLM's own words for every measured object, each from its own isolated crop."""
+    def describe(self, obs: Observation, marks=None) -> None:
+        """The VLM's own words for the given marks (default: all), each from its own isolated crop.
+        Objects already described in this task (same place and size) keep their description."""
         if not obs.marks:
             return
-        obs.descriptions = {}
-        for k, m in obs.marks.items():
-            known = self.world.match(obs.measured[k])  # same place / size as a described object: reuse
+        todo = {}
+        for k in (list(obs.marks) if marks is None else marks):
+            if k in obs.descriptions:
+                continue
+            known = self.world.match(obs.measured[k])
             if known is not None and self.world.objects[known].description:
                 obs.descriptions[k] = dict(self.world.objects[known].description)
                 continue
-            c = isolate(obs.rgb, m)
+            if self.memory is not None:
+                d = self.memory.lookup(obs.measured[k], mean_rgb(obs.rgb, obs.marks[k]))
+                if d is not None:
+                    obs.descriptions[k] = d
+                    self.log("tool", tool="describe_reused", mark=k, description=d)
+                    continue
+            c = isolate(obs.rgb, obs.marks[k])
             cv2.imwrite(str(self.run_dir / "images" / f"{obs.frame_id}_obj_{k}.jpg"), cv2.cvtColor(c, cv2.COLOR_RGB2BGR))
-            obs.descriptions[k] = self.roles.describe_one(c).model_dump()
-        img = draw_names(obs.som, obs.marks, {k: f"{v.get('colour', '')} {v.get('name', '')}" for k, v in obs.descriptions.items()})
+            todo[k] = c
+        if todo:  # one call per crop (same prompt as validated)
+            for k, d in self.roles.describe_many(todo).items():
+                obs.descriptions[k] = d.model_dump()
+                if self.memory is not None:
+                    self.memory.store(obs.measured[k], mean_rgb(obs.rgb, obs.marks[k]), obs.descriptions[k])
+        img = draw_names(obs.som, {k: obs.marks[k] for k in obs.descriptions},
+                         {k: f"{v.get('colour', '')} {v.get('name', '')}" for k, v in obs.descriptions.items()})
         cv2.imwrite(str(self.run_dir / "images" / f"{obs.frame_id}_names.jpg"), cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
         if self.live:
             self.live.perception(obs)
+
+    def shortlist(self, obs: Observation, texts: list[str]) -> None:
+        """One batched VLM call over a grid of every object's isolated crop: per reference text, the
+        objects that could match. Only those are then described. A failed call, or an empty list for a
+        text, falls back to describing every object (open-ended references still work)."""
+        texts = list(dict.fromkeys(t for t in texts if t))
+        if not obs.marks or not texts:
+            return
+        phrases = {chr(ord("A") + i): t for i, t in enumerate(texts)}
+        img = grid({k: isolate(obs.rgb, m) for k, m in obs.marks.items()})
+        cv2.imwrite(str(self.run_dir / "images" / f"{obs.frame_id}_grid.jpg"), cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
+        t0 = time.monotonic()
+        try:
+            lists = self.roles.shortlist(img, phrases, list(obs.marks))
+        except Exception as exc:  # VLMFailure: describe everything instead (previous behaviour)
+            self.log("tool", tool="shortlist", ok=False, reason=str(exc))
+            self.describe(obs)
+            return
+        obs.shortlists = {phrases[k]: sorted(set(v)) for k, v in lists.items()}
+        empty = [t for t, v in obs.shortlists.items() if not v]
+        self.log("tool", tool="shortlist", ok=True, lists=obs.shortlists, objects=len(obs.marks),
+                 seconds=round(time.monotonic() - t0, 2), fallback_all=empty)
+        if empty:
+            self.describe(obs)
+        else:
+            self.describe(obs, sorted({k for v in obs.shortlists.values() for k in v}))
+
+    def pool(self, obs: Observation, text: str) -> list[int]:
+        """Candidate marks for a reference: its shortlist, or every object when there is none."""
+        return obs.shortlists.get(text) or list(obs.marks)
 
     def update_world(self, obs: Observation) -> list[dict]:
         """Store every measured object; returns neighbours that moved (whole-scene re-perception)."""
         before = {oid: list(o.geometry["centre"]) for oid, o in self.world.objects.items()}
         for k, g in obs.measured.items():
             obs.object_ids[k] = self.world.observe(g, obs.descriptions.get(k))
+            if k not in obs.descriptions and self.world.objects[obs.object_ids[k]].description:  # known: no VLM call
+                obs.descriptions[k] = dict(self.world.objects[obs.object_ids[k]].description)
         moved = []
         visible_top = {oid for oid, o in self.world.objects.items() if o.geometry.get("tilt_deg") is not None}
         for oid, c in before.items():
@@ -145,18 +227,21 @@ class Tools:
         return ws | {w[:-1] for w in ws if len(w) > 3 and w.endswith("s")}  # plural -> singular
 
     def lexical_candidates(self, obs: Observation, text: str) -> list[int]:
-        """Marks whose VLM description contains every word of the user's reference (the VLM's own words;
-        deterministic, no word lists)."""
+        """Marks (among the reference's candidates) whose VLM description contains every word of the
+        user's reference (the VLM's own words; deterministic, no word lists)."""
         need = self.words(text)
-        return [k for k, d in obs.descriptions.items()
-                if need and need <= self.words(" ".join(str(d.get(f, "")) for f in ("name", "colour", "shape", "material")))]
+        pool = set(self.pool(obs, text)) if obs.marks else set(obs.descriptions)
+        return [k for k, d in obs.descriptions.items() if k in pool and
+                need and need <= self.words(" ".join(str(d.get(f, "")) for f in ("name", "colour", "shape", "material")))]
 
     def resolve(self, obs: Observation, text: str):
         """VLM resolution over the descriptions, cross-checked: if the pick is not among the objects whose
         description contains every word of the reference, or several objects do, the VLM compares those
         objects' isolated crops side by side and must pick one (or say ambiguous -> ask the user)."""
-        descs = [{"id": k, **obs.descriptions.get(k, {})} for k in obs.marks]
-        r = self.roles.resolve(obs.som, descs, text, list(obs.marks))
+        pool = self.pool(obs, text)
+        self.describe(obs, pool)  # no-op for objects already described
+        descs = [{"id": k, **obs.descriptions.get(k, {})} for k in pool]
+        r = self.roles.resolve(obs.som, descs, text, pool)
         lex = self.lexical_candidates(obs, text)
         need_compare = bool(lex) and (len(lex) > 1 or (r.id is not None and r.id not in lex))
         self.log("tool", tool="lexical_check", text=text, resolver_id=r.id, lexical=lex, compare=need_compare)
@@ -335,7 +420,9 @@ class Tools:
         checker = CollisionChecker(self.obstacles())
         targets = [tuple(target_xy)] if target_xy is not None else self.workspace_points()
         tried, best = [], None
-        for j1 in self.PARK_J1_DEG:
+        # for a single target try HOME (J1 0) first: if it sees the target, the view move IS the return HOME
+        order = ((0.0,) + tuple(j for j in self.PARK_J1_DEG if j != 0.0)) if target_xy is not None else self.PARK_J1_DEG
+        for j1 in order:
             q = np.asarray(ARM_HOME, float).copy()
             q[0] = np.radians(j1)
             c, r, idx, names = checker.spheres(q)
@@ -377,6 +464,9 @@ class Tools:
             out = {"ok": False, "reason": "the robot is still holding an object"}
         elif finger > self.OPEN_FINGER_DEG:
             out = {"ok": False, "reason": f"gripper not open (finger {finger:.1f} deg > {self.OPEN_FINGER_DEG} deg)"}
+        elif float(np.degrees(np.abs(self.bridge.q() - np.array(ARM_HOME, float))).max()) < 0.1:
+            self.log("tool", tool="return_home", ok=True, planned_s=0.0, note="already at HOME (the placement view pose)")
+            return {"ok": True, "reason": "already at HOME", "result": None}
         else:
             q0 = self.bridge.q()
             traj = joint_move(self.kin, q0, np.array(ARM_HOME, float), ARM_SPEED)
@@ -427,8 +517,7 @@ class Tools:
                       "z_error_mm": round(dz * 1000, 1), "tilt_deg": None if tilt == float("inf") else round(tilt, 2),
                       "pass": xy <= self.tol.xy_m and abs(dz) <= self.tol.z_m and tilt <= self.tol.tilt_deg})
             o.geometry, o.status = g, "on_surface"
-        self.describe(obs)
-        moved = self.update_world(obs)
+        moved = self.update_world(obs)  # geometric check: no VLM calls (known objects keep their description)
         v["disturbed_neighbours"] = [m for m in moved if m["id"] != plan.object_id]
         self.log("verification", **v)
         return v

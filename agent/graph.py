@@ -171,7 +171,7 @@ class Supervisor:
             return self._fail(state, "perception", "no collision-free pose that leaves the table camera's view clear")
         try:
             obs = self.tools.perceive("table")
-            self.tools.describe(obs)
+            self.tools.describe(obs)  # every object (a one-image shortlist was benchmarked and rejected: 4/8 wrong)
         except (VLMFailure, TimeoutError) as exc:
             return self._fail(state, "perception", str(exc))
         self.tools.update_world(obs)

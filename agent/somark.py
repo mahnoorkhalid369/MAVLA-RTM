@@ -91,3 +91,23 @@ def montage(crops: dict[int, np.ndarray], height: int = 224) -> np.ndarray:
         tiles.append(np.vstack([head, c]))
         tiles.append(np.full((height + 36, 12, 3), 255, np.uint8))  # white gap between objects
     return np.hstack(tiles[:-1])
+
+
+def grid(crops: dict[int, np.ndarray], tile: int = 150, cols: int = 6) -> np.ndarray:
+    """All isolated crops in one picture: square tiles, each with its number in a header ABOVE it
+    (nothing drawn on the objects). For one batched VLM call instead of one call per object."""
+    keys = list(crops)
+    rows = (len(keys) + cols - 1) // cols
+    head = 30
+    out = np.full((rows * (tile + head), cols * tile, 3), 255, np.uint8)
+    for i, k in enumerate(keys):
+        c = crops[k]
+        s = tile / max(c.shape[:2])
+        c = cv2.resize(c, (max(1, int(c.shape[1] * s)), max(1, int(c.shape[0] * s))), interpolation=cv2.INTER_AREA)
+        y, x = (i // cols) * (tile + head), (i % cols) * tile
+        out[y:y + head, x:x + tile] = 0
+        cv2.putText(out, str(k), (x + tile // 2 - 12, y + 22), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2, cv2.LINE_AA)
+        oy, ox = y + head + (tile - c.shape[0]) // 2, x + (tile - c.shape[1]) // 2
+        out[oy:oy + c.shape[0], ox:ox + c.shape[1]] = c
+        cv2.rectangle(out, (x, y), (x + tile - 1, y + head + tile - 1), (255, 255, 255), 2)
+    return out
