@@ -22,8 +22,16 @@ from isaacsim import SimulationApp  # noqa: E402
 ap = argparse.ArgumentParser()
 ap.add_argument("--frames", type=int, default=1)
 ap.add_argument("--name", default="today")
+ap.add_argument("--layout", type=int, default=None, help="re-arrange the objects with datagen/eval_layouts.py (index)")
 args = ap.parse_args()
 app = SimulationApp({"headless": True, "width": 1280, "height": 720})
+
+import carb  # noqa: E402
+
+for key, value in (("/rtx/materialDb/syncLoads", True), ("/rtx/hydra/materialSyncLoads", True),
+                   ("/omni.kit.plugin/syncUsdLoads", True), ("/rtx-transient/resourcemanager/texturestreaming/async", False),
+                   ("/rtx-transient/resourcemanager/enableTextureStreaming", False)):
+    carb.settings.get_settings().set(key, value)  # no frame before materials are ready (pilot finding)
 
 import cv2  # noqa: E402
 import numpy as np  # noqa: E402
@@ -46,6 +54,21 @@ def main() -> int:
     app.run_coroutine(setup_scene())
     cam_path, _ = add_table_camera()
     stage = stage_utils.get_current_stage()
+    layout = None
+    if args.layout is not None:  # move the objects (before physics starts); the frozen scene files are unchanged
+        from datagen.eval_layouts import base_height, rearranged_layout
+        from pxr import Gf, UsdGeom
+
+        layout = rearranged_layout(args.layout)
+        for name, p in layout.items():
+            o = OBJECTS[name]
+            z = base_height(layout, name) + o.height / 2 + 0.001
+            half = np.radians(p["yaw_deg"]) / 2
+            for op in UsdGeom.Xformable(stage.GetPrimAtPath(f"/World/Objects/{name}")).GetOrderedXformOps():
+                if op.GetOpType() == UsdGeom.XformOp.TypeTranslate:
+                    op.Set(type(op.Get())(p["xy"][0], p["xy"][1], z))
+                elif op.GetOpType() == UsdGeom.XformOp.TypeOrient:
+                    op.Set(type(op.Get())(float(np.cos(half)), Gf.Vec3f(0, 0, float(np.sin(half)))))
     for name in NAMES:
         semantics_utils.add_labels(stage.GetPrimAtPath(f"/World/Objects/{name}"), labels="object", taxonomy="class")
     app_utils.play()
@@ -62,10 +85,12 @@ def main() -> int:
     for sub in ("images", "masks", "depth"):
         (out / sub).mkdir(parents=True, exist_ok=True)
     objects = RigidPrim([f"/World/Objects/{n}" for n in NAMES])
-    coco = {"images": [], "annotations": [], "categories": CATEGORIES, "info": {"layout": args.name, "source": "sim/scene.py"}}
+    coco = {"images": [], "annotations": [], "categories": CATEGORIES,
+            "info": {"layout": args.name, "source": "sim/scene.py", "rearranged_index": args.layout, "arrangement": layout}}
     nxt = 1
     for k in range(args.frames):
-        rep.orchestrator.step(rt_subframes=4, delta_time=0.0)
+        for _ in range(2):  # second frame: everything loaded and in sync (pilot finding)
+            rep.orchestrator.step(rt_subframes=4, delta_time=0.0)
         rgb = np.asarray(a_rgb.get_data())[..., :3]
         ins = a_ins.get_data()
         ids = np.asarray(ins["data"])

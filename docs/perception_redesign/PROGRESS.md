@@ -4,7 +4,7 @@ Goal: perception and grounding with no hardcoded object knowledge (see the brief
 the inventory in HARDCODING_INVENTORY.md). Evidence labels: measured / from files / unverified.
 
 ## Active phase
-**Phase 1 — synthetic training data** (full run in progress) + **architecture revision 2 written, awaiting review** (`ARCHITECTURE.md`; rev 1 approved with changes, kept)
+**Phase 1 — synthetic training data** (full run in progress) + architecture **revision 3 approved** (`ARCHITECTURE.md`; revs 1-2 kept). Then Phase 2 (stop after the comparison)
 
 ## Phases (the merged plan is ARCHITECTURE.md §12; this table tracks the data / perception track)
 | # | Phase | Status | Evidence |
@@ -66,11 +66,29 @@ the inventory in HARDCODING_INVENTORY.md). Evidence labels: measured / from file
   metric, held-object exclusion, trials / Wilson intervals / thresholds, mass as plausibility check,
   whole-scene re-perception, visibility reasoning, CAD limitation); decisions logged.
 
+- 2026-10-14: architecture rev 3 (correlated-error joint failure metric, relational references =
+  attributes from crops + relation from geometry, held-object box from measured geometry); approved.
+- 2026-10-14: rendering slowdown investigated (measured, read-only): GPU at 7 % utilisation, 54 C, no
+  throttling; generator ~200 % CPU; CPU governor powersave / profile "balanced", 69 C; slowdown began
+  mid-chunk train_2000 (first 200 images 0.86 s) and persisted in new processes (1.44-1.48 s); GNOME
+  tracker-extract indexing new files. Conclusion: CPU-bound; likely reduced sustained CPU clocks
+  and indexer competition (unverified); not changed.
+- 2026-10-14: evaluation layouts prepared: `datagen/eval_layouts.py` (20 re-arranged layouts, seeds
+  900000+i, 38 stacked objects over 20 layouts, offline-tested), `eval_scene_capture.py --layout i`
+  (+ synchronous loading and double render).
+- 2026-10-14: Phase 2 prepared (no GPU used): `.venv-seg` (torch 2.11+cu130, torchvision 0.26,
+  ultralytics 8.4.177, pycocotools; Ultralytics analytics sync OFF, runs/weights into git-ignored
+  out/seg, models/ultralytics); `seg/data.py`, `seg/train_maskrcnn.py` (torchvision Mask R-CNN
+  R50-FPN v2, BSD-3), `seg/train_yolo.py` (YOLO11s-seg, AGPL-3.0), `seg/evaluate.py` (same metrics for
+  both, val and test_novel separately); loader and IoU checked on the pilot.
+
 ## Next
-- Wait for the user's review of ARCHITECTURE.md rev 2 (no implementation before approval).
-- Let the full run finish; then `/usr/bin/python3 datagen/verify_dataset.py data/perception/synthetic_v1`,
-  report Phase 1, commit "Phase 1 complete".
-- The user's simulation session is stopped; tell the user to restart it (./launch/run.sh) when done.
+1. Generator finishes -> `datagen/verify_dataset.py data/perception/synthetic_v1`; report stats,
+   sample overlays, slowdown cause.
+2. Capture eval layouts: `eval_scene_capture.py --name today`, `--layout 0..19`; ambiguity sets
+   (needs `generate.py` scene builders refactored into an importable module AFTER the generator
+   finishes: it re-imports generate.py per chunk).
+3. Phase 2: train Mask R-CNN and YOLO11s-seg (2.5 h each, sim stopped), evaluate, licence proposal. STOP.
 
 ## Open questions
 - None.
