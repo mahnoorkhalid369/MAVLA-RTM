@@ -15,13 +15,12 @@ from agent.supervisor import GoalSupervisor  # noqa: E402
 from agent.vlm_roles import GoalPlan, RecordedVLM, Roles, SceneAnswer, VLMFailure  # noqa: E402
 from tests.test_agent import StubTools  # noqa: E402
 
-PP = {"object": {"text": "a", "relation": None, "anchor": None}, "relation": "on",
-      "reference": {"text": "b", "relation": None, "anchor": None}, "frame": "robot"}
-PP2 = {**PP, "object": {"text": "c", "relation": None, "anchor": None}}
+PP = {"object": "a", "relation": "on", "target": "b"}
+PP2 = {**PP, "object": "c"}
 
 
 def plan(*steps, reason=""):
-    return GoalPlan(goal="g", steps=[{"capability": c, "args": a} for c, a in steps], success="s", reason=reason)
+    return GoalPlan(goal="g", steps=[{"do": c, **a} for c, a in steps], success="s", reason=reason)
 
 
 class GoalTools(StubTools):
@@ -105,7 +104,7 @@ def test_observation_only_goal_moves_nothing_and_reports_grounded_objects(tmp_pa
 
 
 def test_scene_question_observes_automatically_and_marks_the_answer_unverified(tmp_path):
-    t = GoalTools([plan(("answer", {"question": "how many cubes?"}))])
+    t = GoalTools([plan(("answer", {"question": "how many cubes?"}))])  # no observe step: added automatically
     r, ev = run(tmp_path, t)
     assert r["status"] == "COMPLETED" and t.perceived == 1 and "not verified" in r["message"]
     assert any(e["kind"] == "step" and e.get("event") == "auto_observe" for e in ev)
@@ -119,7 +118,7 @@ def test_empty_plan_is_reported_as_unsupported_with_the_capabilities(tmp_path):
 
 
 def test_unimplemented_capability_stops_with_explanation_after_done_steps(tmp_path):
-    t = GoalTools([plan(("observe", {}), ("explore", {"target": "banana"}))])
+    t = GoalTools([plan(("observe", {}), ("explore", {"object": "banana"}))])
     r, _ = run(tmp_path, t)
     assert r["status"] == "UNSUPPORTED" and "not implemented" in r["message"] and "1. observe" in r["message"]
 
@@ -171,21 +170,34 @@ def test_replanned_alternative_can_complete_the_goal(tmp_path):
 def test_planner_failure_is_a_clear_failure(tmp_path):
     t = GoalTools([VLMFailure("plan: invalid answer after one retry")])
     r, _ = run(tmp_path, t)
-    assert r["status"] == "FAILED" and "could not interpret" in r["message"]
+    assert r["status"] == "FAILED" and "could not turn the instruction into steps" in r["message"]
 
 
 # --------------------------------------------------------------------------- planner validation (real Roles)
 def test_planner_rejects_unknown_capabilities_and_bad_arguments():
-    good = json.dumps({"goal": "g", "steps": [{"capability": "pick_place", "args": PP}], "success": "s"})
-    for bad in ('{"steps": [{"capability": "dance", "args": {}}]}',
-                '{"steps": [{"capability": "pick_place", "args": {"object": {"text": "a"}}}]}',
-                '{"steps": [{"capability": "answer", "args": {}}]}',
-                json.dumps({"steps": [{"capability": "pick_place", "args": {**PP, "object": {"text": "a", "relation": "on", "anchor": "b"}}}]})):
+    good = json.dumps({"goal": "g", "steps": [{"do": "pick_place", "object": "a", "relation": "on", "target": "b"}]})
+    for bad in ('{"steps": [{"do": "dance"}]}',
+                '{"steps": [{"do": "pick_place", "object": "a"}]}',
+                '{"steps": [{"do": "answer"}]}',
+                '{"steps": [{"do": "locate"}]}',
+                json.dumps({"steps": [{"do": "pick_place", "object": "a", "relation": "on", "target": "b",
+                                       "object_relation": "on", "object_anchor": "b"}]})):
         vlm = RecordedVLM([bad, good])
         p = Roles(vlm).plan_goal("x", "menu")
         assert p.steps[0].capability == "pick_place" and len(vlm.calls) == 2  # one retry with the error
+        assert p.steps[0].args == {"object": {"text": "a", "relation": None, "anchor": None}, "relation": "on",
+                                   "reference": {"text": "b", "relation": None, "anchor": None}, "frame": "robot"}
     with pytest.raises(VLMFailure):
-        Roles(RecordedVLM(['{"steps": [{"capability": "rm -rf", "args": {}}]}'] * 2)).plan_goal("x", "menu")
+        Roles(RecordedVLM(['{"steps": [{"do": "rm -rf"}]}'] * 2)).plan_goal("x", "menu")
+
+
+def test_locate_finds_confirms_or_reports_not_visible(tmp_path):
+    t = GoalTools([plan(("observe", {}), ("locate", {"object": "a"}))])
+    r, ev = run(tmp_path, t)
+    assert r["status"] == "COMPLETED" and "is object 1" in r["message"] and t.executed == []
+    t = GoalTools([plan(("locate", {"object": "zz"})), plan(("locate", {"object": "zz"}))], ambiguous={"zz": []})
+    r, _ = run(tmp_path / "x" if (tmp_path / "x").mkdir() is None else tmp_path, t)
+    assert r["status"] == "FAILED" and r["outcome"] == "insufficient_info" and "do not see 'zz'" in r["message"]
 
 
 def test_planner_menu_lists_only_registry_capabilities():
@@ -193,3 +205,14 @@ def test_planner_menu_lists_only_registry_capabilities():
     menu = planner_menu()
     assert all(f"- {n}:" in menu for n in SPECS) and "(not available yet)" in menu
     assert {s.safety for s in SPECS.values()} == {"read_only", "motion"}
+
+
+def test_plan_completion_rules_are_generic_and_logged(tmp_path):
+    t = GoalTools([plan(("observe", {}))])  # "take a look": observation nobody uses -> reported
+    r, ev = run(tmp_path, t, instruction="Take a look at your surroundings.")
+    assert r["status"] == "COMPLETED" and [s["capability"] for s in r["plan"]] == ["observe", "describe_scene"]
+    assert any(e["kind"] == "plan_completed" for e in ev)
+    t = GoalTools([plan(("observe", {}))])
+    (tmp_path / "q").mkdir()
+    r, _ = run(tmp_path / "q", t, instruction="How many cubes are there?")  # a question gets an answer step
+    assert [s["capability"] for s in r["plan"]] == ["observe", "answer"] and "not verified" in r["message"]

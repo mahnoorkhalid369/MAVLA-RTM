@@ -9,7 +9,7 @@ recoverable reason, and completes only when every step has been verified.
 
 Agents (logical responsibilities, one shared Gemma / YOLO instance):
   planning      Roles.plan_goal (Gemma, capability-constrained JSON, deterministic validation)
-  perception    capabilities.run_observe / run_describe_scene / run_answer (YOLO + depth + Gemma)
+  perception    capabilities.run_observe / run_describe_scene / run_answer / run_locate (YOLO + depth + Gemma)
   manipulation  capabilities.run_pick_place (the validated PickPlaceWorkflow skill) / run_return_home
   verification  inside the skills (contact, camera placement, HOME joints) + VERIFYING_STEP / VERIFYING_GOAL here
   exploration   declared, not implemented (reported as unsupported)
@@ -33,15 +33,32 @@ from agent.eventlog import EventLog
 from agent.vlm_roles import VLMFailure
 from agent.world_state import Step, TaskState
 
-STATES = ["INTERPRETING", "DISPATCHING", "OBSERVING_SCENE", "REPORTING_SCENE", "ANSWERING", "MANIPULATING",
+STATES = ["INTERPRETING", "DISPATCHING", "OBSERVING_SCENE", "REPORTING_SCENE", "ANSWERING", "LOCATING", "MANIPULATING",
           "RETURNING_SAFE", "UNAVAILABLE", "VERIFYING_STEP", "REPLANNING", "VERIFYING_GOAL"]
 TERMINAL = ["COMPLETED", "FAILED", "CANCELLED", "UNSUPPORTED"]
-NODE_OF = {"observe": "OBSERVING_SCENE", "describe_scene": "REPORTING_SCENE", "answer": "ANSWERING",
+NODE_OF = {"observe": "OBSERVING_SCENE", "describe_scene": "REPORTING_SCENE", "answer": "ANSWERING", "locate": "LOCATING",
            "pick_place": "MANIPULATING", "return_home": "RETURNING_SAFE"}
-NEEDS_OBSERVATION = {"describe_scene", "answer"}
+NEEDS_OBSERVATION = {"describe_scene", "answer", "locate"}
 MAX_REPLANS = 1
 MAX_STEPS_EXECUTED = 10  # hard bound on capability executions per instruction (plans + replans)
 RECOVERABLE = {"insufficient_info", "infeasible", "failed"}  # may be replanned once; unsafe / cancelled never
+
+
+CONSUMERS = {"describe_scene", "answer", "locate", "pick_place", "explore"}  # steps that use an observation
+
+
+def complete_plan(plan, instruction: str) -> list[str]:
+    """Deterministic, logged completions of the planner's output (generic rules, not command templates):
+    an observation nobody uses is reported to the user; a question gets an answer step. Returns the rules applied."""
+    from agent.vlm_roles import PlanStep
+    applied = []
+    if instruction.strip().endswith("?") and not {"answer", "locate", "describe_scene"} & {s.do for s in plan.steps}:
+        plan.steps.append(PlanStep(do="answer", question=instruction.strip()))
+        applied.append("question without an answer step -> answer")
+    if "observe" in {s.do for s in plan.steps} and not CONSUMERS & {s.do for s in plan.steps}:
+        plan.steps.append(PlanStep(do="describe_scene"))
+        applied.append("observation without a consumer -> describe_scene")
+    return applied
 
 
 class GoalState(TypedDict, total=False):
@@ -97,7 +114,12 @@ class GoalSupervisor:
         try:
             plan = self.tools.roles.plan_goal(state["instruction"], caps.planner_menu())
         except VLMFailure as exc:
-            return self._finish("FAILED", "failed", f"I could not interpret the instruction ({exc})")
+            return self._finish("FAILED", "failed", f"I could not turn the instruction into steps I can do ({exc}). I can "
+                                "observe and describe the table, answer questions about it, find a described object, move "
+                                "objects onto / next to others and return HOME.")
+        applied = complete_plan(plan, state["instruction"])
+        if applied:
+            self.log("plan_completed", rules=applied)
         self._set_plan(plan)
         if not plan.steps:
             return self._finish("UNSUPPORTED", "unsupported", f"I cannot do that with my current capabilities: "
@@ -151,6 +173,10 @@ class GoalSupervisor:
         step, t0 = self.ts.current(), time.monotonic()
         return self._step_done(step, caps.run_answer(self.ctx, step.args), t0)
 
+    def _locating(self, state) -> dict:
+        step, t0 = self.ts.current(), time.monotonic()
+        return self._step_done(step, caps.run_locate(self.ctx, step.args), t0)
+
     def _manipulating(self, state) -> dict:
         step, t0 = self.ts.current(), time.monotonic()
         final_home = not self._later_motion(step)  # HOME once per instruction, after the last motion step
@@ -173,8 +199,8 @@ class GoalSupervisor:
             s.status = "skipped"
         if step.outcome == "cancelled":
             return self._finish("CANCELLED", "cancelled", step.summary)
-        if step.outcome == "ambiguous":
-            return self._finish("CANCELLED", "ambiguous", step.summary)
+        if step.outcome == "ambiguous":  # reported, not guessed (pick_place asks the user itself)
+            return self._finish("CANCELLED", "ambiguous", step.summary + self._done_so_far())
         if step.outcome == "unsupported":
             return self._finish("UNSUPPORTED", "unsupported", f"Step {step.index} ({step.capability}) is not possible yet: "
                                 f"{step.summary}" + self._done_so_far())

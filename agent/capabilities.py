@@ -41,28 +41,29 @@ class StepResult:
 
 
 SPECS: dict[str, CapabilitySpec] = {s.name: s for s in [
-    CapabilitySpec("observe", "look at the table now and measure every object (positions, sizes, descriptions)", "{}",
+    CapabilitySpec("observe", "look at the table now and measure every object", '{"do": "observe"}',
                    "read_only", "cameras streaming", "fresh observation in the task state (facts + Gemma descriptions)",
                    "no frame; no objects measured", "at least one object measured, or reported as none"),
-    CapabilitySpec("describe_scene", "tell the user which objects are on the table and where", "{}", "read_only",
-                   "a fresh observation (taken automatically if missing)", "a grounded scene report for the user",
+    CapabilitySpec("describe_scene", "tell the user which objects are on the table and where", '{"do": "describe_scene"}',
+                   "read_only", "a fresh observation (taken automatically if missing)", "a grounded scene report",
                    "no fresh observation", "the report lists only measured objects; names marked as Gemma's"),
-    CapabilitySpec("answer", "answer a question about the objects on the table", '{"question": "<the user\'s question>"}',
+    CapabilitySpec("answer", "answer a question about the objects on the table", '{"do": "answer", "question": "<the question>"}',
                    "read_only", "a fresh observation (taken automatically if missing)", "an answer (a hypothesis)",
-                   "no observation; invalid model answer", "answer refers only to measured objects; marked unverified"),
+                   "no observation; invalid model answer", "refers only to measured objects; marked unverified"),
+    CapabilitySpec("locate", "find one described object on the table and say where it is", '{"do": "locate", "object": "<words>"}',
+                   "read_only", "a fresh observation (taken automatically if missing)", "object id and measured position",
+                   "not visible / not confirmed / ambiguous", "same resolution, cross-check and confirmation as pick_place"),
     CapabilitySpec("pick_place", "move ONE object onto or next to another object",
-                   '{"object": {"text": "<words for the object to move>", "relation": null, "anchor": null}, '
-                   '"relation": "on" | "next_to" | "left_of" | "right_of" | "in_front_of" | "behind", '
-                   '"reference": {"text": "<words for the destination object>", "relation": null, "anchor": null}, '
-                   '"frame": "robot" | "camera"}',
+                   '{"do": "pick_place", "object": "<object to move>", "relation": "on" | "next_to" | "left_of" | '
+                   '"right_of" | "in_front_of" | "behind", "target": "<destination object>"}',
                    "motion", "gripper empty; object and destination resolvable (asks the user if ambiguous)",
                    "the object stands at the destination; arm at HOME after the last motion step",
                    "not found / ambiguous / out of reach / collision / no contact / placement out of tolerance / safety reject",
                    "finger contact, camera placement check (xy 10 mm, z 5 mm, tilt 5 deg), HOME joints (1.5 deg)"),
-    CapabilitySpec("return_home", "move the arm to its safe HOME pose", "{}", "motion",
+    CapabilitySpec("return_home", "move the arm to its safe home pose", '{"do": "return_home"}', "motion",
                    "nothing held; gripper open", "arm at HOME", "holding; path collides; execution failure",
                    "HOME joints within 1.5 deg (joint feedback)"),
-    CapabilitySpec("explore", "look for something that is not visible from the current view", '{"target": "<words>"}',
+    CapabilitySpec("explore", "look for something that is not visible from the current view", '{"do": "explore", "object": "<words>"}',
                    "motion", "-", "-", "not implemented", "-", implemented=False),
 ]}
 
@@ -177,6 +178,34 @@ def run_answer(ctx: Context, args: dict) -> StepResult:
     ctx.log("answer", question=q, **a.model_dump())
     refs = f" (objects {a.object_ids})" if a.object_ids else ""
     return StepResult("completed", f"{a.answer}{refs} [Gemma's answer from the measured object list; not verified]")
+
+
+def run_locate(ctx: Context, args: dict) -> StepResult:
+    """Find one described object in the current observation: the pick-and-place resolution path (Gemma
+    resolution, lexical cross-check, comparison) plus confirm_object on its crop. Read-only."""
+    text = (args or {}).get("target", "").strip()
+    _ensure_described(ctx)
+    try:
+        r = ctx.tools.resolve(ctx.obs, text)
+    except VLMFailure as exc:
+        return StepResult("failed", f"could not search for {text!r}: {exc}")
+    if r.id is None:
+        if r.candidates:
+            lst = ", ".join(f"{k} at x {ctx.obs.measured[k]['centre'][0] * 1000:+.0f}, y {ctx.obs.measured[k]['centre'][1] * 1000:+.0f} mm"
+                            for k in r.candidates)
+            return StepResult("ambiguous", f"several objects could be {text!r}: {lst}")
+        return StepResult("insufficient_info", f"I do not see {text!r} from the current view")
+    try:
+        c = ctx.tools.confirm(ctx.obs, r.id, text)
+    except VLMFailure as exc:
+        return StepResult("failed", f"could not confirm {text!r}: {exc}")
+    g = ctx.obs.measured[r.id]
+    ctx.log("located", text=text, mark=r.id, confirm=c.match, centre=g["centre"])
+    if c.match != "yes":
+        return StepResult("insufficient_info", f"object {r.id} might be {text!r} but the check on its crop said {c.match}")
+    return StepResult("completed", f"{text!r} is object {r.id} at x {g['centre'][0] * 1000:+.0f} mm, y {g['centre'][1] * 1000:+.0f} mm "
+                                   f"({np.hypot(*g['centre'][:2]):.2f} m from the robot), {g['height'] * 1000:.0f} mm tall "
+                                   "[position measured; identity from Gemma, confirmed on its crop]")
 
 
 def run_pick_place(ctx: Context, args: dict, final_home: bool, step_no: int) -> StepResult:

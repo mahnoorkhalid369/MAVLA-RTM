@@ -35,7 +35,7 @@ STATE_TEXT = {
     "FAILED": "task failed", "CANCELLED": "task cancelled", "UNSUPPORTED": "not possible with the current capabilities",
     "INTERPRETING": "planning the goal (capabilities only)", "DISPATCHING": "choosing the next step",
     "OBSERVING_SCENE": "perception: observing the table", "REPORTING_SCENE": "perception: reporting the scene",
-    "ANSWERING": "perception: answering from the measured objects", "MANIPULATING": "manipulation: pick-and-place skill",
+    "ANSWERING": "perception: answering from the measured objects", "LOCATING": "perception: finding the described object", "MANIPULATING": "manipulation: pick-and-place skill",
     "RETURNING_SAFE": "manipulation: returning HOME", "UNAVAILABLE": "capability not available",
     "VERIFYING_STEP": "verification: checking the step's evidence", "REPLANNING": "planning again after a failure",
     "VERIFYING_GOAL": "verification: checking every step of the goal",
@@ -84,6 +84,10 @@ def format_event(e: dict) -> Line | None:  # noqa: C901 (a flat dispatch on the 
         return Line(w, "PERCEPTION", f"scene report: {e.get('objects')} objects (frame {e.get('frame_id')})")
     if k == "answer":
         return Line(w, "GEMMA", f"answer: {e.get('answer')} (objects {e.get('object_ids')}; unverified)")
+    if k == "plan_completed":
+        return Line(w, "SUPERVISOR", "plan completed by rule: " + "; ".join(e.get("rules") or []))
+    if k == "located":
+        return Line(w, "PERCEPTION", f"{e.get('text')!r}: object {e.get('mark')} at {_mm(e.get('centre') or [])}, crop check {e.get('confirm')}")
     if k == "replan":
         return Line(w, "PLANNER", "replanned" if e.get("accepted") else f"replan rejected: {e.get('reason')}", "warn")
     if k == "goal_verified":
