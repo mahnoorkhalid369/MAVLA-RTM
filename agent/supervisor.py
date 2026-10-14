@@ -63,6 +63,10 @@ def complete_plan(plan, instruction: str) -> list[str]:
     if instruction.strip().endswith("?") and not {"answer", "locate", "describe_scene"} & {s.do for s in plan.steps}:
         plan.steps.append(PlanStep(do="answer", question=instruction.strip()))
         applied.append("question without an answer step -> answer")
+    for i, st in enumerate(list(plan.steps)):  # exploring is never finding: an explore must be followed by locate
+        if st.do == "explore" and not any(s.do == "locate" and s.object == st.object for s in plan.steps[i + 1:]):
+            plan.steps.append(PlanStep(do="locate", object=st.object))
+            applied.append(f"explore without locate -> locate {st.object!r}")
     if "observe" in {s.do for s in plan.steps} and not CONSUMERS & {s.do for s in plan.steps}:
         plan.steps.append(PlanStep(do="describe_scene"))
         applied.append("observation without a consumer -> describe_scene")

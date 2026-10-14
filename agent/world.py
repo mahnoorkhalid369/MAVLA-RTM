@@ -88,7 +88,20 @@ class WorldModel:
             if d < self.ASSOC_XY and abs(og["top_z"] - g["top_z"]) < self.ASSOC_TOP:
                 c.append((d, o.id))
         c.sort()
-        if not c:
+        if not c:  # a partial view of a larger object: centre inside a stored footprint at the same top height
+            for o in self.objects.values():
+                og = o.geometry
+                if o.status == "held" or abs(og["top_z"] - g["top_z"]) >= self.ASSOC_TOP:
+                    continue
+                a = np.radians(og.get("yaw_deg") or 0.0)
+                d = np.array(g["centre"][:2]) - np.array(og["centre"][:2])
+                local = np.array([d @ [np.cos(a), np.sin(a)], d @ [-np.sin(a), np.cos(a)]])
+                if np.all(np.abs(local) <= np.array(og["extents"]) / 2 + 0.015):
+                    c.append((float(np.hypot(*d)), o.id))
+            if len(c) == 1:
+                return "matched", c[0][1], [c[0][1]]
+            if len(c) > 1:
+                return "ambiguous", None, [i for _, i in sorted(c)]
             return "new", None, []
         if len(c) > 1 and c[1][0] < self.AMBIGUOUS_RATIO * max(c[0][0], 0.005):
             return "ambiguous", None, [i for _, i in c]

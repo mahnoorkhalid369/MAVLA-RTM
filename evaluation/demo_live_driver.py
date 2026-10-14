@@ -43,7 +43,8 @@ def main() -> int:
             print("driver timeout", flush=True)
             break
         if "[agent] ready" in line and a.truth_out:
-            subprocess.Popen([str(ROOT / ".venv-seg/bin/python"), "-m", "evaluation.truth_snapshot", a.truth_out], cwd=ROOT)
+            subprocess.Popen(["bash", "-c", f"source /opt/ros/jazzy/setup.bash && export ROS_DOMAIN_ID=${{ROS_DOMAIN_ID:-42}} && "
+                              f"{ROOT}/.venv-seg/bin/python -m evaluation.truth_snapshot {a.truth_out}"], cwd=ROOT)
         if "[agent] ready" in line and todo:
             p.stdin.write(todo.pop(0) + "\n")
             p.stdin.flush()

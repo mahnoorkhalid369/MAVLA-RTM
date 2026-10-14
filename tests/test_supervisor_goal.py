@@ -280,3 +280,10 @@ def test_replan_that_drops_the_objective_is_rejected(tmp_path, explore_stub):
     r, ev = run(tmp_path, t)
     assert r["status"] == "FAILED" and "do not see 'banana'" in r["message"]
     assert [e["reason"] for e in ev if e["kind"] == "replan"] == ["the new plan no longer pursues the failed step (locate)"]
+
+
+def test_explore_at_the_end_of_a_plan_gets_a_locate(tmp_path, explore_stub):
+    t = GoalTools([plan(("explore", {"object": "thing", "near": "b"})), plan(("observe", {}))], ambiguous={"thing": []})
+    r, ev = run(tmp_path, t)
+    assert [s["capability"] for s in r["plan"]] == ["explore", "locate"] and r["status"] != "COMPLETED"
+    assert any(e["kind"] == "plan_completed" for e in ev)

@@ -203,8 +203,9 @@ def run_locate(ctx: Context, args: dict) -> StepResult:
     if r.id is None:
         # Gemma lists every object when nothing fits: if no description contains the words either, it is not visible
         if not ctx.tools.lexical_candidates(ctx.obs, text):
-            return StepResult("insufficient_info", f"I do not see {text!r} from the current view (no measured object "
-                                                   "is described that way; searching other viewpoints is not available yet)")
+            seen = f" or in {len(ctx.extra_obs)} wrist-camera view(s) of hidden regions" if ctx.extra_obs else ""
+            return StepResult("insufficient_info", f"I do not see {text!r} in the table camera's view{seen} (no measured "
+                                                   "object is described that way or confirmed on its crop)")
         if r.candidates:
             lst = ", ".join(f"{k} at x {ctx.obs.measured[k]['centre'][0] * 1000:+.0f}, y {ctx.obs.measured[k]['centre'][1] * 1000:+.0f} mm"
                             for k in r.candidates)
@@ -232,14 +233,22 @@ def _find_in(ctx: Context, wobs, text: str) -> StepResult | None:
     ctx.tools.describe(wobs, new)
     words = ctx.tools.words(text) - GENERIC_WORDS
     if not words:  # "the object / something behind ...": any single newly seen object answers it
-        lex = new if len(new) == 1 else []
+        cands = new if len(new) == 1 else []
     else:
-        lex = [k for k in ctx.tools.lexical_candidates(wobs, text) if k in new]
-    if len(lex) != 1:
-        return None
-    k = lex[0]
-    c = ctx.tools.confirm(wobs, k, text)
-    if c.match != "yes":
+        cands = [k for k in ctx.tools.lexical_candidates(wobs, text) if k in new]
+        if not cands:  # descriptions use other words (e.g. "green shape" for a cylinder): check the crops of
+            # newly seen objects sharing at least one word with the reference, at most 3
+            def overlap(k):
+                d = wobs.descriptions.get(k) or {}
+                return len(words & ctx.tools.words(" ".join(str(d.get(f, "")) for f in ("name", "colour", "shape"))))
+            cands = [k for k in sorted(new, key=overlap, reverse=True) if overlap(k) > 0][:3]
+    k, c = None, None
+    for cand in cands:
+        c = ctx.tools.confirm(wobs, cand, text)
+        if c.match == "yes":
+            k = cand
+            break
+    if k is None:
         return None
     g = wobs.measured[k]
     ctx.log("located", text=text, mark=k, confirm=c.match, centre=g["centre"], camera="wrist")

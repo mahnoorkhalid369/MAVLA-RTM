@@ -625,3 +625,10 @@ def test_cross_camera_association_and_fusion_rule():
     w2.observe(geom(0.50, 0.30, 0.04), None)
     w2.observe(geom(0.52, 0.30, 0.04, fp=(0.07, 0.07)), None)
     assert w2.add_observation(geom(0.51, 0.30, 0.04), "wrist", "w", 1) == ("ambiguous", None)
+
+
+def test_partial_wrist_view_of_a_large_object_is_associated_not_new():
+    w = WorldModel()
+    big = w.observe(geom(0.02, 1.02, 0.20, fp=(0.10, 0.12)), None)
+    st, oid = w.add_observation(geom(-0.014, 1.016, 0.20, fp=(0.03, 0.02)), "wrist", "w", 2)  # 34 mm off, inside the box
+    assert (st, oid) == ("matched", big) and not w.objects[big].observations[-1]["used_for_geometry"]
