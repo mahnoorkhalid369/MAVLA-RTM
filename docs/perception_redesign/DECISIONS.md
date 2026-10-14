@@ -275,3 +275,35 @@ Design approved with changes; revision 1 kept as `ARCHITECTURE_rev1_2026-10-14.m
   planner, executor, safety and verification untouched; manifest OK. **Live sim test not run:** the
   user's own demo session was running on the GPU (my attempt stopped at Gemma loading with CUDA OOM
   before creating any ROS node; the user's session was not touched).
+
+## 2026-10-14 — Live demo viewer, on-screen logs, return to HOME (user request)
+- **Viewer = separate read-only process** (`agent/viewer.py`, system Python + ROS, like the existing
+  camera viewers): live camera from ROS at its own rate; masks / ids / target / destination from the
+  agent's latest perception result (`agent/live.py`: perception.json + uint16 labels.png + current.json,
+  written atomically; no second YOLO inference); logs from the run's events.jsonl. It never reads
+  stdin and the agent never waits for it (closing it mid-task: task completed, measured). Rejected:
+  an in-process OpenCV window (GUI event loop in the agent process next to ROS spinning, Gemma and the
+  stdin reader). The live overlay is the LAST observation drawn on the live image: labelled with its
+  frame and age, so moving objects are not mistaken for fresh detections.
+- **Log lines** (`agent/events.py`) are generated only from logged events (no inferred success);
+  the same lines are printed in the terminal (EventLog echo). New events: `question` (before asking),
+  `execute_start`, `return_home`, home `verification`, `frame_id` on `localized`.
+- **HOME:** new states RETREATING (the planner's own collision-checked retreat, previously the last
+  step of PLACING), RETURNING_HOME, VERIFYING_HOME, once per instruction and only after a verified
+  placement. Return = collision-checked joint move to the existing validated `ARM_HOME` (no new pose)
+  through RosExecutor + safety layer; refused if an object is held or the gripper is not open
+  (finger > 2 deg). Verified from /joint_states: every joint within **1.5 deg = RosExecutor's
+  validated reach tolerance** (frozen Baseline A executor: a step fails beyond it). Failure classes:
+  home planning / precondition -> FAILED "home" (no retry budget added); execution -> existing
+  execution class (budget 0). Failed manipulation never triggers HOME (robot stays where it stopped).
+- **Measured (2026-10-14):** live HOME check (`out/demo/2026-10-14/home_check/`): refused with the
+  gripper closed; from J1 135 deg -> HOME max joint error 0.016 deg, TCP 0.16 mm, 0 safety events. Full
+  demo via `launch/start_demo.sh` with GUI: "Pick up the yellow cube and put it on the tan box." ->
+  question answered "3" -> placed 1.6 mm, HOME 0.016 deg, COMPLETED, 561 s
+  (`full_demo_home/`); "Put the red cube on the green cube." with the viewer killed during APPROACHING
+  -> placed 4.0 mm, HOME 0.016 deg, COMPLETED (`full_demo_viewer_closed/`). Ground truth was not read
+  in these runs (agent verification only).
+- **Viewer bug found live and fixed:** after the re-observation the panel showed the destination by
+  its old mark number, which now belonged to another object -> selections are shown by world id, by
+  mark only in the frame they were chosen in, otherwise "not identified in this frame". Regression
+  test added.

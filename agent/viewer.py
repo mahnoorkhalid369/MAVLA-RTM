@@ -134,6 +134,8 @@ class Viewer:
             self.run_file, self.ev_pos = c.get("events"), 0
             self.rs.reset(c.get("instruction", ""))
             self.scroll = 0
+            self.perc_updates.clear()
+            self.run_started = c.get("started", 0.0)
         if self.run_file:
             try:
                 with open(self.run_file) as f:
@@ -154,7 +156,7 @@ class Viewer:
             mt = p.stat().st_mtime
             if mt != self.perc_mtime:
                 new = json.loads(p.read_text())
-                if not self.perc or new.get("frame_id") != self.perc.get("frame_id"):
+                if (not self.perc or new.get("frame_id") != self.perc.get("frame_id")) and new.get("time", 0) >= getattr(self, "run_started", 0.0):
                     self.perc_updates.append(time.time())
                 self.perc, self.perc_mtime = new, mt
         except (OSError, ValueError):

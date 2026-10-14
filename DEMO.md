@@ -24,6 +24,23 @@ First thin slice of `docs/perception_redesign/ARCHITECTURE.md` (rev 3). Results 
 
 No object list, colour names or simulator ground truth are used by the agent.
 
+## What's on screen (demo viewer, 2026-10-14)
+
+`./launch/start_demo.sh` opens a read-only **demo viewer** window once the table camera streams:
+- **Image:** the live table camera at its frame rate, shown at the bottom left as "live NN fps".
+- **Overlay:** coloured masks and numbers from the agent's latest perception result. YOLO runs only when the agent observes; the bar shows that frame and its age.
+- **Highlights:** TARGET in green, DESTINATION in blue, question candidates in orange.
+- **Panel:** the task, the supervisor state, the target and destination (description, position, detector confidence), the grasp, and retries used.
+- **Live agent logs:** every event of the run, the same lines as the terminal. Use the arrow keys, PgUp/PgDn and End to scroll.
+- **Status bar:** Task / Robot / HOME.
+
+Keys: `q` closes the viewer only (the task continues, measured); `c` switches table / wrist / auto.
+Questions are always answered in the terminal; the viewer never reads input.
+
+After a verified placement the robot now returns to its validated HOME (`ARM_HOME`) and checks it
+from joint feedback (every joint within 1.5 deg, the executor's validated reach tolerance) before
+reporting COMPLETED. On a failure it does not move HOME (it stops where it is and says why).
+
 ## Run it
 
 GPU order matters (12 GB): the script loads Gemma first, then the detector, then starts Isaac Sim.
@@ -31,8 +48,10 @@ Close any other Isaac Sim first.
 
 ```bash
 cd ~/Documents/PhD-CE/Research-LF/6DOF-Arm
-./launch/start_demo.sh             # Isaac Sim window + wrist and table camera windows
-./launch/start_demo.sh --headless  # no Isaac Sim window (camera windows still open)
+./launch/start_demo.sh                   # Isaac Sim window + demo viewer
+./launch/start_demo.sh --headless        # no Isaac Sim window (demo viewer still opens)
+./launch/start_demo.sh --no-viewer       # terminal only
+./launch/start_demo.sh --camera-windows  # also the raw wrist + table RGB-D windows
 ```
 
 - Wait for `[agent] ready` (about 2–3 min: Gemma ~1 min, Isaac Sim 1–2 min). GPU peak with the
@@ -67,8 +86,9 @@ One instruction, no prompt: `.venv-seg/bin/python -m agent.run --start-sim --ins
    `images/` fill up, see below). Nothing moves during this time; that is normal.
 3. The arm moves above the object, descends, closes, checks that the fingers stalled on it,
    lifts, carries, lowers onto / next to the destination, opens and retreats.
-4. The arm turns away again, the table camera looks (~40 s), and the agent prints one of (a full
-   instruction takes ~4.5 min measured, plus start-up):
+4. The arm retreats, turns away, the table camera checks the placement (~40 s), then the arm
+   returns HOME (~30 s) and the joint positions are checked. The agent prints one of (a full
+   instruction took 7.3-9.4 min in the GUI runs of 2026-10-14, plus start-up):
    - `COMPLETED: Done (verified by the table camera): placed … mm from the planned spot …`
    - `FAILED (<class>): <reason>. I did not report success.`
    - `CANCELLED: <question> -> <why>` — only if you typed cancel, input ended, or nobody answered
