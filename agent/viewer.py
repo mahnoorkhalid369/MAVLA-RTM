@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import signal
 import sys
 import threading
 import time
@@ -72,9 +73,9 @@ class RunState:
                 self.status = "RUNNING"
             if self.state in ("RETURNING_HOME",):
                 self.home = "MOVING"
-        elif k == "localized":
-            self.target = (e.get("object_mark"), e.get("object_id"))
-            self.dest = (e.get("reference_mark"), e.get("reference_id"))
+        elif k == "localized":  # (mark in the frame it was chosen in, world id, that frame)
+            self.target = (e.get("object_mark"), e.get("object_id"), e.get("frame_id"))
+            self.dest = (e.get("reference_mark"), e.get("reference_id"), e.get("frame_id"))
         elif k == "question":
             self.question = (e.get("question"), e.get("candidates") or [])
             self.status = "WAITING FOR USER"
@@ -97,8 +98,9 @@ class RunState:
 
 
 class Viewer:
-    def __init__(self, live_dir: Path, snapshot_every: float = 0.0) -> None:
-        self.live_dir, self.snapshot_every = Path(live_dir), snapshot_every
+    def __init__(self, live_dir: Path, snapshot_every: float = 0.0, snapshot_dir: Path | None = None) -> None:
+        self.live_dir, self.snapshot_every, self.snapshot_dir = Path(live_dir), snapshot_every, snapshot_dir
+        self.n_snap = 0
         self.frames: dict = {}  # camera -> (bgr, stamp)
         self.fps: dict = {c: deque(maxlen=30) for c in ("table", "wrist")}
         self.lock = threading.Lock()
@@ -178,14 +180,26 @@ class Viewer:
             return self.camera_mode
         return (self.perc or {}).get("camera", "table")
 
+    def mark_of(self, sel) -> int | None:
+        """The selected object's mark in the SHOWN perception result: the chosen mark if this is the frame it
+        was chosen in, else the mark carrying its world id, else None (not identified in this frame)."""
+        if not sel or sel[0] is None or not self.perc:
+            return None
+        marks = self.perc.get("marks", {})
+        for k, v in marks.items():
+            if v.get("object_id") is not None and v.get("object_id") == sel[1]:
+                return int(k)
+        if len(sel) > 2 and sel[2] is not None and sel[2] == self.perc.get("frame_id") and str(sel[0]) in marks:
+            return int(sel[0])
+        return None
+
     def highlight(self) -> dict[int, tuple]:
         """mark -> (colour, label) for target / destination / question candidates in the shown result."""
         out = {}
-        marks = (self.perc or {}).get("marks", {})
-        by_world = {v.get("object_id"): int(k) for k, v in marks.items() if v.get("object_id") is not None}
         for sel, col, name in ((self.rs.target, TARGET_C, "TARGET"), (self.rs.dest, DEST_C, "DESTINATION")):
-            if sel and sel[1] in by_world:
-                out[by_world[sel[1]]] = (col, name)
+            k = self.mark_of(sel)
+            if k is not None:
+                out[k] = (col, name)
         if self.rs.question:
             for k in self.rs.question[1]:
                 out.setdefault(int(k), (CAND_C, "?"))
@@ -230,13 +244,18 @@ class Viewer:
     def _obj_line(self, sel, label) -> list[tuple]:
         if not sel or sel[0] is None:
             return [(f"{label}: -", MUTED)]
-        marks = (self.perc or {}).get("marks", {})
-        by_world = {v.get("object_id"): k for k, v in marks.items()}
-        info = marks.get(str(by_world.get(sel[1], sel[0])), {})
+        col = TARGET_C if label == "TARGET" else DEST_C
+        k = self.mark_of(sel)
+        head = f"{label}: object {sel[0]} (world id {sel[1]})"
+        if k is None:
+            return [(head, col), (f"  not identified in frame {(self.perc or {}).get('frame_id', '-')} (e.g. covered)", MUTED)]
+        info = self.perc["marks"][str(k)]
         d = info.get("description") or {}
         c = info.get("centre") or [0, 0, 0]
         s = info.get("score")
-        return [(f"{label}: object {sel[0]} (world id {sel[1]})", TARGET_C if label == "TARGET" else DEST_C),
+        if k != sel[0]:
+            head += f", now mark {k}"
+        return [(head, col),
                 (f"  {d.get('colour', '')} {d.get('name', '')}"[:44], FG),
                 (f"  at x {c[0] * 1000:+.0f}, y {c[1] * 1000:+.0f}, z {c[2] * 1000:.0f} mm" + (f", conf {s:.2f}" if s else ""), MUTED)]
 
@@ -271,11 +290,11 @@ class Viewer:
             put("QUESTION (answer in the terminal):", CAND_C, 0.5, 2)
             put(rs.question[0][:46], CAND_C, 0.45, 1, 20)
             put(f"candidates: {rs.question[1]}", CAND_C, 0.45, 1, 20)
-        y = IMG_H - 50
-        put("outline: TARGET  DESTINATION  candidates", MUTED, 0.42, 1, 0)
-        cv2.line(canvas, (x + 72, IMG_H - 46), (x + 128, IMG_H - 46), TARGET_C, 3)
-        cv2.line(canvas, (x + 136, IMG_H - 46), (x + 236, IMG_H - 46), DEST_C, 3)
-        cv2.line(canvas, (x + 244, IMG_H - 46), (x + 330, IMG_H - 46), CAND_C, 3)
+        lx, ly = x, IMG_H - 20  # legend: a coloured swatch before each word
+        for word, col in (("TARGET", TARGET_C), ("DESTINATION", DEST_C), ("question candidates", CAND_C)):
+            cv2.rectangle(canvas, (lx, ly - 11), (lx + 22, ly - 3), col, -1)
+            cv2.putText(canvas, word, (lx + 28, ly), FONT, 0.45, FG, 1, cv2.LINE_AA)
+            lx += 40 + cv2.getTextSize(word, FONT, 0.45, 1)[0][0]
 
     def draw_logs(self, canvas) -> None:
         y0, y1 = LOG_Y0, H - STATUS_H - 4
@@ -328,7 +347,12 @@ class Viewer:
 
     def maybe_snapshot(self, canvas) -> None:
         if self.snapshot_every > 0 and time.time() - self.last_snap >= self.snapshot_every:
-            cv2.imwrite(str(self.live_dir / "viewer.png"), canvas)
+            if self.snapshot_dir:
+                self.snapshot_dir.mkdir(parents=True, exist_ok=True)
+                cv2.imwrite(str(self.snapshot_dir / f"viewer_{self.n_snap:04d}.jpg"), canvas)
+                self.n_snap += 1
+            else:
+                cv2.imwrite(str(self.live_dir / "viewer.png"), canvas)
             self.last_snap = time.time()
 
 
@@ -336,6 +360,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--live-dir", default=str(ROOT / "out/demo/live"))
     ap.add_argument("--snapshot-every", type=float, default=0.0, help="save the window to <live-dir>/viewer.png every N s")
+    ap.add_argument("--snapshot-dir", help="with --snapshot-every: keep numbered snapshots in this folder instead")
     ap.add_argument("--no-window", action="store_true", help="no window (with --snapshot-every: headless check)")
     a, _ = ap.parse_known_args()
     import rclpy
@@ -343,20 +368,35 @@ def main() -> int:
     from rclpy.qos import qos_profile_sensor_data
     from sensor_msgs.msg import Image
 
-    v = Viewer(Path(a.live_dir), a.snapshot_every)
+    v = Viewer(Path(a.live_dir), a.snapshot_every, Path(a.snapshot_dir) if a.snapshot_dir else None)
     rclpy.init()
+    stop = threading.Event()
+    for sig in (signal.SIGTERM, signal.SIGINT):  # rclpy's own handlers would leave the render loop running
+        signal.signal(sig, lambda *_: stop.set())
     node = rclpy.create_node("demo_viewer")
-    node.create_subscription(Image, "table_camera/color/image_raw", lambda m: v.on_image("table", m), qos_profile_sensor_data)
-    node.create_subscription(Image, "camera/color/image_raw", lambda m: v.on_image("wrist", m), qos_profile_sensor_data)
+    subs = []
+
+    def subscribe() -> None:
+        for sub in subs:
+            node.destroy_subscription(sub)
+        subs[:] = [node.create_subscription(Image, "table_camera/color/image_raw", lambda m: v.on_image("table", m), qos_profile_sensor_data),
+                   node.create_subscription(Image, "camera/color/image_raw", lambda m: v.on_image("wrist", m), qos_profile_sensor_data)]
+    subscribe()
+    last_resub = time.time()
     ex = SingleThreadedExecutor()
     ex.add_node(node)
-    threading.Thread(target=ex.spin, daemon=True).start()
+    spin = threading.Thread(target=ex.spin, daemon=True)
+    spin.start()
     title = "Multi-agent robot demo (read-only viewer)"
     if not a.no_window:
         cv2.namedWindow(title, cv2.WINDOW_NORMAL)
         cv2.resizeWindow(title, W, H)
     try:
-        while True:
+        while not stop.is_set():
+            newest = max((t for _, t in v.frames.values()), default=0.0)
+            if time.time() - max(newest, last_resub) > 10.0:  # no frames: re-subscribe (discovery race at start-up)
+                subscribe()
+                last_resub = time.time()
             v.poll_files()
             canvas = v.render()
             v.maybe_snapshot(canvas)
@@ -373,10 +413,10 @@ def main() -> int:
         pass
     finally:
         cv2.destroyAllWindows()
-        ex.shutdown()
+        ex.shutdown(timeout_sec=2.0)
+        spin.join(timeout=2.0)
         node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+        rclpy.try_shutdown()
     return 0
 
 

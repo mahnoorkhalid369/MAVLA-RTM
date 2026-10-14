@@ -248,7 +248,7 @@ class Supervisor:
             return {"next": "FAILED", "failure": {"cls": "understanding", "reason": f"the object and the destination "
                     f"are the same object ({m_obj}); please rephrase"}}
         oid, rid = obs.object_ids[m_obj], obs.object_ids[m_ref]
-        self.log("localized", object_mark=m_obj, object_id=oid, reference_mark=m_ref, reference_id=rid,
+        self.log("localized", frame_id=obs.frame_id, object_mark=m_obj, object_id=oid, reference_mark=m_ref, reference_id=rid,
                  object=self.tools.world.objects[oid].geometry, reference=self.tools.world.objects[rid].geometry)
         return {"next": "PLANNING_GRASP", "object_id": oid, "reference_id": rid}
 

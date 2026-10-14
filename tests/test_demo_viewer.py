@@ -53,7 +53,7 @@ def test_viewer_draws_masks_highlights_target_and_shows_logs(tmp_path):
     run = tmp_path / "run"
     run.mkdir()
     events = [ev("instruction", text="put the red cube on the green cube"), ev("state", state="LOCALIZING"),
-              ev("localized", object_mark=1, object_id=11, reference_mark=2, reference_id=12, object={"centre": [0, .58, .03]},
+              ev("localized", frame_id="table_001", object_mark=1, object_id=11, reference_mark=2, reference_id=12, object={"centre": [0, .58, .03]},
                  reference={"centre": [.15, .5, .025]}), ev("state", state="APPROACHING"),
               ev("tool", tool="execute_start", label="approach", steps=["move above object"])]
     (run / "events.jsonl").write_text("".join(json.dumps(e) + "\n" for e in events))
@@ -62,7 +62,7 @@ def test_viewer_draws_masks_highlights_target_and_shows_logs(tmp_path):
     v.frames["table"] = (np.full((720, 1280, 3), 90, np.uint8), 0.0)
     v.poll_files()
     img = v.render()
-    assert v.rs.state == "APPROACHING" and v.rs.moving and v.rs.target == (1, 11) and v.rs.dest == (2, 12)
+    assert v.rs.state == "APPROACHING" and v.rs.moving and v.rs.target == (1, 11, "table_001") and v.rs.dest == (2, 12, "table_001")
     assert v.highlight() == {1: (TARGET_C, "TARGET"), 2: (v.highlight()[2][0], "DESTINATION")}
     left = img[:IMG_H, :IMG_W]
     assert (np.abs(left.astype(int) - np.array(TARGET_C)).sum(axis=2) < 10).sum() > 100  # thick target outline drawn
@@ -81,3 +81,18 @@ def test_run_state_ignores_nothing_it_did_not_see():
     assert rs.home == "PENDING" and rs.status == "RUNNING"
     rs.apply(ev("verification", check="home", **{"pass": False}), None)
     assert rs.home == "NOT REACHED"
+
+
+def test_selection_is_never_shown_on_a_different_object_in_a_newer_frame():
+    """Regression (live demo 14:50): in the re-observation mark 4 was another object; the destination
+    (world id 4, covered by the placed cube) must not be shown as that object."""
+    v = Viewer(Path("/nonexistent"))
+    v.rs.dest = (4, 4, "table_001")
+    v.rs.target = (3, 3, "table_001")
+    v.perc = {"frame_id": "table_002", "marks": {"4": {"object_id": 5, "description": {"name": "cylinder"}},
+                                                 "14": {"object_id": 3, "description": {"name": "block"}}}}
+    assert v.mark_of(v.rs.dest) is None and v.mark_of(v.rs.target) == 14
+    assert "not identified" in v._obj_line(v.rs.dest, "DESTINATION")[1][0]
+    v.perc["frame_id"] = "table_001"
+    v.perc["marks"]["4"]["object_id"] = None  # same frame, world ids not assigned yet: the chosen mark is right
+    assert v.mark_of(v.rs.dest) == 4

@@ -12,6 +12,7 @@
 #   ./launch/start_demo.sh --no-viewer        # terminal only (logs are printed here as well)
 #   ./launch/start_demo.sh --camera-windows   # also the raw wrist + table RGB-D windows
 # Outputs: out/demo/<date>/live_<time>/<nn>/ (events.jsonl, images/, result.json); viewer feed out/demo/live/
+# Extra viewer options: DEMO_VIEWER_ARGS="--snapshot-every 3 --snapshot-dir out/demo/shots" ./launch/start_demo.sh
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT" || exit 1
@@ -35,7 +36,7 @@ mkdir -p out/logs out/demo/live
 setsid bash -c '
     until ros2 topic list 2>/dev/null | grep -q "^/table_camera/color/image_raw$"; do sleep 3; done
     if [ "'"$VIEWER"'" = 1 ]; then
-        /usr/bin/python3 agent/viewer.py --live-dir out/demo/live < /dev/null > out/logs/demo_viewer.log 2>&1 &
+        /usr/bin/python3 agent/viewer.py --live-dir out/demo/live '"$DEMO_VIEWER_ARGS"' < /dev/null > out/logs/demo_viewer.log 2>&1 &
     fi
     if [ "'"$CAMERAS"'" = 1 ]; then
         /usr/bin/python3 ros_nodes/camera_viewer.py < /dev/null > out/logs/demo_wrist_viewer.log 2>&1 &
