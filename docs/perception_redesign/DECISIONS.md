@@ -140,3 +140,28 @@ Design approved with changes; revision 1 kept as `ARCHITECTURE_rev1_2026-10-14.m
   cannot be adapted); the agent's camera / state bridge is a second node on a background
   MultiThreadedExecutor. Two nodes in one process, each spun by exactly one executor: no shared-spin
   deadlock.
+- **Executor's ground-truth subscription:** the frozen `RosExecutor` subscribes to
+  `/sim/ground_truth/objects` (for Baseline A). The agent never reads it (`.truth` / `ground_truth`
+  are absent from `agent/`, enforced by `tests/test_agent.py`). Scoring reads ground truth in a
+  separate process (`evaluation/demo_rehearsal.py`) after the agent has finished.
+- **Agent tests run in `.venv-seg`** (pytest installed there with uv): system Python lacks pydantic /
+  langgraph, so `tests/test_agent.py` is skipped by `/usr/bin/python3 -m pytest` and run with
+  `.venv-seg/bin/python -m pytest tests/test_agent.py` (without ROS sourced: ROS's pytest plugins need
+  `lark`).
+- **Geometry fixes found by the synthetic-depth tests (before any sim run):** (1) the lowest
+  *visible* point of a floor object sat 8.6 mm above the floor (mask-edge erosion, 2nd percentile) and
+  was read as "stacked" -> support = the highest real surface (floor, or a measured top under the
+  object) within `SUPPORT_SNAP` = 20 mm below the visible bottom; (2) the top-face tilt included the
+  upper side-face points (6.4 deg on a flat box, would have failed every placement check) -> the top
+  face is the up-facing pixels (|normal z| > 0.9 from neighbouring depth pixels); (3) mask erosion
+  shrank widths by ~5 mm -> add the eroded pixels back (2 x 2 px at the measured distance). These are
+  physical/sensor constants, not object knowledge, and do not change any pass tolerance.
+- **Prompts contain no object words:** the parse prompt's example uses placeholders `<A>` / `<B>`.
+- **Unsupported tasks** ("pick" only, anything not pick-and-place with a destination) go to
+  `ask_user`; the scripted responder answers "cancel" -> CANCELLED (counts as "asked").
+- **View for verification:** the arm is parked at ARM_HOME with J1 in {170, 90, -90, 0, -170} deg,
+  the first pose whose collision spheres stay >= 2 cm off the camera-to-target line and whose joint
+  move is collision-free; initial observation uses the camera's image-centre floor point.
+- **Directional placement search:** candidate spots in the reliable pick/place ring 0.45-0.90 m
+  (grasp-feasibility map), gap 20 mm, +10 mm steps to +100 mm, directions rotated 0/+-15/+-30 deg;
+  `next_to` tries the four sides, closest to mid-reach (0.65 m) first.
