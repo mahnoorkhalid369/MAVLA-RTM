@@ -54,6 +54,10 @@ cd ~/Documents/PhD-CE/Research-LF/6DOF-Arm
 ./launch/start_demo.sh --camera-windows  # also the raw wrist + table RGB-D windows
 ```
 
+- **Faster:** `./launch/start_demo.sh --headless` (the demo viewer still shows the camera): Gemma runs ~2.5x
+  faster and motions ~1.5x faster without the Isaac Sim window (measured). Give several instructions in one
+  session: objects that did not change keep their description, so later instructions skip most Gemma calls
+  (measured: red→green after yellow→tan 161 s headless). A busy desktop (browser, video) slows Gemma too.
 - Wait for `[agent] ready` (about 2–3 min: Gemma ~1 min, Isaac Sim 1–2 min). GPU peak with the
   Isaac Sim window measured at 7.1 GB of 12 GB.
 - Type an instruction at the `instruction (empty line to quit)>` prompt, e.g.

@@ -307,3 +307,30 @@ Design approved with changes; revision 1 kept as `ARCHITECTURE_rev1_2026-10-14.m
   its old mark number, which now belonged to another object -> selections are shown by world id, by
   mark only in the frame they were chosen in, otherwise "not identified in this frame". Regression
   test added.
+
+## 2026-10-14 — Latency profiling and optimisation (user request)
+- **Baseline breakdown (measured, `evaluation/demo_latency.py`, `out/perf/baseline_breakdown.json`):** GUI yellow→tan
+  518.6 s task (561 s launcher wall incl. model loading): Gemma 29 calls / 249 s, of which describing all 22
+  objects one by one = 23 calls / 189 s; motions 192 s wall for 64.6 s planned (sim slower than real time in GUI);
+  parking for views 73 s; return HOME 28 s; observations (YOLO + depth) ~3 s each, 2 per task; human wait 0.
+- **Rejected after benchmarking (accuracy first):** (1) one-image shortlist of all crops: 4/8 references wrong
+  (the 2B model mis-maps tile numbers; `out/perf/bench_shortlist_rejected.json`); code kept, not used.
+  (2) batched multimodal generation: same answers when valid but 7/9 rows invalid / pad-only and no faster
+  (63.5 vs 61.6 s for 9 crops); disabled. Model, quantisation and vlm/model.py unchanged.
+- **Kept:** (a) placement view tries HOME first: when HOME sees the placed object (all 4 rehearsal destinations)
+  the view move is the return HOME; RETURNING_HOME then only verifies (no zero-length motion); the separate
+  park move is gone; retreat unchanged. (b) no VLM calls during placement verification (geometric check).
+  (c) session description memory: an object keeps its description only if position (30 mm), top (20 mm),
+  footprint (20 mm) AND mean mask colour (±20/255 per channel) are unchanged; anything moved / covered /
+  different is described again.
+- **Live before/after, headless, same scene, same two instructions in one session, fresh sim, measured
+  (`out/perf/live_*_headless*`, before = commit f71276a in a worktree):** yellow→tan 304.1 → 225.5 s;
+  red→green (2nd instruction) 343.6 → 161.5 s (Gemma calls 26 → 7); session 674 → 414 s wall. Both: correct
+  objects (positions), placement 1.3 / 0.9 mm and 4.0 / 4.0 mm, HOME 0.016 deg, 0 recoveries. CPU load was
+  higher during the before run (median load 8.1 vs 5.6 on 16 cores: a browser at ~150 % CPU), so per-call
+  Gemma times differ by load; call counts and removed motions are load-independent.
+- **GUI:** the optimised GUI session was dominated by machine load in its first instruction (load average 13,
+  every step ~4x slower: excluded as a measurement); its second instruction took 265 s vs 398 s baseline.
+  Gemma per call with the Isaac Sim window vs headless (measured): describe 8.2-8.4 s vs 2.9-3.7 s, parse
+  11.8-12.5 s vs 4.3-6.3 s. GPU memory peak 8.1 GB GUI / 7.7 GB headless (12 GB); Gemma's 4.7 GB per-layer
+  embedding table is in CPU RAM (vlm/model.py), so CPU load also slows Gemma.

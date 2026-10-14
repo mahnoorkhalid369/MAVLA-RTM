@@ -18,26 +18,32 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--instruction", required=True)
+    ap.add_argument("--instruction", required=True, action="append", help="repeat for several instructions in one session")
     ap.add_argument("--pick-near", type=float, nargs=2, required=True)
     ap.add_argument("--console", required=True)
     ap.add_argument("--launcher-args", nargs="*", default=[])
-    ap.add_argument("--timeout", type=float, default=1500)
+    ap.add_argument("--timeout", type=float, default=3000)
+    ap.add_argument("--launcher", default="launch/start_demo.sh")
+    ap.add_argument("--gpu-log", help="log nvidia-smi memory / utilisation every 2 s to this file")
     a = ap.parse_args()
-    p = subprocess.Popen([str(ROOT / "launch/start_demo.sh"), *a.launcher_args], cwd=ROOT, stdin=subprocess.PIPE,
+    gpu = subprocess.Popen(["nvidia-smi", "--query-gpu=timestamp,memory.used,utilization.gpu", "--format=csv,noheader", "-l", "2"],
+                           stdout=open(a.gpu_log, "w")) if a.gpu_log else None
+    launcher = Path(a.launcher)
+    p = subprocess.Popen([str(launcher if launcher.is_absolute() else ROOT / launcher), *a.launcher_args],
+                         cwd=(launcher.parents[1] if launcher.is_absolute() else ROOT), stdin=subprocess.PIPE,
                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
     log = open(a.console, "w")
-    t0, sent, cands, answered, final = time.time(), False, [], [], None
+    t0, cands, answered, finals = time.time(), [], [], []
+    todo = list(a.instruction)
     for line in p.stdout:
         log.write(line)
         log.flush()
         if time.time() - t0 > a.timeout:
             print("driver timeout", flush=True)
             break
-        if "[agent] ready" in line and not sent:
-            p.stdin.write(a.instruction + "\n")
+        if "[agent] ready" in line and todo:
+            p.stdin.write(todo.pop(0) + "\n")
             p.stdin.flush()
-            sent = True
         if "QUESTION" in line:
             cands = []
         m = re.match(r"\s+(\d+): .* at x ([+-]\d+) mm, y ([+-]\d+) mm", line)
@@ -49,12 +55,14 @@ def main() -> int:
             p.stdin.flush()
             answered.append(k)
         if re.search(r"\[agent\] (COMPLETED|FAILED|CANCELLED)", line):
-            final = line.strip()
-            p.stdin.write("\n")  # quit
+            finals.append(line.strip())
+            p.stdin.write((todo.pop(0) if todo else "") + "\n")  # next instruction, or quit
             p.stdin.flush()
     p.wait(60)
-    print(f"final: {final}\nanswered: {answered}\nlauncher exit: {p.returncode}\nseconds: {time.time() - t0:.0f}")
-    return 0 if final and "COMPLETED" in final else 1
+    if gpu:
+        gpu.terminate()
+    print("finals:\n  " + "\n  ".join(finals) + f"\nanswered: {answered}\nlauncher exit: {p.returncode}\nseconds: {time.time() - t0:.0f}")
+    return 0 if finals and all("COMPLETED" in f for f in finals) else 1
 
 
 if __name__ == "__main__":
