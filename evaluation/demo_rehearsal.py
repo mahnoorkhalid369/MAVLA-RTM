@@ -189,7 +189,7 @@ def main() -> int:
     ap.add_argument("--instructions", type=int, nargs="+", default=[1, 2, 3])
     ap.add_argument("--runs", type=int, default=3)
     ap.add_argument("--out", default=str(ROOT / "out/demo" / time.strftime("%Y-%m-%d") / "rehearsal"))
-    ap.add_argument("--weights", default=str(ROOT / "out/seg/runs/yolo11s_seg/weights/best.pt"))
+    ap.add_argument("--weights", default=str(ROOT / "out/seg/runs/yolo11s_seg_r1/weights/best.pt"))
     ap.add_argument("--timeout", type=float, default=1200.0)
     ap.add_argument("--tag", default="")
     a = ap.parse_args()

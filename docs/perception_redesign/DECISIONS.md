@@ -197,3 +197,7 @@ Design approved with changes; revision 1 kept as `ARCHITECTURE_rev1_2026-10-14.m
   is now `None` (unknown, never guessed); planning refuses to pick it or place on it, and placement
   verification fails if the placed object's top face is not visible. These do not loosen any
   tolerance; they make an unmeasurable case fail instead of passing on a guess.
+- **YOLO stops after round 1:** the fixed criteria passed on today's scene (recall box 16/16,
+  cylinder 3/3, precision 0.952); rounds 2-3 are only for failures. Training used 1.75 of 4 h.
+  Caveat recorded: the criterion is measured on ONE image (today's layout); the 20 extra layouts
+  (after the demo) are needed for a statistically meaningful number.

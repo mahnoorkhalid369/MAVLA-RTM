@@ -1,7 +1,7 @@
 """Detector interface: class-agnostic instance masks. In-process YOLO-seg now; the same interface can
 later be served by a separate inference process without changing the agents.
 
-    det = YoloDetector("out/seg/runs/yolo11s_seg/weights/best.pt")
+    det = YoloDetector("out/seg/runs/yolo11s_seg_r1/weights/best.pt")
     masks = det.detect(rgb)        # [Detection(mask HxW bool, score)]
 """
 

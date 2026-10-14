@@ -19,6 +19,12 @@ instructions) -> 5 DEMO.md, DEMO_REPORT.md, out/demo/<date>/.
 - 08:51-08:54 two agent smoke tests with the sim (pretrained detector): plumbing works end to end;
   4 bugs fixed (DECISIONS). Commit after this entry.
 - ~08:58 YOLO round 1 started (1.75 h budget), sim stopped.
+- 10:40 YOLO round 1 done: 49 epochs in 1.75 h, 139 s epoch 1, 133 s/epoch after (median). Metrics
+  (`out/seg/eval/round1/metrics.json`, conf 0.25, mask IoU >= 0.5, greedy one-to-one): today's scene
+  recall box 16/16, cylinder 3/3, sphere 1/1, precision 0.952 (20/21) -> **pass criteria met**
+  (one image only: the Wilson 95 % lower bound for 16/16 is 0.81); val recall 0.976 / precision
+  0.904; test_novel recall 0.965 / precision 0.893 (ycb_novel 0.939 lowest). No round 2/3 needed.
+- 10:45 rehearsal cycle 1 started (instructions 1-3 x 3 runs, fresh sim per run).
 
 ## Phases (the merged plan is ARCHITECTURE.md §12; this table tracks the data / perception track)
 | # | Phase | Status | Evidence |

@@ -23,7 +23,7 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_WEIGHTS = ROOT / "out/seg/runs/yolo11s_seg/weights/best.pt"
+DEFAULT_WEIGHTS = ROOT / "out/seg/runs/yolo11s_seg_r1/weights/best.pt"
 
 
 def start_sim(gui: bool, log: Path) -> subprocess.Popen:
