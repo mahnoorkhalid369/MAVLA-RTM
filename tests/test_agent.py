@@ -603,3 +603,25 @@ def test_intermediate_step_skips_home_and_reuses_a_fresh_observation(tmp_path):
     states = [e["state"] for e in ev if e["kind"] == "state"]
     assert r["status"] == "COMPLETED" and "RETURNING_HOME" not in states and t.home_calls == 0
     assert "back at HOME" not in r["message"]
+
+
+# ------------------------------------------------------------------------------ cross-camera world model
+def test_cross_camera_association_and_fusion_rule():
+    w = WorldModel()
+    a = w.observe(geom(0.6, 0.3, 0.04), {"name": "cube"})
+    w.observe(geom(0.4, 0.5, 0.04), None)
+    # wrist sees the same cube, full top face, consistent size: refines geometry
+    st, oid = w.add_observation(geom(0.602, 0.301, 0.0405), "wrist", "wrist_001", 1, {"name": "red cube"})
+    assert (st, oid) == ("matched", a) and w.objects[a].geometry["centre"][0] == 0.602
+    assert w.objects[a].observations[-1]["used_for_geometry"] and w.objects[a].descriptions_by_camera["wrist"]["name"] == "red cube"
+    # partial view (smaller footprint): evidence only, geometry kept
+    st, oid = w.add_observation(geom(0.615, 0.30, 0.04, fp=(0.02, 0.02)), "wrist", "wrist_002", 1)
+    assert st == "matched" and w.objects[a].geometry["centre"][0] == 0.602 and not w.objects[a].observations[-1]["used_for_geometry"]
+    # something only the wrist camera saw: new object
+    st, oid = w.add_observation(geom(0.9, -0.2, 0.05), "wrist", "wrist_002", 2)
+    assert st == "new" and w.objects[oid].observations[0]["camera"] == "wrist"
+    # two stored objects equally close: ambiguous, not merged
+    w2 = WorldModel()
+    w2.observe(geom(0.50, 0.30, 0.04), None)
+    w2.observe(geom(0.52, 0.30, 0.04, fp=(0.07, 0.07)), None)
+    assert w2.add_observation(geom(0.51, 0.30, 0.04), "wrist", "w", 1) == ("ambiguous", None)
