@@ -34,9 +34,21 @@ ap.add_argument("--start", type=int, default=0)
 ap.add_argument("--count", type=int, default=10)
 ap.add_argument("--pilot", action="store_true", help="160 train + 20 val + 20 test_novel into <name>_pilot")
 ap.add_argument("--out", default=None)
+ap.add_argument("--debug", action="store_true", help="dump the instance-segmentation id maps per image")
+ap.add_argument("--align-test", action="store_true", help="re-render each scene 4 more times, saving RGB with mask edges")
+ap.add_argument("--check-stale", action="store_true", help="re-render each scene once more and count changed pixels")
 args = ap.parse_args()
 
 app = SimulationApp({"headless": True, "width": 1280, "height": 720})
+
+import carb  # noqa: E402
+
+# Synthetic data must not render a frame before new materials / textures are ready (pilot, measured:
+# stale floor material and missing objects in the RGB with asynchronous loading)
+for key, value in (("/rtx/materialDb/syncLoads", True), ("/rtx/hydra/materialSyncLoads", True),
+                   ("/omni.kit.plugin/syncUsdLoads", True), ("/rtx-transient/resourcemanager/texturestreaming/async", False),
+                   ("/rtx-transient/resourcemanager/enableTextureStreaming", False)):
+    carb.settings.get_settings().set(key, value)
 
 import cv2  # noqa: E402
 import numpy as np  # noqa: E402
@@ -53,7 +65,7 @@ from control.robot import ARM_JOINTS, GRIPPER_JOINT  # noqa: E402
 from datagen.coco import CATEGORIES, annotations_from_ids  # noqa: E402
 from datagen.layout import SceneSampler, apply_rgb_effects, camera_pose, object_rotation, world_extent  # noqa: E402
 from datagen.textures import KINDS, make_texture  # noqa: E402
-from sim.scene import ROBOT_PATH, ROBOT_USD, _d435_intrinsics, add_microphone, add_table_camera, attach_gripper  # noqa: E402
+from sim.scene import ROBOT_PATH, ROBOT_USD, _d435_intrinsics, add_microphone, attach_gripper  # noqa: E402
 
 CFG = json.loads(Path(args.config).read_text())
 OUT = Path(args.out) if args.out else ROOT / "data" / "perception" / (CFG["name"] + ("_pilot" if args.pilot else ""))
@@ -70,7 +82,7 @@ def build_base_stage():
     robot.GetVariantSets().GetVariantSet("Physics").SetVariantSelection("physx")
     attach_gripper()
     add_microphone()
-    add_table_camera()  # its stand is real background in the lab; the camera itself is not used here
+    # no table-camera hardware: the data camera sits where it is (pilot: its body showed in table views)
     for p in ("/World/defaultLight", "/Environment/defaultLight", "/Environment"):
         if stage.GetPrimAtPath(p):
             stage.RemovePrim(p)
@@ -153,13 +165,12 @@ def prism_mesh(stage, path: str, sides: int, apex: bool = False) -> UsdGeom.Mesh
 def asset_ref(stage, path: str, name: str, size, unit_scale: np.ndarray):
     """Reference an asset under path, re-centred so its bbox centre is at the local origin, scaled."""
     info = ASSETS[name]
-    inner = stage.DefinePrim(path, "Xform")
+    outer = UsdGeom.Xform.Define(stage, path)  # our scale + re-centring; the asset keeps its own ops below
+    outer.AddScaleOp().Set(Gf.Vec3f(*[float(v) for v in unit_scale]))
+    outer.AddTranslateOp(opSuffix="centre").Set(Gf.Vec3d(*[-float(c) for c in info["centre"]]))
+    inner = stage.DefinePrim(f"{path}/asset", "Xform")
     inner.GetReferences().AddReference(str(ROOT / info["file"]))
-    x = UsdGeom.Xformable(inner)
-    x.ClearXformOpOrder()
-    x.AddScaleOp().Set(Gf.Vec3f(*[float(v) for v in unit_scale]))
-    x.AddTranslateOp(opSuffix="centre").Set(Gf.Vec3d(*[-float(c) for c in info["centre"]]))
-    return inner
+    return outer
 
 
 def build_object(stage, o, tex_dir: Path):
@@ -211,6 +222,9 @@ def build_object(stage, o, tex_dir: Path):
                      uv_scale=1.0, tint=mat.colour if tex else (1, 1, 1))
         UsdShade.MaterialBindingAPI.Apply(root.GetPrim()).Bind(m, UsdShade.Tokens.strongerThanDescendants)
     semantics_utils.add_labels(root.GetPrim(), labels="object", taxonomy="class")
+    # the object's uid as a second label: the annotator's id -> prim path map is empty for prims created
+    # after the first frame (measured), the semantic labels are not
+    semantics_utils.add_labels(root.GetPrim(), labels=f"uid_{o.uid:03d}", taxonomy="uid")
     return path
 
 
@@ -293,6 +307,8 @@ def main() -> int:
     app_utils.play()
     app.update()
     robot = Articulation(ROBOT_PATH)
+    if args.debug:  # label the robot too (debug only), so its mask can be compared with the RGB
+        semantics_utils.add_labels(stage.GetPrimAtPath(ROBOT_PATH), labels="robot", taxonomy="class")
     idx = robot.get_dof_indices(ARM_JOINTS + [GRIPPER_JOINT])
     w, h = CFG["render"]["resolution"]
     rp = rep.create.render_product(str(cam.GetPath()), (w, h))
@@ -307,15 +323,19 @@ def main() -> int:
     jobs = ([("train", i) for i in range(160)] + [("val", i) for i in range(20)] + [("test_novel", i) for i in range(20)]) if args.pilot \
         else [(args.split, i) for i in range(args.start, args.start + args.count)]
     coco: dict[str, dict] = {}
-    times = []
+    times, stale = [], []
     for n, (split, index) in enumerate(jobs):
         t0 = time.monotonic()
         spec = sampler.sample(split, index)
         d = out / split
         for sub in ("images", "masks") + (("depth",) if split != "train" else ()):
             (d / sub).mkdir(parents=True, exist_ok=True)
+        # fresh prim paths for every image: re-using a path (delete + recreate) let the renderer keep the
+        # old material in the RGB (pilot, measured: the first image's floor in every frame)
+        global GEN
         if stage.GetPrimAtPath(GEN):
             stage.RemovePrim(GEN)
+        GEN = f"/World/Gen_{n:05d}"
         stage.DefinePrim(GEN, "Xform")
         stage.DefinePrim(f"{GEN}/Looks", "Scope")
         for o in spec.objects:
@@ -332,18 +352,56 @@ def main() -> int:
         q = np.concatenate([spec.robot_q, [spec.finger_rad]]).astype(np.float32).reshape(1, -1)
         robot.set_dof_positions(wp.array(q), dof_indices=idx)
         robot.set_dof_position_targets(wp.array(q), dof_indices=idx)
-        for _ in range(2):
+        for _ in range(3):
             app.update()
-        rep.orchestrator.step(rt_subframes=CFG["render"]["rt_subframes"], delta_time=0.0)
+        posed = robot.get_dof_positions(dof_indices=idx).numpy()[0]
+        pose_err = float(np.degrees(np.max(np.abs(posed[:6] - np.asarray(spec.robot_q)))))
+        # render each scene twice and keep the second frame: the RGB annotator can lag the instance
+        # masks by one frame (measured in the pilot: masks of scene N over the RGB of scene N-1)
+        for _ in range(CFG["render"].get("steps_per_image", 2)):
+            rep.orchestrator.step(rt_subframes=CFG["render"]["rt_subframes"], delta_time=0.0)
+        if args.check_stale:  # one more render of the SAME scene must not change the image or the masks
+            rgb_a, ids_a = np.asarray(a_rgb.get_data())[..., :3].astype(int), np.asarray(a_ins.get_data()["data"]).copy()
+            rep.orchestrator.step(rt_subframes=CFG["render"]["rt_subframes"], delta_time=0.0)
+            rgb_b, ids_b = np.asarray(a_rgb.get_data())[..., :3].astype(int), np.asarray(a_ins.get_data()["data"])
+            stale.append({"index": index, "rgb_changed_px": int((np.abs(rgb_a - rgb_b).max(axis=2) > 25).sum()),
+                          "mask_changed_px": int((ids_a != ids_b).sum()), "robot_pose_err_deg": round(pose_err, 3)})
+        if args.align_test:  # render the same scene more times, save RGB + mask outline per step
+            for k in range(4):
+                rep.orchestrator.step(rt_subframes=CFG["render"]["rt_subframes"], delta_time=0.0)
+                im = np.asarray(a_rgb.get_data())[..., :3].copy()
+                idk = np.asarray(a_ins.get_data()["data"])
+                edge = cv2.Canny(((idk * 37) % 255).astype(np.uint8), 1, 2) > 0
+                im[edge] = (255, 255, 0)
+                cv2.imwrite(str(out / f"align_{index}_{k}.jpg"), cv2.cvtColor(im, cv2.COLOR_RGB2BGR))
         rgb = np.asarray(a_rgb.get_data())[..., :3]
         ins = a_ins.get_data()
         ids, info = np.asarray(ins["data"]), ins["info"]
+        if args.debug:
+            present = {int(v): int((ids == v).sum()) for v in np.unique(ids)}
+            (out / f"debug_{split}_{index:05d}.json").write_text(json.dumps(
+                {"present_ids_px": present, "idToLabels": {str(k): str(v) for k, v in info["idToLabels"].items()},
+                 "idToSemantics": {str(k): str(v) for k, v in info.get("idToSemantics", {}).items()},
+                 "objects": [o.uid for o in spec.objects]}, indent=1))
         uid_img = np.zeros(ids.shape, np.uint16)
-        for iid, prim_path in info["idToLabels"].items():
-            p = prim_path if isinstance(prim_path, str) else str(prim_path)
-            if "/obj_" in p:
+        for iid, labels in info.get("idToSemantics", {}).items():
+            uid = str(labels.get("uid", "")) if isinstance(labels, dict) else ""
+            if uid.startswith("uid_"):
+                uid_img[ids == int(iid)] = int(uid[4:].split(",")[0])
+        for iid, prim_path in info["idToLabels"].items():  # fallback: prim paths, when present
+            p = str(prim_path)
+            if "/obj_" in p and not (uid_img[ids == int(iid)] > 0).any():
                 uid_img[ids == int(iid)] = int(p.split("/obj_")[1].split("/")[0])
         name = f"{split}_{index:05d}"
+        if args.debug:  # RGB with object mask edges (yellow) and robot mask edges (red)
+            dbg = rgb.astype(np.uint8).copy()
+            robot_px = np.zeros(ids.shape, bool)
+            for iid, prim_path in info["idToLabels"].items():
+                if str(prim_path).startswith(ROBOT_PATH) or "robotiq" in str(prim_path):
+                    robot_px |= ids == int(iid)
+            dbg[cv2.Canny(robot_px.astype(np.uint8) * 255, 50, 100) > 0] = (255, 0, 0)
+            dbg[cv2.Canny((uid_img * 37 % 251).astype(np.uint8), 1, 2) > 0] = (255, 255, 0)
+            cv2.imwrite(str(out / f"debug_{name}.jpg"), cv2.cvtColor(dbg, cv2.COLOR_RGB2BGR))
         rgb_fx = apply_rgb_effects(rgb.astype(np.uint8), spec.rgb_effects)
         cv2.imwrite(str(d / "images" / f"{name}.jpg"), cv2.cvtColor(rgb_fx, cv2.COLOR_RGB2BGR),
                     [cv2.IMWRITE_JPEG_QUALITY, CFG["render"]["jpeg_quality"]])
@@ -384,6 +442,11 @@ def main() -> int:
             old["annotations"] += c["annotations"]
             c = old
         f.write_text(json.dumps(c))
+    if stale:
+        (out / "stale_check.json").write_text(json.dumps(stale, indent=1))
+        print("[gen] stale check (pixels changed by one more render): rgb max", max(x["rgb_changed_px"] for x in stale),
+              "mask max", max(x["mask_changed_px"] for x in stale), "robot pose err max deg",
+              max(x["robot_pose_err_deg"] for x in stale), flush=True)
     stats = {"images": len(times), "seconds_per_image_mean": float(np.mean(times)),
              "seconds_per_image_median": float(np.median(times)), "first_image_s": float(times[0])}
     (out / f"render_stats_{args.split if not args.pilot else 'pilot'}.json").write_text(json.dumps(stats, indent=1))
