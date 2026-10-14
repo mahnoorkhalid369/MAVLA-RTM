@@ -42,13 +42,26 @@ class Measured:
         return asdict(self)
 
 
+# Robot parts that are VISUAL ONLY in the URDF (no collision shape) but seen by the cameras:
+# (link, box centre in the link frame, half sizes). The wrist-camera bracket (URDF camera_link visual
+# "bracket", 20 x 40 x 50 mm at z -37.5 mm) was measured as a floating object (2026-10-14).
+VISUAL_ONLY_PARTS = [("camera_link", (0.0, 0.0, -0.0375), (0.010, 0.020, 0.025))]
+
+
 class RobotVolume:
-    """Point-in-robot test from the collision model's spheres at a joint state (+ held object kept)."""
+    """Point-in-robot test from the collision model's spheres at a joint state, plus visual-only robot parts
+    (VISUAL_ONLY_PARTS, posed by forward kinematics), inflated; the held object's volume is kept."""
 
     def __init__(self, checker, q, opening: float, held_box=None, tool_pose=None) -> None:
         c, r, idx, names = checker.spheres(q, opening, held_box)
         robot = np.array([names[i] != "held" for i in idx])
         self.centres, self.radii = c[robot], r[robot] + ROBOT_INFLATE
+        self.boxes = []
+        poses = checker.link_poses(q)
+        for link, centre, half in VISUAL_ONLY_PARTS:
+            if link in poses:
+                T = poses[link] @ np.vstack([np.column_stack([np.eye(3), centre]), [0, 0, 0, 1]])
+                self.boxes.append((T, np.asarray(half) + ROBOT_INFLATE))
         self.held = None
         if held_box is not None and tool_pose is not None:  # held object's box in the world
             T_held, size = held_box
@@ -59,6 +72,9 @@ class RobotVolume:
         for k in range(0, len(self.centres), 32):
             d = np.linalg.norm(pts[:, None, :] - self.centres[None, k:k + 32], axis=-1)
             inside |= np.any(d <= self.radii[None, k:k + 32], axis=1)
+        for T, half in self.boxes:
+            local = (pts - T[:3, 3]) @ T[:3, :3]
+            inside |= np.all(np.abs(local) <= half, axis=1)
         if self.held is not None:  # the held object is NOT robot: keep its points
             T, half = self.held
             local = (pts - T[:3, 3]) @ T[:3, :3]

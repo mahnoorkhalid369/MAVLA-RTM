@@ -84,6 +84,22 @@ def format_event(e: dict) -> Line | None:  # noqa: C901 (a flat dispatch on the 
         return Line(w, "PERCEPTION", f"scene report: {e.get('objects')} objects (frame {e.get('frame_id')})")
     if k == "answer":
         return Line(w, "GEMMA", f"answer: {e.get('answer')} (objects {e.get('object_ids')}; unverified)")
+    if k == "exploration":
+        pl = e.get("plan") or {}
+        if pl.get("ok"):
+            b = pl["best"]
+            return Line(w, "EXPLORATION", f"{e.get('purpose')} {e.get('target')!r}: viewpoint {b['distance_m']} m away "
+                                          f"(elev {b['elevation_deg']} deg, az {b['azimuth_deg']} deg, expected {b['expected_gain']}x pixels), "
+                                          f"{pl['evaluated']} candidates, {e.get('seconds')} s; path collision-checked")
+        return Line(w, "EXPLORATION", f"{e.get('purpose')} {e.get('target')!r}: {pl.get('reason')} {pl.get('rejected')}", "warn")
+    if k == "inspection":
+        return Line(w, "PERCEPTION", f"wrist view of {e.get('target')!r}: {_mm(e.get('wrist_centre') or [])} "
+                                     f"(table {_mm(e.get('table_centre') or [])}); association {(e.get('association') or {}).get('status')}")
+    if k == "explore_result":
+        return Line(w, "EXPLORATION", f"{e.get('target')!r}: {e.get('viewpoints')} viewpoint(s), {e.get('new_objects')} newly seen object(s), "
+                                      + ("found" if e.get("found") else "not found"), "success" if e.get("found") else "warn")
+    if k == "subtask":
+        return Line(w, "SUPERVISOR", f"information-gathering subtask: {e.get('reason')}", "warn")
     if k == "plan_completed":
         return Line(w, "SUPERVISOR", "plan completed by rule: " + "; ".join(e.get("rules") or []))
     if k == "located":
@@ -185,6 +201,9 @@ def format_event(e: dict) -> Line | None:  # noqa: C901 (a flat dispatch on the 
                 return Line(w, "VERIFY", f"placement: {e.get('reason')}", lvl)
             return Line(w, "VERIFY", f"placement: xy {e.get('xy_error_mm')} mm, z {e.get('z_error_mm')} mm, tilt {e.get('tilt_deg')} deg "
                                      "(limits 10 / 5 / 5): " + ("confirmed" if ok else "OUT OF TOLERANCE"), lvl)
+        if c == "viewpoint":
+            return Line(w, "VERIFY", f"viewpoint reached: joints {e.get('max_joint_error_deg')} deg, camera {e.get('camera_pos_error_mm')} mm, "
+                                     f"axis {e.get('axis_error_deg')} deg", lvl)
         if c == "home":
             return Line(w, "VERIFY", f"HOME: max joint error {e.get('max_error_deg')} deg (limit {e.get('tolerance_deg')}), "
                                      f"TCP {e.get('tcp_error_mm')} mm: " + ("reached" if ok else "NOT REACHED"), lvl)
