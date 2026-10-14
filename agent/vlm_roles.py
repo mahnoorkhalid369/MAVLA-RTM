@@ -150,7 +150,15 @@ RESOLVE_PROMPT = """The objects in the image are outlined and numbered. Their de
 {descriptions}
 Which ONE numbered object does the user mean by "{text}"?
 If exactly one object fits, give its number. If several fit equally well, or none fits, set "id" to null,
-"ambiguous" to true and list the numbers that could fit. Answer with ONE JSON object only:
+"ambiguous" to true and list the numbers that could fit in "candidates". "id" is always ONE number or
+null, never a list. Answer with ONE JSON object only:
+{{"id": <number or null>, "ambiguous": <true|false>, "candidates": [<numbers>], "reason": "<short>"}}"""
+
+COMPARE_PROMPT = """The picture shows {n} objects side by side; the number of each object is written above it.
+Which ONE of them is "{text}"? Compare them with each other. If one fits clearly better than the others,
+give its number. If several fit equally well or none fits, set "id" to null, "ambiguous" to true and
+list the numbers that could fit in "candidates". "id" is always ONE number or null, never a list.
+Answer with ONE JSON object only:
 {{"id": <number or null>, "ambiguous": <true|false>, "candidates": [<numbers>], "reason": "<short>"}}"""
 
 CONFIRM_PROMPT = """Look at the object at full brightness in this picture (everything around it is dimmed). Is it "{text}"?
@@ -176,7 +184,10 @@ class Roles:
                     self.log("vlm", role=role, attempt=attempt, prompt=prompt, answer=raw, valid=True, seconds=round(dt, 2))
                 return obj
             except (ValueError, ValidationError, json.JSONDecodeError) as exc:
-                error = str(exc).splitlines()[0][:200]
+                if isinstance(exc, ValidationError):  # say WHICH field is wrong and why (the retry needs it)
+                    error = "; ".join(f"{'.'.join(map(str, e['loc'])) or 'answer'}: {e['msg']}" for e in exc.errors())[:300]
+                else:
+                    error = str(exc).splitlines()[0][:300]
                 if self.log:
                     self.log("vlm", role=role, attempt=attempt, prompt=prompt, answer=raw, valid=False, error=error, seconds=round(dt, 2))
         raise VLMFailure(f"{role}: invalid answer after one retry ({error})")
@@ -213,6 +224,14 @@ class Roles:
         desc = "\n".join(f"{d['id']}: {d.get('name', '')} ({d.get('colour', '')}, {d.get('shape', '')}, {d.get('material', '')})"
                          for d in descriptions)
         return self._call("resolve", Resolution, RESOLVE_PROMPT.format(descriptions=desc, text=text), image=som_image, check=check)
+
+    def compare(self, montage_image: np.ndarray, text: str, ids: list[int]) -> Resolution:
+        def check(r: Resolution):
+            if r.id is not None and r.id not in ids:
+                raise ValueError(f"id {r.id} is not one of the shown numbers {ids}")
+            if r.id is None and not r.ambiguous:
+                raise ValueError("id is null but ambiguous is false")
+        return self._call("compare", Resolution, COMPARE_PROMPT.format(n=len(ids), text=text), image=montage_image, check=check)
 
     def confirm(self, crop_image: np.ndarray, text: str) -> Confirmation:
         return self._call("confirm", Confirmation, CONFIRM_PROMPT.format(text=text), image=crop_image)

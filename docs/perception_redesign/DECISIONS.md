@@ -220,3 +220,23 @@ Design approved with changes; revision 1 kept as `ARCHITECTURE_rev1_2026-10-14.m
   ground truth: it did not move) -> only objects whose top face is visible now are compared; (b)
   re-observations describe only objects that do not match a described world object (saves ~70 s per
   verification; matched objects keep their description). Cycle 2 stopped after 3 scored runs.
+- **Cycle 3 results (measured, `rehearsal/cycle3/`):** i1 3/3 truth success (xy 4.0 / 2.6 / 4.3 mm);
+  i2 1/3 (2 honest FAILED: resolve answers invalid 3x); i3 0/3: run 1 honest FAILED (grasp: fingers
+  stopped 1.46 / 1.29 deg short of the close target, threshold 1.5 deg, unchanged), runs 2-3
+  **FALSE DONE**: "orange cube" resolved to the brown cube (rendered orange-brown; described
+  "brown/orange-brown"), confirm_object said "yes" (same model, correlated error — the failure mode
+  ARCHITECTURE rev 3 names), the brown cube was then placed and verified geometrically on the
+  cylinder. Geometric verification cannot detect a wrong object.
+- **Fix cycle 3 (of 3, the last), new code only:** (1) VLM retry message names the invalid field and
+  why (was "1 validation error"); resolve prompt states "id" is one number or null. (2) Square
+  footprints (symmetry 90): width = mean of both measured extents (the oblique view under-reads one
+  axis and over-reads the other; offline on today's capture: cubes -0.4..-1.0 mm instead of up to
+  +1.0 / -3.1 mm); errs to the tighter close target. The 1.5 deg contact threshold is unchanged.
+  (3) Reference cross-check: lexical candidates = objects whose VLM description contains every word of
+  the reference (deterministic, the VLM's own words; only English function words are dropped). If
+  the resolver's pick is not among them or several qualify, the VLM compares their isolated crops side
+  by side; the choice is accepted only if it is also the single most specific description (fewest
+  extra words); otherwise ambiguous -> ask the user (scripted "cancel" -> counted as asked). Offline
+  on the false-done crops the visual comparison alone picked the brown cube 3/3 times
+  (`vlm_check/compare_check.json`), so the agreement rule turns that case into a question instead of
+  a wrong pick. Conservative by design: some correct picks will now be questions.

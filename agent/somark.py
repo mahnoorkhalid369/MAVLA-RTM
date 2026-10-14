@@ -78,3 +78,16 @@ def isolate(rgb: np.ndarray, mask: np.ndarray, margin: float = 0.6, min_side: in
     if s > 1.0:
         out = cv2.resize(out, None, fx=s, fy=s, interpolation=cv2.INTER_CUBIC)
     return out
+
+
+def montage(crops: dict[int, np.ndarray], height: int = 224) -> np.ndarray:
+    """Isolated crops side by side at one height, each with its number in a header strip ABOVE it
+    (nothing drawn on the objects)."""
+    tiles = []
+    for k, c in crops.items():
+        c = cv2.resize(c, (max(1, int(c.shape[1] * height / c.shape[0])), height), interpolation=cv2.INTER_AREA)
+        head = np.zeros((36, c.shape[1], 3), np.uint8)
+        cv2.putText(head, str(k), (max(4, c.shape[1] // 2 - 10), 27), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 255, 255), 2, cv2.LINE_AA)
+        tiles.append(np.vstack([head, c]))
+        tiles.append(np.full((height + 36, 12, 3), 255, np.uint8))  # white gap between objects
+    return np.hstack(tiles[:-1])

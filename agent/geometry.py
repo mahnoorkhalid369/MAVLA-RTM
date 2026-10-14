@@ -139,6 +139,9 @@ def measure(mask: np.ndarray, depth: np.ndarray, K, T: np.ndarray, robot: RobotV
     cam_dist = float(np.median(np.linalg.norm(pts[layer] - T[:3, 3], axis=1)))
     pad = 2 * MASK_ERODE_PX * cam_dist / K[0]
     ext, fp, g_width = ext + pad, (fp[0] + pad, fp[1] + pad), g_width + pad
+    if yaw is not None and sym == 90.0:  # square footprint: both extents measure the same width; average
+        w = float(np.mean(ext))         # them (the oblique view under-reads one axis and over-reads the other)
+        ext, fp, g_width = np.array([w, w]), (w, w), w
     if yaw is None:  # round: a percentile range under-measures a disc; use the radius around the centre
         d = 2 * float(np.percentile(np.linalg.norm(xy - centre_xy, axis=1), 99)) + pad
         ext, fp, g_width = np.array([d, d]), (d, d), d

@@ -8,6 +8,7 @@ camera's line of sight before re-observing). No ground truth, no object knowledg
 
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass, field
 
@@ -16,7 +17,7 @@ import numpy as np
 
 from agent.config import FIXTURES, Relations, Tolerances, unit
 from agent.geometry import RobotVolume, measure, snap_supports
-from agent.somark import draw_marks, draw_names, isolate
+from agent.somark import draw_marks, draw_names, isolate, montage
 from agent.world import WorldModel
 from control.collision import Box, CollisionChecker
 from control.kinematics import Kinematics
@@ -124,9 +125,48 @@ class Tools:
             self.log("world", event="disturbed", moved=moved)
         return moved
 
+    STOPWORDS = {"the", "a", "an", "of", "and", "that", "this", "is", "one", "with"}  # English function words
+
+    @classmethod
+    def words(cls, text: str) -> set[str]:
+        ws = {w for w in re.split(r"[^a-z]+", text.lower()) if w and w not in cls.STOPWORDS}
+        return ws | {w[:-1] for w in ws if len(w) > 3 and w.endswith("s")}  # plural -> singular
+
+    def lexical_candidates(self, obs: Observation, text: str) -> list[int]:
+        """Marks whose VLM description contains every word of the user's reference (the VLM's own words;
+        deterministic, no word lists)."""
+        need = self.words(text)
+        return [k for k, d in obs.descriptions.items()
+                if need and need <= self.words(" ".join(str(d.get(f, "")) for f in ("name", "colour", "shape", "material")))]
+
     def resolve(self, obs: Observation, text: str):
+        """VLM resolution over the descriptions, cross-checked: if the pick is not among the objects whose
+        description contains every word of the reference, or several objects do, the VLM compares those
+        objects' isolated crops side by side and must pick one (or say ambiguous -> ask the user)."""
         descs = [{"id": k, **obs.descriptions.get(k, {})} for k in obs.marks]
-        return self.roles.resolve(obs.som, descs, text, list(obs.marks))
+        r = self.roles.resolve(obs.som, descs, text, list(obs.marks))
+        lex = self.lexical_candidates(obs, text)
+        need_compare = bool(lex) and (len(lex) > 1 or (r.id is not None and r.id not in lex))
+        self.log("tool", tool="lexical_check", text=text, resolver_id=r.id, lexical=lex, compare=need_compare)
+        if not need_compare:
+            return r
+        ids = sorted(set(lex) | ({r.id} if r.id is not None else set()))
+        img = montage({k: isolate(obs.rgb, obs.marks[k]) for k in ids})
+        cv2.imwrite(str(self.run_dir / "images" / f"{obs.frame_id}_compare_{'_'.join(map(str, ids))}.jpg"), cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
+        c = self.roles.compare(img, text, ids)
+        # second, independent cue from the VLM's own descriptions: the candidate whose description adds
+        # the fewest words beyond the reference is the most specific match. Accept the visual choice only
+        # if it is the single most specific candidate; if the cues disagree or tie -> ambiguous (ask).
+        need = self.words(text)
+        extra = {k: len(self.words(" ".join(str(obs.descriptions.get(k, {}).get(f, "")) for f in ("name", "colour", "shape"))) - need)
+                 for k in ids}
+        best = [k for k in ids if extra[k] == min(extra.values())]
+        agree = c.id is not None and best == [c.id]
+        self.log("tool", tool="compare", text=text, ids=ids, extra_words=extra, most_specific=best, agree=agree, **c.model_dump())
+        if agree:
+            return c
+        return type(c)(id=None, ambiguous=True, candidates=ids,
+                       reason=f"visual choice {c.id} vs most specific description {best}: cues disagree")
 
     def confirm(self, obs: Observation, mark: int, text: str):
         c = isolate(obs.rgb, obs.marks[mark])

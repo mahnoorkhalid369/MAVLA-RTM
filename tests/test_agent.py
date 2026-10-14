@@ -326,3 +326,39 @@ def test_park_poses_stay_inside_joint_limits():
     k = Kinematics()
     for j1 in Tools.PARK_J1_DEG:
         assert k.lower[0] + np.radians(5) < np.radians(j1) < k.upper[0] - np.radians(5)
+
+
+def test_resolve_retry_names_the_wrong_field():
+    img = np.zeros((32, 32, 3), np.uint8)
+    vlm = RecordedVLM(['{"id": [1, 2], "ambiguous": true, "candidates": [1, 2]}', '{"id": null, "ambiguous": true, "candidates": [1, 2]}'])
+    r = Roles(vlm).resolve(img, [], "x", [1, 2])
+    assert r.ambiguous and "id" in vlm.calls[1].split("not valid")[1]
+
+
+def test_lexical_cross_check_triggers_comparison():
+    """The resolver picks a partial match (as in rehearsal cycle 3, i3 run 2): the comparison decides."""
+    from agent.tools import Observation
+    t, _ = tools_with([])
+    t.run_dir = Path(__file__).parent  # images are written next to the test only if it fails before cleanup
+    rgb = np.zeros((60, 60, 3), np.uint8)
+    m = np.zeros((60, 60), bool)
+    m[20:30, 20:30] = True
+    obs = Observation("t", "table", rgb, rgb, {1: m, 19: m}, {}, descriptions={
+        1: {"name": "Cube", "colour": "brown/orange-brown", "shape": "cube"},
+        19: {"name": "Cube", "colour": "Orange", "shape": "Cube"}})
+    assert t.lexical_candidates(obs, "the orange cube") == [1, 19]
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        t.run_dir = Path(d)
+        t.roles = Roles(RecordedVLM(['{"id": 1}', '{"id": 19, "ambiguous": false, "candidates": [19]}']))
+        assert t.resolve(obs, "orange cube").id == 19  # visual choice = most specific description: accepted
+        t.roles = Roles(RecordedVLM(['{"id": 1}', '{"id": 1, "ambiguous": false, "candidates": [1]}']))
+        r = t.resolve(obs, "orange cube")  # visual choice disagrees with the descriptions: ask, never guess
+        assert r.id is None and r.ambiguous and r.candidates == [1, 19]
+
+
+def test_square_footprint_width_is_the_mean_of_both_extents():
+    depth, masks = render([((0.0, 0.70), (0.035, 0.035, 0.035))])
+    g, _ = measure(masks[0], depth, K, table_camera_pose(), robot=None)
+    assert g.symmetry_deg == 90.0 and g.extents[0] == g.extents[1] == g.grasp_width
+    assert abs(g.grasp_width - 0.035) < 0.003
