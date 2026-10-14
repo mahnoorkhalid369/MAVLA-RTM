@@ -232,8 +232,17 @@ def _find_in(ctx: Context, wobs, text: str) -> StepResult | None:
         return None
     ctx.tools.describe(wobs, new)
     words = ctx.tools.words(text) - GENERIC_WORDS
-    if not words:  # "the object / something behind ...": any single newly seen object answers it
-        cands = new if len(new) == 1 else []
+    if not words:  # "the object / something behind ...": the single newly seen COMPLETE object answers it
+        whole = [k for k in new if wobs.measured[k].get("tilt_deg") is not None]  # top face measured (not a side face)
+        if len(whole) != 1:
+            return None
+        k = whole[0]
+        g, d = wobs.measured[k], wobs.descriptions.get(k) or {}
+        ctx.log("located", text=text, mark=k, confirm="generic reference", centre=g["centre"], camera="wrist")
+        return StepResult("completed", f"Behind it, the wrist camera found an object the table camera cannot see (frame {wobs.frame_id}): "
+                                       f"at x {g['centre'][0] * 1000:+.0f} mm, y {g['centre'][1] * 1000:+.0f} mm, {g['height'] * 1000:.0f} mm "
+                                       f"tall, described as {d.get('colour', '')} {d.get('name', '')} [position measured; description Gemma's]",
+                          {"mark": k, "camera": "wrist"})
     else:
         cands = [k for k in ctx.tools.lexical_candidates(wobs, text) if k in new]
         if not cands:  # descriptions use other words (e.g. "green shape" for a cylinder): check the crops of
