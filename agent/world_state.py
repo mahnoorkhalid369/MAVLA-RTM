@@ -1,0 +1,75 @@
+"""Shared task state of the goal supervisor: one inspectable object per instruction, written to
+<run_dir>/task_state.json after every step.
+
+It keeps four kinds of information apart:
+  facts       what sensors measured (object geometry from depth, detector scores, robot joint state)
+  hypotheses  what Gemma said (object descriptions, interpretations, answers) — never physical ground truth
+  plan        the planned capability steps and their status
+  verified    outcomes confirmed by independent checks (contact, camera placement check, HOME joints)
+"""
+
+from __future__ import annotations
+
+import json
+import time
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
+
+# Outcome classes for a step or a whole goal (requested distinction; "completed" = verified success)
+OUTCOMES = ("completed", "unsupported", "insufficient_info", "ambiguous", "infeasible", "unsafe", "cancelled", "failed")
+
+
+@dataclass
+class Step:
+    index: int
+    capability: str
+    args: dict
+    status: str = "pending"  # pending | running | done | failed | skipped | replaced
+    outcome: str | None = None  # one of OUTCOMES once finished
+    summary: str = ""
+    seconds: float = 0.0
+
+
+@dataclass
+class TaskState:
+    instruction: str
+    goal: str = ""  # the planner's one-line interpretation (hypothesis)
+    success_condition: str = ""  # the planner's statement of what "done" means (hypothesis)
+    plan: list[Step] = field(default_factory=list)
+    facts: dict = field(default_factory=dict)  # {"objects": [...], "frame_id", "taken_at", "view_blocked", ...}
+    hypotheses: dict = field(default_factory=dict)  # {"descriptions": {world_id: {...}}, "answers": [...]}
+    verified: list[dict] = field(default_factory=list)  # independent verification records
+    actions: list[dict] = field(default_factory=list)  # capability calls with outcome and duration
+    questions: list[dict] = field(default_factory=list)
+    replans: int = 0
+    status: str = "running"  # running | completed | failed | cancelled | unsupported
+    outcome: str | None = None
+    message: str = ""
+    started: float = field(default_factory=time.time)
+
+    def current(self) -> Step | None:
+        return next((s for s in self.plan if s.status in ("pending", "running")), None)
+
+    def remaining(self, after: Step) -> list[Step]:
+        return [s for s in self.plan if s.index > after.index and s.status == "pending"]
+
+    def record_observation(self, obs) -> None:
+        """Facts from an agent.tools.Observation (measured) and its descriptions (Gemma hypotheses)."""
+        objs = []
+        for k in obs.marks:
+            g = obs.measured.get(k, {})
+            objs.append({"mark": k, "world_id": obs.object_ids.get(k), "centre_m": [round(v, 4) for v in g.get("centre", [])],
+                         "footprint_m": [round(v, 4) for v in g.get("footprint", [])], "height_m": round(g.get("height", 0.0), 4),
+                         "top_visible": g.get("tilt_deg") is not None, "detector_score": obs.scores.get(k)})
+        self.facts = {"frame_id": obs.frame_id, "camera": obs.camera, "objects": objs, "cleared_view": obs.cleared_view,
+                      "excluded_masks": len(obs.excluded)}
+        self.hypotheses.setdefault("descriptions", {})
+        for k, d in obs.descriptions.items():
+            self.hypotheses["descriptions"][str(obs.object_ids.get(k, f"mark{k}"))] = {**d, "source": "gemma", "frame_id": obs.frame_id}
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    def save(self, run_dir) -> None:
+        p = Path(run_dir) / "task_state.json"
+        p.write_text(json.dumps(self.to_dict(), indent=1, default=str))

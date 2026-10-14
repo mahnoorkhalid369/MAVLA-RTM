@@ -44,7 +44,7 @@ def stop_sim(p: subprocess.Popen | None) -> None:
 
 def run_one(instruction: str, out: Path, bridge, detector, vlm, executor, responder, live=None, memory=None) -> dict:
     from agent.eventlog import EventLog
-    from agent.pick_place import PickPlaceWorkflow
+    from agent.supervisor import GoalSupervisor
     from agent.tools import Tools
     from agent.vlm_roles import Roles
 
@@ -54,7 +54,7 @@ def run_one(instruction: str, out: Path, bridge, detector, vlm, executor, respon
         live.start_run(out, instruction)
     try:
         tools = Tools(bridge, detector, Roles(vlm, log), executor, log, out, live, memory)
-        report = Supervisor(tools, log, out, responder).run(instruction, thread_id=out.name)
+        report = GoalSupervisor(tools, log, out, responder).run(instruction, thread_id=out.name)
     except Exception as exc:  # an unexpected error is a failure, never a success
         log("error", error=repr(exc))
         report = {"instruction": instruction, "status": "FAILED", "failure": {"cls": "internal", "reason": repr(exc)},

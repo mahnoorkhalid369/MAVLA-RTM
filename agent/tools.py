@@ -427,6 +427,19 @@ class Tools:
         """Floor points on the reliable reach ring (0.45-0.90 m), every 30 deg, for the first look."""
         return [(r * np.cos(np.radians(a)), r * np.sin(np.radians(a))) for r in (0.5, 0.7, 0.9) for a in range(0, 360, 30)]
 
+    def view_blockage(self, q=None) -> tuple[int, int]:
+        """(workspace points whose camera ray the arm blocks at joint state q (default: now), total points)."""
+        q = self.bridge.q() if q is None else q
+        cam = table_camera_pose()[:3, 3]
+        c, r, idx, names = CollisionChecker().spheres(q)
+        pts = self.workspace_points()
+        blocked = 0
+        for x, y in pts:
+            seg = np.array([x, y, 0.03]) - cam
+            t = np.clip(((c - cam) @ seg) / (seg @ seg), 0, 1)
+            blocked += int(np.any(np.linalg.norm(cam + t[:, None] * seg - c, axis=1) < r + 0.02))
+        return blocked, len(pts)
+
     def park_for_view(self, target_xy=None) -> dict:
         """Move the arm to a collision-free pose (ARM_HOME turned about J1) from which the table camera
         sees target_xy (must be unblocked), or, with target_xy None, the pose blocking the fewest

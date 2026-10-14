@@ -96,3 +96,18 @@ def test_selection_is_never_shown_on_a_different_object_in_a_newer_frame():
     v.perc["frame_id"] = "table_001"
     v.perc["marks"]["4"]["object_id"] = None  # same frame, world ids not assigned yet: the chosen mark is right
     assert v.mark_of(v.rs.dest) == 4
+
+
+def test_goal_plan_and_steps_are_tracked_and_formatted():
+    rs = RunState()
+    for e in [ev("state", state="INTERPRETING", level="goal"),
+              ev("goal_plan", goal="report", steps=[{"index": 1, "capability": "observe", "args": {}},
+                                                   {"index": 2, "capability": "describe_scene", "args": {}}]),
+              ev("step", event="start", index=1, capability="observe", safety="read_only"),
+              ev("step", event="end", index=1, capability="observe", outcome="completed", seconds=3.0),
+              ev("state", state="COMPLETED"),  # a skill-level terminal state does not end the goal
+              ev("state", state="UNSUPPORTED", level="goal")]:
+        rs.apply(e, None)
+    assert [s["status"] for s in rs.steps] == ["completed", "pending"] and rs.status == "UNSUPPORTED"
+    lines = [str(format_event(e)) for e in [ev("goal_plan", goal="g", steps=[], reason="cannot sing")]]
+    assert "cannot sing" in lines[0] and "[PLANNER]" in lines[0]

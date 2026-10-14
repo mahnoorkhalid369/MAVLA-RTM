@@ -62,14 +62,22 @@ class RunState:
         self.retries, self.budgets_used = {}, {}
         self.moving, self.home, self.last_plan = False, "PENDING", None
         self.lines: deque = deque(maxlen=2000)
+        self.steps: list = []  # goal plan: [{"index", "capability", "status"}]
 
     def apply(self, e: dict, frame_id: str | None) -> None:
         k = e.get("kind")
+        if k == "goal_plan":
+            self.steps = [s for s in self.steps if s["status"] != "pending"] + \
+                [{"index": x["index"], "capability": x["capability"], "status": "pending"} for x in e.get("steps", [])]
+        elif k == "step" and e.get("event") in ("start", "end"):
+            for st in self.steps:
+                if st["index"] == e.get("index"):
+                    st["status"] = "running" if e["event"] == "start" else e.get("outcome", "?")
         if k == "state":
             self.state = e["state"]
-            if self.state in ("COMPLETED", "FAILED", "CANCELLED"):
+            if self.state in ("COMPLETED", "FAILED", "CANCELLED", "UNSUPPORTED") and e.get("level") == "goal":
                 self.status = self.state
-            elif self.status not in ("COMPLETED", "FAILED", "CANCELLED"):
+            elif self.status not in ("COMPLETED", "FAILED", "CANCELLED", "UNSUPPORTED"):
                 self.status = "RUNNING"
             if self.state in ("RETURNING_HOME",):
                 self.home = "MOVING"
@@ -279,6 +287,12 @@ class Viewer:
         put(line, FG, 0.6, 1, 34)
         put("SUPERVISOR STATE", MUTED, 0.5)
         put(rs.state, LEVEL_COLOUR["success"] if rs.state == "COMPLETED" else FG, 0.75, 2, 36)
+        if rs.steps:
+            put("GOAL PLAN", MUTED, 0.5, 1, 20)
+            for st in rs.steps[-5:]:
+                col = {"completed": LEVEL_COLOUR["success"], "running": CAND_C, "pending": MUTED}.get(st["status"], LEVEL_COLOUR["warn"])
+                put(f"  {st['index']}. {st['capability']}: {st['status']}", col, 0.45, 1, 19)
+            y += 6
         for t, c in self._obj_line(rs.target, "TARGET") + self._obj_line(rs.dest, "DESTINATION"):
             put(t, c, 0.5, 1, 22)
         y += 8
@@ -311,6 +325,7 @@ class Viewer:
         rs = self.rs
         cv2.rectangle(canvas, (0, H - STATUS_H), (W, H), (12, 12, 12), -1)
         col = {"COMPLETED": LEVEL_COLOUR["success"], "FAILED": LEVEL_COLOUR["error"], "CANCELLED": LEVEL_COLOUR["warn"],
+               "UNSUPPORTED": LEVEL_COLOUR["warn"],
                "WAITING FOR USER": CAND_C}.get(rs.status, FG)
         items = [(f"Task: {rs.status}", col), (f"Robot: {'MOVING' if rs.moving else 'STILL'}", FG),
                  (f"HOME: {rs.home}", LEVEL_COLOUR["success"] if rs.home == "VERIFIED" else FG),

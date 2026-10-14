@@ -98,6 +98,30 @@ class TaskSpec(BaseModel):
     reason: str = ""
 
 
+class PickPlaceArgs(BaseModel):
+    object: Ref
+    relation: Literal["on", "next_to", "left_of", "right_of", "in_front_of", "behind"]
+    reference: Ref
+    frame: Literal["robot", "camera"] = "robot"
+
+
+class PlanStep(BaseModel):
+    capability: Literal["observe", "describe_scene", "answer", "pick_place", "return_home", "explore"]
+    args: dict = {}
+
+
+class GoalPlan(BaseModel):
+    goal: str = ""
+    steps: list[PlanStep] = []
+    success: str = ""
+    reason: str = ""
+
+
+class SceneAnswer(BaseModel):
+    answer: str
+    object_ids: list[int] = []
+
+
 class Description(BaseModel):
     id: int
     name: str
@@ -172,6 +196,26 @@ Example: "put the <A> on the <B>" -> {"task": "pick_place", "object": {"text": "
 "anchor": null}, "relation": "on", "reference": {"text": "<B>", "relation": null, "anchor": null},
 "frame": "robot", "reason": "move <A> onto <B>"}"""
 
+PLAN_SYSTEM = """You plan for a robot arm that has a camera looking at a table with objects on it.
+Turn the user's instruction into a short list of steps, using ONLY these capabilities:
+{menu}
+Rules: copy the user's own words for objects; one pick_place step per object to move, in the order the user
+wants; use "observe" before "describe_scene" or "answer"; no steps that the user did not ask for. If none of
+the capabilities can do what the user wants, return an empty step list and explain why in "reason".
+For pick_place, keep object.relation and object.anchor null unless the user picks out the object to move by
+where it is now (e.g. "the <A> that is next to the <B>"). frame is "camera" only if the user says so.
+Answer with ONE JSON object only:
+{{"goal": "<one line>", "steps": [{{"capability": "<name>", "args": {{...}}}}], "success": "<what must be true at the end>", "reason": "<short>"}}
+Examples:
+"put the <A> on the <B>" -> {{"goal": "move <A> onto <B>", "steps": [{{"capability": "pick_place", "args": {{"object": {{"text": "<A>", "relation": null, "anchor": null}}, "relation": "on", "reference": {{"text": "<B>", "relation": null, "anchor": null}}, "frame": "robot"}}}}], "success": "<A> stands on <B>", "reason": "one move"}}
+"what is on the table?" -> {{"goal": "report the scene", "steps": [{{"capability": "observe", "args": {{}}}}, {{"capability": "describe_scene", "args": {{}}}}], "success": "the user knows what is on the table", "reason": "observation only"}}"""
+
+ANSWER_PROMPT = """These objects were measured on the table by the robot's camera (number: description, position):
+{facts}
+Answer the user's question using only these objects. Answer with ONE JSON object only:
+{{"answer": "<short answer>", "object_ids": [<numbers of the objects your answer refers to>]}}
+Question: {question}"""
+
 DESCRIBE_PROMPT = """Each object in the image is outlined and numbered. The numbers are: {ids}.
 For EVERY number, describe the object inside that outline as you see it. Answer with ONE JSON object only:
 {{"objects": [{{"id": <number>, "name": "<short name>", "colour": "<colour>", "shape": "<shape>", "material": "<material>"}}, ...]}}
@@ -244,6 +288,33 @@ class Roles:
                 raise ValueError("object.relation / object.anchor repeat the destination; keep them null "
                                  "unless the user describes where the object to move is now")
         return self._call("parse", TaskSpec, f"Instruction: {instruction}", system=PARSE_SYSTEM, check=check)
+
+    def plan_goal(self, instruction: str, menu: str, max_steps: int = 6) -> GoalPlan:
+        """Goal -> capability plan (one call; replaces `parse`). Validated deterministically: known capability
+        names (schema enum), argument shapes per capability, step count, the parse consistency rules."""
+        def check(p: GoalPlan):
+            if len(p.steps) > max_steps:
+                raise ValueError(f"at most {max_steps} steps")
+            for i, st in enumerate(p.steps):
+                if st.capability == "pick_place":
+                    a = PickPlaceArgs.model_validate(st.args)
+                    if a.object.anchor and a.object.anchor.strip().lower() == a.reference.text.strip().lower() \
+                            and a.object.relation == a.relation:
+                        raise ValueError("object.relation / object.anchor repeat the destination; keep them null "
+                                         "unless the user describes where the object to move is now")
+                    st.args = a.model_dump()
+                elif st.capability == "answer" and not str(st.args.get("question", "")).strip():
+                    raise ValueError(f"step {i + 1}: answer needs args.question")
+        return self._call("plan", GoalPlan, f"Instruction: {instruction}", system=PLAN_SYSTEM.format(menu=menu),
+                          check=check, max_new_tokens=600)
+
+    def answer(self, question: str, facts: str, ids: list[int]) -> SceneAnswer:
+        def check(a: SceneAnswer):
+            bad = sorted(set(a.object_ids) - set(ids))
+            if bad:
+                raise ValueError(f"object_ids {bad} are not in the list")
+        return self._call("answer", SceneAnswer, ANSWER_PROMPT.format(facts=facts, question=question), check=check,
+                          max_new_tokens=200)
 
     def describe(self, som_image: np.ndarray, ids: list[int]) -> Descriptions:
         def check(d: Descriptions):

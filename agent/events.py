@@ -32,8 +32,20 @@ STATE_TEXT = {
     "TRANSPORTING": "lifting and carrying", "PLACING": "lowering and releasing", "RETREATING": "retreating from the object",
     "VERIFYING_PLACEMENT": "checking the placement with the table camera", "RETURNING_HOME": "returning HOME",
     "VERIFYING_HOME": "checking the HOME joint positions", "RECOVERING": "recovering", "COMPLETED": "task complete",
-    "FAILED": "task failed", "CANCELLED": "task cancelled",
+    "FAILED": "task failed", "CANCELLED": "task cancelled", "UNSUPPORTED": "not possible with the current capabilities",
+    "INTERPRETING": "planning the goal (capabilities only)", "DISPATCHING": "choosing the next step",
+    "OBSERVING_SCENE": "perception: observing the table", "REPORTING_SCENE": "perception: reporting the scene",
+    "ANSWERING": "perception: answering from the measured objects", "MANIPULATING": "manipulation: pick-and-place skill",
+    "RETURNING_SAFE": "manipulation: returning HOME", "UNAVAILABLE": "capability not available",
+    "VERIFYING_STEP": "verification: checking the step's evidence", "REPLANNING": "planning again after a failure",
+    "VERIFYING_GOAL": "verification: checking every step of the goal",
 }
+
+
+def _args(a: dict) -> str:
+    if "object" in a:
+        return f"{(a.get('object') or {}).get('text')!r} {a.get('relation')} {(a.get('reference') or {}).get('text')!r}"
+    return ", ".join(f"{k}={v!r}" for k, v in a.items())
 
 
 def _mm(v) -> str:
@@ -46,8 +58,36 @@ def format_event(e: dict) -> Line | None:  # noqa: C901 (a flat dispatch on the 
         return Line(w, "SUPERVISOR", f"task received: {e.get('text')!r}")
     if k == "state":
         s = e.get("state")
-        lvl = {"COMPLETED": "success", "FAILED": "error", "CANCELLED": "warn", "RECOVERING": "warn"}.get(s, "info")
-        return Line(w, "SUPERVISOR", f"state {s}: {STATE_TEXT.get(s, '')}", lvl)
+        lvl = {"COMPLETED": "success", "FAILED": "error", "CANCELLED": "warn", "RECOVERING": "warn",
+               "UNSUPPORTED": "warn", "REPLANNING": "warn"}.get(s, "info")
+        who = "SUPERVISOR" if e.get("level") == "goal" else "SKILL"
+        return Line(w, who, f"state {s}: {STATE_TEXT.get(s, '')}", lvl)
+    if k == "goal_plan":
+        steps = "; ".join(f"{x['index']}. {x['capability']}" + (f" {_args(x['args'])}" if x.get("args") else "") for x in e.get("steps", []))
+        return Line(w, "PLANNER", f"goal: {e.get('goal')} | plan: {steps or '(none)'}" + (f" | {e.get('reason')}" if not e.get("steps") else ""),
+                    "info" if e.get("steps") else "warn")
+    if k == "step":
+        ev = e.get("event")
+        if ev == "start":
+            return Line(w, "SUPERVISOR", f"step {e.get('index')}: delegate {e.get('capability')} ({e.get('safety')})")
+        if ev == "auto_observe":
+            return Line(w, "SUPERVISOR", f"step {e.get('index')}: needs a fresh observation first")
+        if ev == "end":
+            o = e.get("outcome")
+            return Line(w, "SUPERVISOR", f"step {e.get('index')} {e.get('capability')}: {o} in {e.get('seconds')} s",
+                        "success" if o == "completed" else ("warn" if o in ("cancelled", "ambiguous", "unsupported") else "error"))
+    if k == "skill":
+        if e.get("event") == "start":
+            return Line(w, "MANIPULATION", f"pick-and-place skill started (final HOME: {e.get('final_home')})")
+        return None
+    if k == "scene_report":
+        return Line(w, "PERCEPTION", f"scene report: {e.get('objects')} objects (frame {e.get('frame_id')})")
+    if k == "answer":
+        return Line(w, "GEMMA", f"answer: {e.get('answer')} (objects {e.get('object_ids')}; unverified)")
+    if k == "replan":
+        return Line(w, "PLANNER", "replanned" if e.get("accepted") else f"replan rejected: {e.get('reason')}", "warn")
+    if k == "goal_verified":
+        return Line(w, "VERIFY", f"goal: all {e.get('steps')} steps verified (evidence: {', '.join(e.get('evidence') or []) or 'perception'})", "success")
     if k == "task":
         if e.get("task") != "pick_place":
             return Line(w, "GEMMA", f"parsed as {e.get('task')!r}: {e.get('reason', '')}", "warn")
@@ -80,6 +120,8 @@ def format_event(e: dict) -> Line | None:  # noqa: C901 (a flat dispatch on the 
             return Line(w, "EXECUTION", f"{e.get('label')}: FAILED at {e.get('failed_step')!r}: {e.get('reason')}", "error")
         if t == "park_for_view" and not e.get("ok"):
             return Line(w, "MANIPULATION", "no collision-free pose with a clear camera view", "error")
+        if t == "observation_reused":
+            return Line(w, "PERCEPTION", f"reusing observation {e.get('frame_id')} (robot not moved since)")
         if t == "describe_reused":
             return None  # summarised by the "described N objects" line
         if t == "shortlist":
@@ -147,7 +189,7 @@ def format_event(e: dict) -> Line | None:  # noqa: C901 (a flat dispatch on the 
     if k == "recovery":
         return Line(w, "SUPERVISOR", f"recovering from {e.get('cls')} (retries {e.get('retries')})", "warn")
     if k == "report":
-        lvl = {"COMPLETED": "success", "CANCELLED": "warn"}.get(e.get("status"), "error")
+        lvl = {"COMPLETED": "success", "CANCELLED": "warn", "UNSUPPORTED": "warn"}.get(e.get("status"), "error")
         return Line(w, "SUPERVISOR", f"{e.get('status')}: {e.get('message')}", lvl)
     if k == "error":
         return Line(w, "SUPERVISOR", f"internal error: {e.get('error')}", "error")
