@@ -4,6 +4,10 @@ Goal: perception and grounding with no hardcoded object knowledge (see the brief
 the inventory in HARDCODING_INVENTORY.md). Evidence labels: measured / from files / unverified.
 
 ## Active phase
+**AUTONOMOUS DEMO RUN started 2026-10-14T08:19:52Z (hard stop at 20:19Z, 12 h).** Brief: user message of
+2026-10-14 (demo thin slice of ARCHITECTURE rev 3; rules, budgets, hard stops). Steps: 1 dataset ->
+2 fine-tune YOLO11s-seg (<= 3 rounds, <= 4 h) -> 3 demo slice (agent/) -> 4 rehearsal (3 runs x
+instructions) -> 5 DEMO.md, DEMO_REPORT.md, out/demo/<date>/.
 **Phase 1 — synthetic training data** (full run in progress) + architecture **revision 3 approved** (`ARCHITECTURE.md`; revs 1-2 kept). Then Phase 2 (stop after the comparison)
 
 ## Phases (the merged plan is ARCHITECTURE.md §12; this table tracks the data / perception track)
@@ -82,13 +86,17 @@ the inventory in HARDCODING_INVENTORY.md). Evidence labels: measured / from file
   R50-FPN v2, BSD-3), `seg/train_yolo.py` (YOLO11s-seg, AGPL-3.0), `seg/evaluate.py` (same metrics for
   both, val and test_novel separately); loader and IoU checked on the pilot.
 
-## Next
-1. Generator finishes -> `datagen/verify_dataset.py data/perception/synthetic_v1`; report stats,
-   sample overlays, slowdown cause.
-2. Capture eval layouts: `eval_scene_capture.py --name today`, `--layout 0..19`; ambiguity sets
-   (needs `generate.py` scene builders refactored into an importable module AFTER the generator
-   finishes: it re-imports generate.py per chunk).
-3. Phase 2: train Mask R-CNN and YOLO11s-seg (2.5 h each, sim stopped), evaluate, licence proposal. STOP.
+- 2026-10-14 08:17Z: pretrained YOLO11s-seg recall measured (CPU, 100 images): boxes 2 %, all 10 % at
+  conf 0.25 (24 % at 0.05); novel 7 % — not usable (`out/seg/pretrained_recall.json`).
+- 2026-10-14 08:25Z: .venv-seg extended with Gemma deps + LangGraph (versions in DECISIONS.md); rclpy OK.
+
+## Next (autonomous run)
+1. Generator finishing (train 5000-5999 chunk, then val, test_novel) -> verify_dataset.py -> capture
+   today's scene (`eval_scene_capture.py --name today`).
+2. Train YOLO11s-seg round 1 (sim stopped; imgsz 1024; seed 0) while writing agent/ code + tests.
+3. Evaluate round 1 (val, test_novel, today separately; criteria: today recall >= 95 % boxes and
+   cylinders, precision >= 0.9).
+4. Integration + rehearsal.
 
 ## Open questions
 - None.

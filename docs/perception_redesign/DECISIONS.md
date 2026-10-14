@@ -122,3 +122,21 @@ Design approved with changes; revision 1 kept as `ARCHITECTURE_rev1_2026-10-14.m
   correlated with the resolver).
 - **Held-object box** for collision checking / exclusion from measured geometry (ObjectRecord), never
   the catalogue.
+
+## 2026-10-14 — Autonomous demo run: decisions taken without the user
+(Pre-authorised run; each entry records a choice the rules did not fix.)
+- **Pretrained YOLO is not usable** (measured: recall 2 % on boxes, 10 % overall at conf 0.25,
+  `out/seg/pretrained_recall.json`); the demo uses a YOLO11s-seg fine-tuned on synthetic_v1.
+- **AGPL accepted for the demo only** (user decision): Ultralytics YOLO11s-seg code and weights are
+  AGPL-3.0; the demo's detector must not be distributed beyond the AGPL terms; the permissive model
+  comparison (Phase 2) and the final licence decision remain open.
+- **Agent process runs in `.venv-seg`, not `.venv-vlm`** (deviation from ARCHITECTURE §7): the run's
+  rules allow package installs only into `.venv-seg`, and LangGraph is needed in the same process as
+  Gemma and YOLO. Installed there the same versions Gemma uses in `.venv-vlm` (transformers 5.19.0,
+  bitsandbytes 0.50.2, accelerate 1.15.0, tokenizers 0.23.2, safetensors 0.8.0, huggingface_hub
+  1.33.0) + langgraph 1.2.15, langgraph-checkpoint-sqlite 3.1.2, pydantic 2.14.1. No new model
+  download (Gemma weights already in models/). `.venv-vlm` untouched. rclpy works there (measured).
+- **RosExecutor keeps its own node and spins it during `execute`** (it is manifest-covered and
+  cannot be adapted); the agent's camera / state bridge is a second node on a background
+  MultiThreadedExecutor. Two nodes in one process, each spun by exactly one executor: no shared-spin
+  deadlock.
