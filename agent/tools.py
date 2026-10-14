@@ -72,6 +72,9 @@ class Observation:
     excluded: list[dict] = field(default_factory=list)
     scores: dict[int, float] = field(default_factory=dict)  # mark number -> detector confidence
     shortlists: dict[str, list[int]] = field(default_factory=dict)  # reference text -> candidate marks
+    taken_at: float = 0.0  # time.monotonic() when the frame was taken
+    motion_count: int = -1  # Tools.motion_count when the frame was taken (robot not moved since if equal)
+    cleared_view: bool = False  # taken after park_for_view (arm out of the camera's view)
 
 
 @dataclass
@@ -97,6 +100,8 @@ class Tools:
         self.bridge, self.detector, self.roles, self.ex, self.log, self.run_dir = bridge, detector, roles, executor, log, run_dir
         self.live = live  # agent.live.LiveChannel or None (viewer is optional)
         self.memory = memory  # agent.tools.DescriptionMemory shared by the instructions of one session, or None
+        self.motion_count = 0  # every executed robot / gripper command increments it (observation freshness)
+        self.view_cleared_at = -1  # motion_count right after the last successful park_for_view
         self.world = WorldModel()
         self.kin = Kinematics()
         self.wrist_kin = Kinematics(tip="camera_color_optical_frame")
@@ -107,6 +112,14 @@ class Tools:
     # ------------------------------------------------------------------ perception
     def _camera_pose(self, frame) -> np.ndarray:
         return table_camera_pose() if frame.camera == "table" else self.wrist_kin.fk(frame.q)
+
+    MAX_OBS_AGE_S = 120.0
+
+    def is_fresh(self, obs: Observation | None, need_clear_view: bool = False) -> bool:
+        """An observation still describes the scene: the robot has not moved since it was taken, it is younger
+        than MAX_OBS_AGE_S and (if required) it was taken with the arm parked out of the camera's view."""
+        return (obs is not None and obs.motion_count == self.motion_count
+                and time.monotonic() - obs.taken_at < self.MAX_OBS_AGE_S and (obs.cleared_view or not need_clear_view))
 
     def perceive(self, camera: str = "table") -> Observation:
         frame = self.bridge.snapshot(camera)
@@ -131,7 +144,9 @@ class Tools:
         self.log("tool", tool="perceive", camera=camera, frame_id=fid, detections=len(dets), objects=len(marks),
                  excluded=excluded, measured={k: {kk: v[kk] for kk in ("centre", "top_z", "height", "footprint", "grasp_yaw_deg", "grasp_width")}
                                               for k, v in measured.items()})
-        obs = Observation(fid, camera, frame.rgb, som, marks, measured, excluded=excluded, scores=scores)
+        obs = Observation(fid, camera, frame.rgb, som, marks, measured, excluded=excluded, scores=scores,
+                          taken_at=time.monotonic(), motion_count=self.motion_count,
+                          cleared_view=self.view_cleared_at == self.motion_count)
         if self.live:
             self.live.perception(obs)
         return obs
@@ -389,6 +404,7 @@ class Tools:
         # RosExecutor (frozen) reads its sim clock only while spinning: refresh it after the VLM pauses,
         # otherwise its first step starts from a stale clock (wrong tracking numbers, early step end)
         self.ex.spin(0.3)
+        self.motion_count += 1  # counted before executing: a failed command may still have moved the robot
         res = self.ex.execute(steps)
         self.log("tool", tool="execute", label=label, ok=res.ok, failed_step=res.failed_step, reason=res.reason,
                  steps=res.steps, seconds=round(time.monotonic() - t0, 2))
@@ -441,8 +457,14 @@ class Tools:
             return {"ok": False, "tried": tried}
         from control.skills import MoveStep
         blocked, j1, traj = best
+        cur = np.degrees(np.abs(q0 - traj.positions[-1])).max()
+        if cur < 0.1:  # already there: no motion needed
+            self.view_cleared_at = self.motion_count
+            return {"ok": True, "j1": j1, "blocked": blocked, "tried": tried, "moved": False}
         res = self.execute([MoveStep(traj, f"park J1 {j1:+.0f} (view blocked for {blocked}/{len(targets)} points)")], "park")
-        return {"ok": res.ok, "j1": j1, "blocked": blocked, "tried": tried}
+        if res.ok:
+            self.view_cleared_at = self.motion_count
+        return {"ok": res.ok, "j1": j1, "blocked": blocked, "tried": tried, "moved": True}
 
     def assume_placed(self, plan: PickPlan) -> None:
         """Before re-observing: count the released object as an obstacle at its PLANNED pose (it is no

@@ -1,18 +1,19 @@
-"""Supervisor: a LangGraph state machine over the agent tools (ARCHITECTURE.md rev 3, demo slice).
+"""Pick-and-place SKILL: the validated LangGraph chain, run by the goal supervisor (agent/supervisor.py) for
+one already-interpreted pick-and-place step.
 
-IDLE -> UNDERSTANDING -> OBSERVING -> LOCALIZING -> PLANNING_GRASP -> APPROACHING -> GRASPING ->
-VERIFYING_GRASP -> TRANSPORTING -> PLACING -> RETREATING -> VERIFYING_PLACEMENT -> RETURNING_HOME ->
-VERIFYING_HOME -> COMPLETED
+OBSERVING -> LOCALIZING -> PLANNING_GRASP -> APPROACHING -> GRASPING -> VERIFYING_GRASP -> TRANSPORTING ->
+PLACING -> RETREATING -> VERIFYING_PLACEMENT -> [RETURNING_HOME -> VERIFYING_HOME] -> COMPLETED
                                           any -> RECOVERING (budgeted) | FAILED | CANCELLED
 
-The LLM only parses, names, resolves and confirms; motions come from SkillPlanner (collision-checked)
-and go through RosExecutor and the simulator's safety layer. "COMPLETED" needs verification passed.
-The graph state holds plain data only (checkpointed to SQLite); plans and images live in `ctx`.
+Unchanged from the validated demo (2026-10-14) except: interpretation moved to the planner (no UNDERSTANDING
+state here), a fresh cleared-view observation from the supervisor can be reused (no second capture), and the
+final HOME phase is skipped when another manipulation step follows (final_home=False). The LLM only names,
+resolves and confirms; motions come from SkillPlanner (collision-checked) through RosExecutor and the
+simulator's safety layer. "COMPLETED" needs verification passed.
 """
 
 from __future__ import annotations
 
-import json
 import sqlite3
 import time
 from pathlib import Path
@@ -23,44 +24,15 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, StateGraph
 
 from agent.ask import Answer, Candidate, Question
+from agent.eventlog import EventLog
 from agent.config import Budgets
 from agent.vlm_roles import VLMFailure
 from control.motion import PlanningError
 
-STATES = ["UNDERSTANDING", "OBSERVING", "LOCALIZING", "PLANNING_GRASP", "APPROACHING", "GRASPING",
+STATES = ["OBSERVING", "LOCALIZING", "PLANNING_GRASP", "APPROACHING", "GRASPING",
           "VERIFYING_GRASP", "TRANSPORTING", "PLACING", "RETREATING", "VERIFYING_PLACEMENT", "RETURNING_HOME",
           "VERIFYING_HOME", "RECOVERING"]
 TERMINAL = ["COMPLETED", "FAILED", "CANCELLED"]
-
-
-class EventLog:
-    """JSON-lines event log: one object per line with time, kind and fields."""
-
-    def __init__(self, path: Path, echo: bool = False) -> None:
-        """echo: also print a readable line per event to the terminal (agent.events.format_event)."""
-        self.path, self.t0, self.echo = Path(path), time.monotonic(), echo
-        self.f = open(self.path, "a", buffering=1)
-
-    def __call__(self, kind: str, **fields) -> None:
-        rec = {"t": round(time.monotonic() - self.t0, 3), "wall": time.strftime("%H:%M:%S"), "kind": kind, **fields}
-        line = json.dumps(rec, default=_jsonable)
-        self.f.write(line + "\n")
-        if self.echo:
-            from agent.events import format_event
-            ev = format_event(json.loads(line))
-            if ev is not None:
-                print(str(ev), flush=True)
-
-    def close(self) -> None:
-        self.f.close()
-
-
-def _jsonable(o):
-    if isinstance(o, np.ndarray):
-        return o.tolist()
-    if isinstance(o, (np.floating, np.integer)):
-        return o.item()
-    return str(o)
 
 
 class AgentState(TypedDict, total=False):
@@ -78,11 +50,13 @@ class AgentState(TypedDict, total=False):
     plan: dict | None
 
 
-class Supervisor:
-    def __init__(self, tools, log: EventLog, run_dir: Path, responder, budgets: Budgets | None = None) -> None:
+class PickPlaceWorkflow:
+    def __init__(self, tools, log: EventLog, run_dir: Path, responder, budgets: Budgets | None = None,
+                 final_home: bool = True) -> None:
         """responder: agent.ask.TerminalResponder (a person) or ScriptedResponder (unattended runs).
         Required: there is no silent default answer."""
         self.tools, self.log, self.run_dir, self.responder = tools, log, Path(run_dir), responder
+        self.final_home = final_home
         self.budgets = budgets or Budgets()
         self.ctx: dict = {}  # non-serialisable working data: observation, plan
         g = StateGraph(AgentState)
@@ -91,7 +65,7 @@ class Supervisor:
         for s in TERMINAL:
             g.add_node(s, self._wrap(s, lambda st: {}))
             g.add_edge(s, END)
-        g.set_entry_point("UNDERSTANDING")
+        g.set_entry_point("OBSERVING")
         for s in STATES:
             g.add_conditional_edges(s, lambda st: st["next"], {n: n for n in STATES + TERMINAL})
         self.conn = sqlite3.connect(str(self.run_dir / "checkpoints.sqlite"), check_same_thread=False)
@@ -153,19 +127,15 @@ class Supervisor:
         return {"next": next_state}
 
     # -------------------------------------------------------------------- states
-    def _understanding(self, state) -> dict:
-        try:
-            task = self.tools.roles.parse(state["instruction"])
-        except VLMFailure as exc:
-            return self._fail(state, "understanding", str(exc))
-        self.log("task", **task.model_dump())
-        if task.task != "pick_place" or task.object is None or task.reference is None or task.relation is None:
-            return {"task": task.model_dump(), "next": "FAILED",
-                    "failure": {"cls": "unsupported", "reason": f"I can only move one object onto or next to another "
-                                f"({task.reason or task.task}); please rephrase the instruction"}}
-        return {"next": "OBSERVING", "task": task.model_dump()}
-
     def _observing(self, state) -> dict:
+        given = self.ctx.pop("given_obs", None)
+        if given is not None and self.tools.is_fresh(given, need_clear_view=True):
+            obs = given  # the supervisor's observation: same frame, robot not moved since, cleared view
+            self.log("tool", tool="observation_reused", frame_id=obs.frame_id)
+            self.ctx["obs"] = obs
+            if not obs.marks:
+                return self._fail(state, "perception", "no objects measured on the table")
+            return {"next": "LOCALIZING"}
         p = self.tools.park_for_view(None)  # whole workspace: least-blocking pose
         if not p["ok"]:
             return self._fail(state, "perception", "no collision-free pose that leaves the table camera's view clear")
@@ -318,8 +288,8 @@ class Supervisor:
         except (VLMFailure, TimeoutError) as exc:
             return self._fail(state, "placement", f"re-observation failed: {exc}")
         vs = list(state.get("verifications", [])) + [v]
-        if v["pass"]:
-            return {"next": "RETURNING_HOME", "verifications": vs}
+        if v["pass"]:  # HOME once per instruction: only after the last manipulation step
+            return {"next": "RETURNING_HOME" if self.final_home else "COMPLETED", "verifications": vs}
         return {**self._fail(state, "placement", v.get("reason") or "placement outside tolerance (xy 10 mm, z 5 mm, tilt 5 deg)"),
                 "verifications": vs}
 
@@ -360,10 +330,13 @@ class Supervisor:
         return {"next": "FAILED", "failure": {"cls": cls, "reason": r["reason"]}}
 
     # ------------------------------------------------------------------- run
-    def run(self, instruction: str, thread_id: str = "run") -> dict:
+    def run(self, instruction: str, task: dict, observation=None, thread_id: str = "run") -> dict:
+        """task: the planner's pick-and-place step {"object": {...}, "relation", "reference": {...}, "frame"}."""
         t0 = time.monotonic()
-        self.log("instruction", text=instruction)
-        init: AgentState = {"instruction": instruction, "retries": {}, "questions": [], "timeline": [],
+        self.log("skill", skill="pick_place", event="start", task=task, final_home=self.final_home)
+        if observation is not None:
+            self.ctx["given_obs"] = observation
+        init: AgentState = {"instruction": instruction, "task": task, "retries": {}, "questions": [], "timeline": [],
                             "verifications": [], "failure": None, "plan": None}
         final = self.graph.invoke(init, {"configurable": {"thread_id": thread_id}, "recursion_limit": 80})
         status = final["timeline"][-1]["state"]
@@ -371,9 +344,9 @@ class Supervisor:
                   "task": final.get("task"), "object_id": final.get("object_id"), "reference_id": final.get("reference_id"),
                   "plan": final.get("plan"), "verifications": final.get("verifications"), "failure": final.get("failure"),
                   "questions": final.get("questions"), "retries": final.get("retries"), "timeline": final["timeline"],
-                  "world": self.tools.world.to_dict()}
+                  "home": self.final_home}
         report["message"] = honest_message(report)
-        self.log("report", status=status, message=report["message"])
+        self.log("skill", skill="pick_place", event="end", status=status, message=report["message"])
         return report
 
 
@@ -385,8 +358,8 @@ def honest_message(r: dict) -> str:
     placed = (f"placed {place[-1]['xy_error_mm']} mm from the planned spot, top {place[-1]['z_error_mm']:+} mm, "
               f"tilt {place[-1]['tilt_deg']} deg") if place else ""
     if s == "COMPLETED":
-        return (f"Done (verified by the table camera): {placed}; back at HOME (max joint error "
-                f"{home[-1]['max_error_deg']} deg).")
+        back = f"; back at HOME (max joint error {home[-1]['max_error_deg']} deg)" if home else ""
+        return f"Done (verified by the table camera): {placed}{back}."
     if s == "CANCELLED":
         return f"Cancelled: {r['failure']['reason']}."
     f = r.get("failure") or {}

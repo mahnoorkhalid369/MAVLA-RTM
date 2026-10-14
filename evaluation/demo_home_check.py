@@ -24,7 +24,7 @@ def main() -> int:
     a = ap.parse_args()
     out = Path(a.out)
     (out / "images").mkdir(parents=True, exist_ok=True)
-    from agent.graph import EventLog
+    from agent.eventlog import EventLog
     from agent.ros_bridge import RosBridge
     from agent.tools import Tools
     from control.robot import ARM_HOME, GRIPPER_CLOSED, GRIPPER_OPEN, ARM_SPEED

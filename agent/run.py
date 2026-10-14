@@ -43,7 +43,8 @@ def stop_sim(p: subprocess.Popen | None) -> None:
 
 
 def run_one(instruction: str, out: Path, bridge, detector, vlm, executor, responder, live=None, memory=None) -> dict:
-    from agent.graph import EventLog, Supervisor
+    from agent.eventlog import EventLog
+    from agent.pick_place import PickPlaceWorkflow
     from agent.tools import Tools
     from agent.vlm_roles import Roles
 

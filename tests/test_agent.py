@@ -16,7 +16,8 @@ pytest.importorskip("pydantic")
 pytest.importorskip("langgraph")
 
 from agent.geometry import measure  # noqa: E402
-from agent.graph import EventLog, Supervisor  # noqa: E402
+from agent.eventlog import EventLog  # noqa: E402
+from agent.pick_place import PickPlaceWorkflow  # noqa: E402
 from agent.tools import Tools  # noqa: E402
 from agent.vlm_roles import Roles, RecordedVLM, VLMFailure  # noqa: E402
 from agent.world import WorldModel  # noqa: E402
@@ -262,11 +263,15 @@ class StubTools:
         return {"check": "placement", "pass": ok, "xy_error_mm": 3.0, "z_error_mm": 1.0, "tilt_deg": 0.4}
 
 
-def run(tmp_path, tools, instruction="put a on b", responder=None):
+TASK = {"object": {"text": "a"}, "relation": "on", "reference": {"text": "b"}, "frame": "robot"}
+
+
+def run(tmp_path, tools, instruction="put a on b", responder=None, task=None, final_home=True):
+    """Runs the pick-and-place skill (the planner's interpretation is given as `task`)."""
     from agent.ask import ScriptedResponder
     log = EventLog(tmp_path / "events.jsonl")
-    sup = Supervisor(tools, log, tmp_path, responder or ScriptedResponder(["cancel"]))
-    r = sup.run(instruction)
+    wf = PickPlaceWorkflow(tools, log, tmp_path, responder or ScriptedResponder(["cancel"]), final_home=final_home)
+    r = wf.run(instruction, task or TASK)
     log.close()
     return r, [json.loads(line) for line in (tmp_path / "events.jsonl").read_text().splitlines()]
 
@@ -275,7 +280,7 @@ def test_supervisor_happy_path_completes_only_after_verification(tmp_path):
     r, ev = run(tmp_path, StubTools())
     assert r["status"] == "COMPLETED"
     states = [e["state"] for e in ev if e["kind"] == "state"]
-    assert states == ["UNDERSTANDING", "OBSERVING", "LOCALIZING", "PLANNING_GRASP", "APPROACHING", "GRASPING",
+    assert states == ["OBSERVING", "LOCALIZING", "PLANNING_GRASP", "APPROACHING", "GRASPING",
                       "VERIFYING_GRASP", "TRANSPORTING", "PLACING", "RETREATING", "VERIFYING_PLACEMENT",
                       "RETURNING_HOME", "VERIFYING_HOME", "COMPLETED"]
     assert "back at HOME" in r["message"]
@@ -306,12 +311,6 @@ def test_supervisor_unattended_ambiguity_is_scripted_cancel(tmp_path):
     assert r["status"] == "CANCELLED"
     asks = [e for e in ev if e["kind"] == "ask_user"]
     assert len(asks) == 1 and asks[0]["answer"] == "cancel" and asks[0]["source"] == "scripted"
-
-
-def test_supervisor_unsupported_task_fails_without_a_fake_question(tmp_path):
-    r, ev = run(tmp_path, StubTools(task="unsupported"))
-    assert r["status"] == "FAILED" and r["failure"]["cls"] == "unsupported"
-    assert not [e for e in ev if e["kind"] == "ask_user"]
 
 
 def test_parse_inconsistent_task_gets_one_retry():
@@ -595,3 +594,12 @@ def test_describe_uses_session_memory_and_stores_new(tmp_path):
     t2.roles = Roles(vlm)
     t2.describe(obs2)  # next instruction, same scene: no VLM call
     assert not vlm.calls and [obs2.descriptions[k]["name"] for k in (1, 2, 3)] == ["a", "b", "c"]
+
+
+
+def test_intermediate_step_skips_home_and_reuses_a_fresh_observation(tmp_path):
+    t = StubTools()
+    r, ev = run(tmp_path, t, final_home=False)
+    states = [e["state"] for e in ev if e["kind"] == "state"]
+    assert r["status"] == "COMPLETED" and "RETURNING_HOME" not in states and t.home_calls == 0
+    assert "back at HOME" not in r["message"]

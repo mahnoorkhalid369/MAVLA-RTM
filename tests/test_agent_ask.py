@@ -1,4 +1,4 @@
-"""Clarification questions (agent/ask.py + Supervisor): regression tests for the bug where the
+"""Clarification questions (agent/ask.py + PickPlaceWorkflow): regression tests for the bug where the
 interactive demo answered its own question with a scripted "cancel" (2026-10-14).
 
 Needs pydantic + langgraph (.venv-seg); skipped where they are missing.
@@ -86,9 +86,10 @@ def test_scripted_answers_are_marked_scripted():
 
 # ---------------------------------------------------------------------- end to end in the supervisor
 def test_supervisor_needs_an_explicit_responder(tmp_path):
-    from agent.graph import EventLog, Supervisor
+    from agent.eventlog import EventLog
+    from agent.pick_place import PickPlaceWorkflow
     with pytest.raises(TypeError):
-        Supervisor(StubTools(), EventLog(tmp_path / "e.jsonl"), tmp_path)  # no silent default answer
+        PickPlaceWorkflow(StubTools(), EventLog(tmp_path / "e.jsonl"), tmp_path)  # no silent default answer
 
 
 def test_object_choice_continues_the_same_task(tmp_path):
@@ -101,7 +102,7 @@ def test_object_choice_continues_the_same_task(tmp_path):
     asks = [e for e in ev if e["kind"] == "ask_user"]
     assert len(asks) == 1 and asks[0]["source"] == "terminal" and asks[0]["mark"] == 3 and asks[0]["role"] == "object"
     states = [e["state"] for e in ev if e["kind"] == "state"]
-    assert states.count("UNDERSTANDING") == 1 and states.count("OBSERVING") == 1  # not restarted
+    assert states.count("OBSERVING") == 1  # not restarted
 
 
 def test_destination_choice_continues_the_same_task(tmp_path):
