@@ -9,6 +9,8 @@ this process starts Isaac Sim itself after the models are loaded; otherwise star
     .venv-seg/bin/python -m agent.run --instruction "put A on B" --out out/demo/x
 
 Outputs per instruction in --out: events.jsonl, checkpoints.sqlite, images/, result.json.
+Instructions typed in one interactive process form one session (see Session): follow-ups like "put it ..." refer
+to the previous instruction's object; a new process starts a new, empty session.
 """
 
 from __future__ import annotations
@@ -43,27 +45,51 @@ def stop_sim(p: subprocess.Popen | None) -> None:
         os.killpg(p.pid, signal.SIGKILL)
 
 
-def run_one(instruction: str, out: Path, bridge, detector, vlm, executor, responder, live=None, memory=None) -> dict:
-    from agent.eventlog import EventLog
-    from agent.supervisor import GoalSupervisor
-    from agent.tools import Tools
-    from agent.vlm_roles import Roles
+class Session:
+    """One robot session = one agent process with one simulator connection. The Tools object - world model,
+    held object, last referent, remembered clarifications - lives as long as the session, so a follow-up such as
+    "put it in the processing rack" can refer to the previous instruction's object. Each instruction still gets
+    its own event log, VLM roles (call counters), supervisor, task ledger, goal conditions and LangGraph thread.
+    The held-object claim is re-verified from finger feedback at the start of every instruction (and again before
+    a place). Nothing is written to disk for the next session: a new process starts with an empty world and
+    nothing held."""
 
-    (out / "images").mkdir(parents=True, exist_ok=True)
-    log = EventLog(out / "events.jsonl", echo=True)
-    if live:
-        live.start_run(out, instruction)
-    try:
-        tools = Tools(bridge, detector, Roles(vlm, log), executor, log, out, live, memory)
-        report = GoalSupervisor(tools, log, out, responder).run(instruction, thread_id=out.name)
-    except Exception as exc:  # an unexpected error is a failure, never a success
-        log("error", error=repr(exc))
-        report = {"instruction": instruction, "status": "FAILED", "failure": {"cls": "internal", "reason": repr(exc)},
-                  "message": f"Failed (internal error): {exc!r}. I did not report success."}
-    finally:
-        log.close()
-    (out / "result.json").write_text(json.dumps(report, indent=1, default=str))
-    return report
+    def __init__(self, bridge, detector, vlm, executor, responder, live=None, memory=None) -> None:
+        self.id = time.strftime("session_%Y%m%d_%H%M%S")
+        self.bridge, self.detector, self.vlm, self.executor = bridge, detector, vlm, executor
+        self.responder, self.live, self.memory = responder, live, memory
+        self.tools = None
+        self.count = 0
+
+    def run(self, instruction: str, out: Path) -> dict:
+        from agent.eventlog import EventLog
+        from agent.supervisor import GoalSupervisor
+        from agent.tools import Tools
+        from agent.vlm_roles import Roles
+
+        (out / "images").mkdir(parents=True, exist_ok=True)
+        log = EventLog(out / "events.jsonl", echo=True)
+        self.count += 1
+        if self.live:
+            self.live.start_run(out, instruction)
+        try:
+            log("session", session_id=self.id, instruction_index=self.count, reused_state=self.tools is not None)
+            roles = Roles(self.vlm, log)
+            if self.tools is None:
+                self.tools = Tools(self.bridge, self.detector, roles, self.executor, log, out, self.live, self.memory)
+                self.tools.revalidate_held()
+            else:
+                self.tools.begin_instruction(log, roles, out)
+            report = GoalSupervisor(self.tools, log, out, self.responder).run(instruction, thread_id=f"{self.id}_{self.count:02d}")
+        except Exception as exc:  # an unexpected error is a failure, never a success
+            log("error", error=repr(exc))
+            report = {"instruction": instruction, "status": "FAILED", "failure": {"cls": "internal", "reason": repr(exc)},
+                      "message": f"Failed (internal error): {exc!r}. I did not report success."}
+        finally:
+            log.close()
+        report["session"] = {"id": self.id, "instruction_index": self.count}
+        (out / "result.json").write_text(json.dumps(report, indent=1, default=str))
+        return report
 
 
 def main() -> int:
@@ -122,8 +148,9 @@ def main() -> int:
             executor.spin(0.2)
         executor.wait_sim(3.0)
         print("[agent] ready", flush=True)
+        session = Session(bridge, detector, vlm, executor, responder, live, memory)
         if a.instruction:
-            r = run_one(a.instruction, out, bridge, detector, vlm, executor, responder, live, memory)
+            r = session.run(a.instruction, out)
             print(f"[agent] {r['status']}: {r['message']}", flush=True)
             return 0
         n = 0
@@ -134,7 +161,7 @@ def main() -> int:
                 break
             text = text.strip()
             n += 1
-            r = run_one(text, out / f"{n:02d}", bridge, detector, vlm, executor, responder, live, memory)
+            r = session.run(text, out / f"{n:02d}")
             print(f"[agent] {r['status']}: {r['message']}", flush=True)
         return 0
     finally:

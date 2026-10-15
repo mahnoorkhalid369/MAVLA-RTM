@@ -31,7 +31,13 @@ class GoalTools(StubTools):
     from agent.tools import Tools as _T
     relation_holds = _T.relation_holds
     _direction = _T._direction
+    begin_instruction = _T.begin_instruction  # session hooks: the real code
+    revalidate_held = _T.revalidate_held
+    OPEN_FINGER_DEG = _T.OPEN_FINGER_DEG
     del _T
+
+    def log(self, *a, **k):  # replaced by the instruction's event log in sessions
+        pass
 
     def __init__(self, plans, answer=None, misplace=False, **kw):
         super().__init__(**kw)

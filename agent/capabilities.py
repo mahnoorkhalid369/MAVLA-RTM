@@ -518,9 +518,23 @@ def run_pick(ctx: Context, args: dict, step_no: int) -> StepResult:
 
 
 def run_place(ctx: Context, args: dict, final_home: bool, step_no: int) -> StepResult:
-    if ctx.tools.held_object is None:
+    t = ctx.tools
+    named = (args.get("object") or {}).get("text", "") if isinstance(args.get("object"), dict) else ""
+    if t.held_object is None:
+        o = t.world.objects.get(int(named[1:])) if named.startswith("#") and named[1:].isdigit() else None
+        if o is not None and o.status == "missing":  # it was held, the fingers say it no longer is
+            return StepResult("ambiguous", f"{named} is no longer in the gripper and its position is unknown. Nothing was "
+                              "moved. Should I look for it, or pick it up again?")
         return StepResult("unsupported", "nothing is held: there is nothing to place (pick it up first, or ask for pick-and-place)")
-    task = {"object": {"text": f"#{ctx.tools.held_object}"}, "relation": args["relation"], "reference": args["reference"],
+    if named.startswith("#") and named[1:].isdigit() and int(named[1:]) != t.held_object:
+        return StepResult("ambiguous", f"you asked to place {named}, but the gripper holds #{t.held_object}; which one do you mean?")
+    held = t.held_object
+    ev = t.revalidate_held()  # the memory says "held": the fingers must say so too, before any motion
+    if ev["held"] != "verified":
+        return StepResult("ambiguous", f"I no longer hold #{held}: the fingers are not closed on anything (finger "
+                          f"{ev['finger_deg']} deg). Nothing was moved. Should I look for it, or pick it up again?",
+                          {"evidence": [{"kind": "verification", "check": "held_state", "pass": False}]})
+    task = {"object": {"text": f"#{t.held_object}"}, "relation": args["relation"], "reference": args["reference"],
             "frame": args.get("frame") or "robot"}
     return _skill(ctx, "place", task, final_home, step_no)
 

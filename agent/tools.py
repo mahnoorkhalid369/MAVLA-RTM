@@ -114,6 +114,37 @@ class Tools:
         self.held_box = None  # (pose in tool0, size) while holding, from measured geometry
         self._frames = 0
 
+    # ------------------------------------------------------------------ session
+    def begin_instruction(self, log, roles, run_dir) -> dict:
+        """Next instruction of the same session: new outputs (event log, VLM roles with their counters, images);
+        the session state (world model, held object, last referent, clarifications) is kept, and the physical
+        part of it is re-verified from the sensors before anything relies on it."""
+        self.log, self.roles, self.run_dir = log, roles, run_dir
+        return self.revalidate_held()
+
+    def revalidate_held(self) -> dict:
+        """A remembered held object is a claim, not evidence: the fingers must still be stalled on something
+        (finger feedback, the same check as the retention check after a lift). If not, the claim is dropped and
+        the object's pose is unknown (status "missing") until it is measured again."""
+        finger = float(np.degrees(self.bridge.finger()))
+        ev = {"held_object": self.held_object, "finger_deg": round(finger, 2), "last_referent": self.last_referent}
+        if self.held_object is None:
+            ev["held"] = "none"
+            if finger > self.OPEN_FINGER_DEG:
+                ev["note"] = "gripper not open, but nothing is recorded as held"
+        else:
+            v = self.verify_contact(self.held_close_target)
+            if v["pass"]:
+                ev["held"] = "verified"
+            else:
+                ev["held"] = "invalidated"
+                lost = self.world.objects.get(self.held_object)
+                if lost is not None:
+                    lost.status = "missing"
+                self.clear_held()
+        self.log("session_state", **ev)
+        return ev
+
     # ------------------------------------------------------------------ perception
     def _camera_pose(self, frame) -> np.ndarray:
         return table_camera_pose() if frame.camera == "table" else self.wrist_kin.fk(frame.q)
