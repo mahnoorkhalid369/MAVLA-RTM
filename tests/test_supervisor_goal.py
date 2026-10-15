@@ -32,7 +32,7 @@ class GoalTools(StubTools):
         self.motion_count, self.view_cleared_at = 0, -1
         tools = self
 
-        def plan_goal(text, menu):
+        def plan_goal(text, menu, context=""):
             tools.plan_calls.append(text)
             p = tools.plans.pop(0)
             if isinstance(p, Exception):
@@ -43,6 +43,15 @@ class GoalTools(StubTools):
     def execute(self, steps, label):
         self.motion_count += 1
         return super().execute(steps, label)
+
+    def verify_placement(self, plan):
+        v = super().verify_placement(plan)
+        o = self.world.objects.get(plan.object_id)
+        if v["pass"] and o is not None:  # like Tools.verify_placement: the re-measured pose replaces the old one
+            from tests.test_agent import geom
+            h = o.geometry["height"]
+            o.geometry = geom(plan.target_centre[0], plan.target_centre[1], plan.target_top, support=plan.target_top - h)
+        return v
 
     def park_for_view(self, xy):
         self.parks += 1
@@ -90,7 +99,7 @@ def test_pick_and_place_goal_delegates_to_the_validated_skill(tmp_path):
     assert t.home_calls == 1 and "back at HOME" in r["message"]
     assert [v["check"] for v in r["verifications"]] == ["contact", "contact_after_carry", "placement", "home"]
     goal_states = [e["state"] for e in ev if e["kind"] == "state" and e.get("level") == "goal"]
-    assert goal_states[:3] == ["INTERPRETING", "DISPATCHING", "MANIPULATING"] and goal_states[-1] == "COMPLETED"
+    assert goal_states[:4] == ["INTERPRETING", "DISPATCHING", "DELEGATING", "REVIEWING"] and goal_states[-1] == "COMPLETED"
     st = json.loads((tmp_path / "task_state.json").read_text())
     assert st["status"] == "completed" and st["plan"][0]["outcome"] == "completed" and st["verified"]
 
@@ -154,7 +163,8 @@ def test_found_after_exploration_completes_the_goal(tmp_path, monkeypatch):
         n.append(1)
         if len(n) == 1:
             return caps.StepResult("insufficient_info", "I do not see 'zz' from the current view")
-        return caps.StepResult("completed", "'zz' found with the wrist camera at x +100 mm", {"mark": 9, "camera": "wrist"})
+        return caps.StepResult("completed", "'zz' found with the wrist camera at x +100 mm",
+                               {"mark": 9, "camera": "wrist", "bindings": {"zz": 1}})
     monkeypatch.setattr(caps, "run_locate", locate)
     t = GoalTools([plan(("observe", {}), ("locate", {"object": "zz"}))])
     r, _ = run(tmp_path, t)

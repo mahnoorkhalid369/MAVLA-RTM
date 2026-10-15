@@ -37,7 +37,14 @@ class GemmaVLM:
         self.model = VisionLanguageModel(VLMConfig())
 
     def generate(self, text, image=None, system=None, max_new_tokens=None, thinking=None) -> str:
-        return self.model.generate(text, image=image, system=system, max_new_tokens=max_new_tokens, thinking=thinking)
+        out = self.model.generate(text, image=image, system=system, max_new_tokens=max_new_tokens, thinking=thinking)
+        try:  # instrumentation only: text tokens in / out (image tokens are a fixed per-image cost, counted as images)
+            tok = self.model.processor.tokenizer
+            self.last_tokens = {"prompt": len(tok.encode((system or "") + text)), "answer": len(tok.encode(out)),
+                                "images": int(image is not None)}
+        except Exception:
+            self.last_tokens = None
+        return out
 
     def _generate_batch_disabled(self, text: str, images: list, max_new_tokens: int) -> list[str]:
         """DISABLED (benchmarked 2026-10-14): batched multimodal generation with left padding returned
@@ -98,17 +105,27 @@ class TaskSpec(BaseModel):
     reason: str = ""
 
 
+PLACEHOLDERS = {"", "null", "none", "nothing", "n/a", "na", "?", "unknown", "no", "nowhere"}
+
+
 class PlanStep(BaseModel):
     """One flat step (the 2B model drops braces in nested JSON; flat keys are converted deterministically)."""
-    do: Literal["observe", "describe_scene", "answer", "locate", "inspect", "pick_place", "return_home", "explore"]
-    object: str | None = None  # pick_place: object to move; locate / explore: what to find
+    do: Literal["observe", "describe_scene", "answer", "locate", "inspect", "explore", "pick", "place", "pick_place",
+                "return_home", "decompose"]
+    object: str | None = None  # pick / pick_place: object to move; locate / inspect / explore: what to find
     relation: Literal["on", "next_to", "left_of", "right_of", "in_front_of", "behind"] | None = None
-    target: str | None = None  # pick_place: destination object
+    target: str | None = None  # place / pick_place: destination object
     frame: Literal["robot", "camera"] = "robot"
     object_relation: Literal["next_to", "left_of", "right_of", "in_front_of", "behind", "on"] | None = None
     object_anchor: str | None = None  # "the <A> that is next to the <B>": object_relation next_to, object_anchor <B>
     question: str | None = None  # answer
     near: str | None = None  # explore: an object the thing may be hidden behind
+    goal: str | None = None  # decompose: the goal to plan over the measured scene
+
+    @field_validator("object", "target", "object_anchor", "question", "near", "goal", mode="before")
+    @classmethod
+    def no_placeholders(cls, v):  # "null" / "none" written as text means "not given": never an object name
+        return None if v is None or str(v).strip().lower() in PLACEHOLDERS else str(v).strip()
 
     @property
     def capability(self) -> str:
@@ -120,13 +137,33 @@ class PlanStep(BaseModel):
             return {"object": {"text": self.object, "relation": self.object_relation, "anchor": self.object_anchor},
                     "relation": self.relation, "reference": {"text": self.target, "relation": None, "anchor": None},
                     "frame": self.frame}
+        if self.do == "pick":
+            return {"object": {"text": self.object, "relation": self.object_relation, "anchor": self.object_anchor}}
+        if self.do == "place":
+            return {"object": {"text": self.object or "it", "relation": None, "anchor": None}, "relation": self.relation,
+                    "reference": {"text": self.target, "relation": None, "anchor": None}, "frame": self.frame}
         if self.do in ("locate", "inspect"):
             return {"target": self.object}
         if self.do == "explore":
             return {"target": self.object, "near": self.near}
         if self.do == "answer":
             return {"question": self.question}
+        if self.do == "decompose":
+            return {"goal": self.goal}
         return {}
+
+
+class Condition(BaseModel):
+    pred: str
+    args: list[str] = []
+    by: Literal["size", "height", "width"] | None = None
+    axis: Literal["x", "y"] | None = None
+
+
+class SubPlan(BaseModel):
+    steps: list[PlanStep] = []
+    goal: list[Condition] = []
+    reason: str = ""
 
 
 class GoalPlan(BaseModel):
@@ -139,6 +176,8 @@ class GoalPlan(BaseModel):
 class SceneAnswer(BaseModel):
     answer: str
     object_ids: list[int] = []
+    certain: bool = True  # False: the descriptions do not settle it
+    check_closer: list[int] = []  # objects a closer look could settle
 
 
 class Description(BaseModel):
@@ -218,25 +257,47 @@ Example: "put the <A> on the <B>" -> {"task": "pick_place", "object": {"text": "
 "anchor": null}, "relation": "on", "reference": {"text": "<B>", "relation": null, "anchor": null},
 "frame": "robot", "reason": "move <A> onto <B>"}"""
 
-PLAN_SYSTEM = """You plan for a robot arm that has a camera looking at a table with objects on it.
-Turn the user's instruction into a short list of steps. Each step uses ONE of these capabilities:
+PLAN_SYSTEM = """You plan for a robot arm with a gripper and two cameras, looking at a table with objects on it.
+Work out what the user wants to be TRUE at the end, then list the steps that get there. Each step uses ONE of:
 {menu}
-Rules: copy the user's own words for objects. One pick_place step per object to move, in the user's order.
-Use "observe" first when the user wants to know or find something. Only steps the user asked for.
-If no capability can do what the user wants, return "steps": [] and say why in "reason".
+Rules: copy the user's own words for objects. "pick" only grasps and holds (no destination). Use pick_place only when
+the user gives a destination; if the robot already holds the object, use "place" (no new grasp). Words like "it" /
+"that" may name the held or last-handled object: write "it". When the goal involves several objects chosen by a
+property (all <A>s, the largest, sort, arrange, line up), use "observe" then "decompose" with the goal.
+Only steps the user asked for. If no capability can achieve it, return "steps": [] and say what is missing in "reason".
 Answer with ONE JSON object only. Each step is one flat object with "do" and its own keys:
 {{"goal": "<one line>", "steps": [...], "reason": "<short>"}}
 Examples:
-"put the <A> on the <B>" -> {{"goal": "move <A> onto <B>", "steps": [{{"do": "pick_place", "object": "<A>", "relation": "on", "target": "<B>"}}], "reason": "one move"}}
-"move the <A> that is next to the <B> behind the <C>" -> {{"goal": "move <A> behind <C>", "steps": [{{"do": "pick_place", "object": "<A>", "object_relation": "next_to", "object_anchor": "<B>", "relation": "behind", "target": "<C>"}}], "reason": "one move"}}
+"pick up the <A>" -> {{"goal": "hold <A>", "steps": [{{"do": "pick", "object": "<A>"}}], "reason": "grasp only"}}
+"put the <A> on the <B>" -> {{"goal": "<A> on <B>", "steps": [{{"do": "pick_place", "object": "<A>", "relation": "on", "target": "<B>"}}], "reason": "one move"}}
+(holding something) "put it next to the <B>" -> {{"goal": "held object next to <B>", "steps": [{{"do": "place", "object": "it", "relation": "next_to", "target": "<B>"}}], "reason": "already held"}}
 "what is on the table?" -> {{"goal": "report the scene", "steps": [{{"do": "observe"}}, {{"do": "describe_scene"}}], "reason": "look and tell"}}
-"is there a <A> left of the <B>?" -> {{"goal": "answer a question", "steps": [{{"do": "observe"}}, {{"do": "answer", "question": "is there a <A> left of the <B>?"}}], "reason": "look and answer"}}
-"where is the <A>?" -> {{"goal": "find <A>", "steps": [{{"do": "observe"}}, {{"do": "locate", "object": "<A>"}}], "reason": "look and find"}}"""
+"is there a <A> left of the <B>?" -> {{"goal": "answer", "steps": [{{"do": "observe"}}, {{"do": "answer", "question": "is there a <A> left of the <B>?"}}], "reason": "look and answer"}}
+"where is the <A>?" -> {{"goal": "find <A>", "steps": [{{"do": "observe"}}, {{"do": "locate", "object": "<A>"}}], "reason": "look and find"}}
+"move closer and inspect the <A>" -> {{"goal": "close look at <A>", "steps": [{{"do": "observe"}}, {{"do": "inspect", "object": "<A>"}}], "reason": "close-up"}}
+"find the thing behind the <B>" -> {{"goal": "find what is behind <B>", "steps": [{{"do": "observe"}}, {{"do": "explore", "object": "thing", "near": "<B>"}}, {{"do": "locate", "object": "thing"}}], "reason": "hidden region"}}
+"line up all <A> by size" -> {{"goal": "<A> in a row by size", "steps": [{{"do": "observe"}}, {{"do": "decompose", "goal": "line up all <A> by size"}}], "reason": "depends on the measured objects"}}"""
+
+DECOMPOSE_PROMPT = """Goal: {goal}
+The robot measured these objects on the table (#id: description; position in mm, x = robot's right, y = forward;
+footprint and height in mm). Descriptions are a vision model's words (may be imperfect); sizes and positions are measured.
+{facts}
+{context}
+Plan the steps that make the goal true, referring to objects ONLY as "#<id>". Available steps: pick_place (object,
+relation, target), pick (object), place (relation, target: the held object), locate / inspect (object).
+Relations: on, next_to, left_of, right_of, in_front_of, behind. Also list the final conditions to check:
+holding, on, next_to, left_of, right_of, in_front_of, behind (args ["#a", "#b"]), located, observed, or
+ordered (args = all the "#ids" in order, with "by": size | height | width and "axis": x | y).
+If the goal cannot be achieved with these steps, return "steps": [] and say why in "reason".
+Answer with ONE JSON object only:
+{{"steps": [{{"do": "pick_place", "object": "#3", "relation": "right_of", "target": "#5"}}, ...], "goal": [{{"pred": "...", "args": ["#3", "#5"]}}], "reason": "<short>"}}"""
 
 ANSWER_PROMPT = """These objects were measured on the table by the robot's camera (number: description, position):
 {facts}
-Answer the user's question using only these objects. Answer with ONE JSON object only:
-{{"answer": "<short answer>", "object_ids": [<numbers of the objects your answer refers to>]}}
+Answer the user's question using only these objects. If the descriptions do not settle it (e.g. the shape or
+colour of a small object is unclear), say so: set "certain" to false and list in "check_closer" the objects a
+closer look could settle. Answer with ONE JSON object only:
+{{"answer": "<short answer>", "object_ids": [<numbers your answer refers to>], "certain": true|false, "check_closer": [<numbers>]}}
 Question: {question}"""
 
 DESCRIBE_PROMPT = """Each object in the image is outlined and numbered. The numbers are: {ids}.
@@ -276,6 +337,7 @@ Answer with ONE JSON object only: {{"match": "yes" | "no" | "unsure", "reason": 
 class Roles:
     def __init__(self, vlm: VLM, log=None, thinking: bool = False) -> None:
         self.vlm, self.log, self.thinking = vlm, log, thinking
+        self.calls, self.tokens = 0, {"prompt": 0, "answer": 0, "images": 0}  # instrumentation (per session)
 
     def _call(self, role: str, schema, text: str, image=None, system=None, check=None, max_new_tokens: int = 400):
         error = None
@@ -284,12 +346,16 @@ class Roles:
             t0 = time.monotonic()
             raw = self.vlm.generate(prompt, image=image, system=system, max_new_tokens=max_new_tokens, thinking=self.thinking)
             dt = time.monotonic() - t0
+            self.calls += 1
+            tk = getattr(self.vlm, "last_tokens", None) or {}
+            for k in self.tokens:
+                self.tokens[k] += int(tk.get(k, 0))
             try:
                 obj = schema.model_validate(_json(raw))
                 if check is not None:
                     check(obj)
                 if self.log:
-                    self.log("vlm", role=role, attempt=attempt, prompt=prompt, answer=raw, valid=True, seconds=round(dt, 2))
+                    self.log("vlm", role=role, attempt=attempt, prompt=prompt, answer=raw, valid=True, seconds=round(dt, 2), tokens=tk)
                 return obj
             except (ValueError, ValidationError, json.JSONDecodeError) as exc:
                 if isinstance(exc, ValidationError):  # say WHICH field is wrong and why (the retry needs it)
@@ -297,7 +363,7 @@ class Roles:
                 else:
                     error = str(exc).splitlines()[0][:300]
                 if self.log:
-                    self.log("vlm", role=role, attempt=attempt, prompt=prompt, answer=raw, valid=False, error=error, seconds=round(dt, 2))
+                    self.log("vlm", role=role, attempt=attempt, prompt=prompt, answer=raw, valid=False, error=error, seconds=round(dt, 2), tokens=tk)
         raise VLMFailure(f"{role}: invalid answer after one retry ({error})")
 
     def parse(self, instruction: str) -> TaskSpec:
@@ -312,22 +378,29 @@ class Roles:
                                  "unless the user describes where the object to move is now")
         return self._call("parse", TaskSpec, f"Instruction: {instruction}", system=PARSE_SYSTEM, check=check)
 
-    def plan_goal(self, instruction: str, menu: str, max_steps: int = 6) -> GoalPlan:
-        """Goal -> capability plan (one call; replaces `parse`). Validated deterministically: capability names
-        (schema enum), the keys each capability needs, step count, and the parse consistency rule."""
+    def plan_goal(self, instruction: str, menu: str, max_steps: int = 6, context: str = "") -> GoalPlan:
+        """Goal -> capability plan (one call). Validated deterministically: capability names (schema enum), the keys
+        each capability needs (placeholder strings like "null" count as missing), step count, consistency rules."""
         def check(p: GoalPlan):
             if len(p.steps) > max_steps:
                 raise ValueError(f"at most {max_steps} steps")
             for i, st in enumerate(p.steps, 1):
                 if st.do == "pick_place":
                     if not (st.object and st.relation and st.target):
-                        raise ValueError(f"step {i}: pick_place needs object, relation and target")
+                        raise ValueError(f"step {i}: pick_place needs object, relation and a real target object; with no "
+                                         "destination use pick")
                     if st.object_anchor and st.object_anchor.strip().lower() == st.target.strip().lower() \
                             and st.object_relation == st.relation:
                         raise ValueError(f"step {i}: object_relation / object_anchor repeat the destination; leave them "
                                          "out unless the user describes where the object to move is now")
                     if bool(st.object_anchor) != bool(st.object_relation):
                         raise ValueError(f"step {i}: object_relation and object_anchor go together")
+                elif st.do == "pick" and not st.object:
+                    raise ValueError(f"step {i}: pick needs object")
+                elif st.do == "place" and not (st.relation and st.target):
+                    raise ValueError(f"step {i}: place needs relation and a real target object")
+                elif st.do == "decompose" and not st.goal:
+                    raise ValueError(f"step {i}: decompose needs goal")
                 elif st.do == "explore" and not st.near and HIDING_WORDS.search(instruction):
                     raise ValueError(f"step {i}: the instruction says where the thing is hidden; set explore.object to "
                                      "the thing to find and explore.near to the object it is behind / under")
@@ -335,8 +408,28 @@ class Roles:
                     raise ValueError(f"step {i}: {st.do} needs object")
                 elif st.do == "answer" and not (st.question or "").strip():
                     raise ValueError(f"step {i}: answer needs question")
-        return self._call("plan", GoalPlan, f"Instruction: {instruction}", system=PLAN_SYSTEM.format(menu=menu),
-                          check=check, max_new_tokens=300)
+        text = f"{context}\nInstruction: {instruction}" if context else f"Instruction: {instruction}"
+        return self._call("plan", GoalPlan, text, system=PLAN_SYSTEM.format(menu=menu), check=check, max_new_tokens=300)
+
+    def decompose(self, goal: str, facts: str, ids: list[int], context: str = "", max_steps: int = 8) -> SubPlan:
+        """Planning over the measured scene: steps and final conditions referring to world objects as #id."""
+        import re as _re
+        valid = {f"#{i}" for i in ids}
+
+        def check(p: SubPlan):
+            if len(p.steps) > max_steps:
+                raise ValueError(f"at most {max_steps} steps")
+            refs = [x for st in p.steps for x in (st.object, st.target) if x] + [a for c in p.goal for a in c.args]
+            bad = sorted({r for r in refs if not _re.fullmatch(r"#\d+", r) or r not in valid})
+            if bad:
+                raise ValueError(f"unknown references {bad}: use only the listed #ids")
+            for st in p.steps:
+                if st.do not in ("pick_place", "pick", "place", "locate", "inspect"):
+                    raise ValueError(f"step '{st.do}' is not available here")
+                if st.do == "pick_place" and not (st.object and st.relation and st.target):
+                    raise ValueError("pick_place needs object, relation, target")
+        return self._call("decompose", SubPlan, DECOMPOSE_PROMPT.format(goal=goal, facts=facts, context=context),
+                          check=check, max_new_tokens=500)
 
     def answer(self, question: str, facts: str, ids: list[int]) -> SceneAnswer:
         def check(a: SceneAnswer):
@@ -398,6 +491,7 @@ class Roles:
         prompt = f"{DESCRIBE_ONE_PROMPT}\n\nYour previous answer was not valid ({error}). Answer again with only the JSON."
         t0 = time.monotonic()
         raw = self.vlm.generate(prompt, image=crop, max_new_tokens=120, thinking=self.thinking)
+        self.calls += 1
         try:
             d = ObjectDescription.model_validate(_json(raw))
             ok, err = True, None

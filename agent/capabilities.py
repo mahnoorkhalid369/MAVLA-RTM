@@ -53,6 +53,19 @@ SPECS: dict[str, CapabilitySpec] = {s.name: s for s in [
     CapabilitySpec("locate", "find one described object on the table and say where it is", '{"do": "locate", "object": "<words>"}',
                    "read_only", "a fresh observation (taken automatically if missing)", "object id and measured position",
                    "not visible / not confirmed / ambiguous", "same resolution, cross-check and confirmation as pick_place"),
+    CapabilitySpec("pick", "grasp ONE object and hold it (no destination)", '{"do": "pick", "object": "<words>"}', "motion",
+                   "gripper empty; object resolvable and graspable", "the object is held (lifted)",
+                   "not found / ambiguous / too wide / out of reach / no contact / lost while lifting",
+                   "finger contact at the grasp and retention after the lift (finger stall)"),
+    CapabilitySpec("place", "put the object the robot is HOLDING onto or next to another object",
+                   '{"do": "place", "object": "it", "relation": "on" | "next_to" | "left_of" | "right_of" | "in_front_of" | '
+                   '"behind", "target": "<destination object>"}', "motion",
+                   "an object is held; destination resolvable", "the held object stands at the destination; arm at HOME",
+                   "nothing held / destination not found / no free reachable spot / collision / placement out of tolerance",
+                   "contact during the carry, camera placement check, HOME joints"),
+    CapabilitySpec("decompose", "plan a multi-object goal over the measured objects", '{"do": "decompose", "goal": "<the goal>"}',
+                   "read_only", "a fresh observation (taken automatically)", "concrete steps on #ids + final conditions",
+                   "invalid plan / not achievable with the available steps", "references must be measured objects"),
     CapabilitySpec("pick_place", "move ONE object onto or next to another object",
                    '{"do": "pick_place", "object": "<object to move>", "relation": "on" | "next_to" | "left_of" | '
                    '"right_of" | "in_front_of" | "behind", "target": "<destination object>"}',
@@ -164,6 +177,22 @@ def run_describe_scene(ctx: Context, args: dict) -> StepResult:
     return StepResult("completed", report)
 
 
+def world_facts(ctx: Context) -> tuple[str, list[int]]:
+    """Measured objects as '#<world id>: description; position; size' (close-up descriptions when available)."""
+    lines, ids = [], []
+    marks = {v: k for k, v in ctx.obs.object_ids.items()}
+    for oid, o in ctx.tools.world.objects.items():
+        if o.status not in ("on_surface", "occluded", "held") or oid not in marks and o.status != "held":
+            continue
+        g = o.geometry
+        d = o.descriptions_by_camera.get("wrist") or o.description or {}
+        where = "IN THE GRIPPER" if o.status == "held" else f"x {g['centre'][0] * 1000:+.0f}, y {g['centre'][1] * 1000:+.0f}"
+        lines.append(f"#{oid}: {d.get('colour', '')} {d.get('name', '')} ({d.get('shape', '')}); {where}; "
+                     f"footprint {g['footprint'][0] * 1000:.0f} x {g['footprint'][1] * 1000:.0f}, height {g['height'] * 1000:.0f}")
+        ids.append(oid)
+    return "\n".join(lines), ids
+
+
 def facts_text(obs) -> str:
     out = []
     for k in obs.marks:
@@ -184,7 +213,11 @@ def run_answer(ctx: Context, args: dict) -> StepResult:
     ctx.state.hypotheses.setdefault("answers", []).append({"question": q, **a.model_dump(), "source": "gemma"})
     ctx.log("answer", question=q, **a.model_dump())
     refs = f" (objects {a.object_ids})" if a.object_ids else ""
-    return StepResult("completed", f"{a.answer}{refs} [Gemma's answer from the measured object list; not verified]")
+    wid = {k: ctx.obs.object_ids.get(k) for k in set(a.object_ids) | set(a.check_closer)}
+    note = "" if a.certain else " — not certain from the table view"
+    return StepResult("completed", f"{a.answer}{refs}{note} [Gemma's answer from the measured object list; not verified]",
+                      {"certain": a.certain, "check_closer_world": [wid[k] for k in a.check_closer if wid.get(k)],
+                       "object_world_ids": [wid[k] for k in a.object_ids if wid.get(k)], "confidence": "model"})
 
 
 def run_locate(ctx: Context, args: dict) -> StepResult:
@@ -221,7 +254,9 @@ def run_locate(ctx: Context, args: dict) -> StepResult:
         return StepResult("insufficient_info", f"object {r.id} might be {text!r} but the check on its crop said {c.match}")
     return StepResult("completed", f"{text!r} is object {r.id} at x {g['centre'][0] * 1000:+.0f} mm, y {g['centre'][1] * 1000:+.0f} mm "
                                    f"({np.hypot(*g['centre'][:2]):.2f} m from the robot), {g['height'] * 1000:.0f} mm tall "
-                                   "[position measured; identity from Gemma, confirmed on its crop]", {"mark": r.id})
+                                   "[position measured; identity from Gemma, confirmed on its crop]",
+                      {"mark": r.id, "bindings": {text: ctx.obs.object_ids.get(r.id)},
+                       "evidence": [{"kind": "frame", "id": ctx.obs.frame_id, "mark": r.id}]})
 
 
 def _find_in(ctx: Context, wobs, text: str) -> StepResult | None:
@@ -242,7 +277,8 @@ def _find_in(ctx: Context, wobs, text: str) -> StepResult | None:
         return StepResult("completed", f"Behind it, the wrist camera found an object the table camera cannot see (frame {wobs.frame_id}): "
                                        f"at x {g['centre'][0] * 1000:+.0f} mm, y {g['centre'][1] * 1000:+.0f} mm, {g['height'] * 1000:.0f} mm "
                                        f"tall, described as {d.get('colour', '')} {d.get('name', '')} [position measured; description Gemma's]",
-                          {"mark": k, "camera": "wrist"})
+                          {"mark": k, "camera": "wrist", "bindings": {text: wobs.assoc.get(k, {}).get("world_id")},
+                           "evidence": [{"kind": "frame", "id": wobs.frame_id, "mark": k}]})
     else:
         cands = [k for k in ctx.tools.lexical_candidates(wobs, text) if k in new]
         if not cands:  # descriptions use other words (e.g. "green shape" for a cylinder): check the crops of
@@ -263,7 +299,9 @@ def _find_in(ctx: Context, wobs, text: str) -> StepResult | None:
     ctx.log("located", text=text, mark=k, confirm=c.match, centre=g["centre"], camera="wrist")
     return StepResult("completed", f"{text!r} found with the wrist camera (frame {wobs.frame_id}, not visible to the table camera) at "
                                    f"x {g['centre'][0] * 1000:+.0f} mm, y {g['centre'][1] * 1000:+.0f} mm, {g['height'] * 1000:.0f} mm tall "
-                                   "[position measured; identity from Gemma, confirmed on its crop]", {"mark": k, "camera": "wrist"})
+                                   "[position measured; identity from Gemma, confirmed on its crop]",
+                      {"mark": k, "camera": "wrist", "bindings": {text: wobs.assoc.get(k, {}).get("world_id")},
+                       "evidence": [{"kind": "frame", "id": wobs.frame_id, "mark": k}]})
 
 
 def _target_mark(ctx: Context, text: str) -> tuple[int | None, StepResult | None]:
@@ -347,6 +385,8 @@ def run_inspect(ctx: Context, args: dict) -> StepResult:
             description=d, association=data["association"])
     shift = np.hypot(*(np.array(wg["centre"][:2]) - np.array(g["centre"][:2]))) * 1000
     used = (data["association"] or {}).get("status") == "matched" and t.world.objects[data["association"]["world_id"]].observations[-1]["used_for_geometry"]
+    data["bindings"] = {text: oid}
+    data["evidence"] = [{"kind": "frame", "id": w["obs"].frame_id, "mark": wm}]
     return StepResult("completed",
                       f"Inspected {text!r} from {b.distance:.2f} m with the wrist camera: at x {wg['centre'][0] * 1000:+.0f} mm, "
                       f"y {wg['centre'][1] * 1000:+.0f} mm ({shift:.0f} mm from the table camera's estimate), about "
@@ -431,20 +471,70 @@ def Kinematics_tcp():
     return Kinematics()
 
 
-def run_pick_place(ctx: Context, args: dict, final_home: bool, step_no: int) -> StepResult:
+def _skill(ctx: Context, mode: str, task: dict, final_home: bool, step_no: int) -> StepResult:
     from agent.pick_place import PickPlaceWorkflow
-    task = {"object": args["object"], "relation": args["relation"], "reference": args["reference"],
-            "frame": args.get("frame") or "robot"}
     given = ctx.obs if ctx.tools.is_fresh(ctx.obs, need_clear_view=True) else None
-    wf = PickPlaceWorkflow(ctx.tools, ctx.log, ctx.run_dir, ctx.responder, ctx.budgets, final_home=final_home)
-    r = wf.run(ctx.state.instruction, task, observation=given, thread_id=f"{ctx.state.started:.0f}_step{step_no}")
+    wf = PickPlaceWorkflow(ctx.tools, ctx.log, ctx.run_dir, ctx.responder, ctx.budgets, final_home=final_home, mode=mode)
+    r = wf.run(ctx.state.instruction, task, observation=given, thread_id=f"{ctx.state.started:.0f}_step{step_no}_{mode}")
     ctx.state.verified.extend(r.get("verifications") or [])
     ctx.state.questions.extend(r.get("questions") or [])
-    ctx.obs = wf.ctx.get("obs", ctx.obs)  # latest observation (stale after the motion: is_fresh says so)
+    ctx.obs = wf.ctx.get("obs", ctx.obs)
+    b = {}
+    if r.get("object_id") is not None and (task.get("object") or {}).get("text"):
+        b[task["object"]["text"]] = r["object_id"]
+    if r.get("reference_id") is not None and (task.get("reference") or {}).get("text"):
+        b[task["reference"]["text"]] = r["reference_id"]
+    data = {"report": r, "bindings": b, "evidence": [{"kind": "verification", "check": v.get("check"), "pass": v.get("pass")}
+                                                     for v in r.get("verifications") or []],
+            "world_changes": [f"holding #{ctx.tools.held_object}"] if mode == "pick" and r["status"] == "COMPLETED" else []}
     if r["status"] == "COMPLETED":
-        return StepResult("completed", r["message"], {"report": r})
+        return StepResult("completed", r["message"], data)
     f = r.get("failure") or {}
-    return StepResult(_failure_outcome(f.get("cls"), f.get("reason", "")), r["message"], {"report": r})
+    return StepResult(_failure_outcome(f.get("cls"), f.get("reason", "")), r["message"], data)
+
+
+def run_pick(ctx: Context, args: dict, step_no: int) -> StepResult:
+    t, text = ctx.tools, (args.get("object") or {}).get("text", "")
+    if t.held_object is not None:
+        if text == f"#{t.held_object}":
+            return StepResult("completed", f"already holding #{t.held_object} (no new grasp)", {"bindings": {text: t.held_object}})
+        return StepResult("unsafe", f"the gripper already holds #{t.held_object}; place it before picking another object")
+    return _skill(ctx, "pick", {"object": args["object"], "relation": None, "reference": None, "frame": "robot"}, False, step_no)
+
+
+def run_place(ctx: Context, args: dict, final_home: bool, step_no: int) -> StepResult:
+    if ctx.tools.held_object is None:
+        return StepResult("unsupported", "nothing is held: there is nothing to place (pick it up first, or ask for pick-and-place)")
+    task = {"object": {"text": f"#{ctx.tools.held_object}"}, "relation": args["relation"], "reference": args["reference"],
+            "frame": args.get("frame") or "robot"}
+    return _skill(ctx, "place", task, final_home, step_no)
+
+
+def run_decompose(ctx: Context, args: dict) -> StepResult:
+    """Planning worker: the goal over the measured objects -> concrete steps (#ids) + final conditions."""
+    _ensure_described(ctx)
+    facts, ids = world_facts(ctx)
+    held = f"The gripper holds #{ctx.tools.held_object}." if ctx.tools.held_object else "The gripper is empty."
+    try:
+        sp = ctx.tools.roles.decompose(args["goal"], facts, ids, context=held)
+    except VLMFailure as exc:
+        return StepResult("failed", f"could not plan the goal over the measured objects: {exc}")
+    if not sp.steps:
+        return StepResult("infeasible", f"the goal cannot be planned with the available skills: {sp.reason}")
+    steps = [(st.capability, st.args) for st in sp.steps]
+    conds = [c.model_dump(exclude_none=True) for c in sp.goal]
+    ctx.log("decomposed", goal=args["goal"], steps=[{"capability": c, "args": a} for c, a in steps], conditions=conds,
+            reason=sp.reason)
+    return StepResult("completed", f"planned {len(steps)} step(s) over the measured objects: {sp.reason}",
+                      {"steps": steps, "conditions": conds, "confidence": "model"})
+
+
+def run_pick_place(ctx: Context, args: dict, final_home: bool, step_no: int) -> StepResult:
+    if ctx.tools.held_object is not None:
+        return StepResult("unsafe", f"the gripper already holds #{ctx.tools.held_object}; place it before picking another object")
+    task = {"object": args["object"], "relation": args["relation"], "reference": args["reference"],
+            "frame": args.get("frame") or "robot"}
+    return _skill(ctx, "pick_place", task, final_home, step_no)
 
 
 def run_return_home(ctx: Context, args: dict) -> StepResult:

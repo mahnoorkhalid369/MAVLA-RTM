@@ -1,26 +1,28 @@
-"""Goal supervisor: the central coordinator (LangGraph). It interprets the user's goal into a capability plan,
-delegates each step to the responsible agent, checks the step's evidence, replans once if a step fails for a
-recoverable reason, and completes only when every step has been verified.
+"""Supervisor: the central coordinator (LangGraph). It owns the user's goal and the task ledger, interprets the
+goal into a desired final state plus a first plan, delegates each subtask to a worker as a typed request,
+reviews each typed result (evidence, uncertainty, advisory suggestions), adapts the plan, and completes only
+when the desired final state is verified over measured state.
 
-    INTERPRETING -> DISPATCHING -> {OBSERVING_SCENE | REPORTING_SCENE | ANSWERING | MANIPULATING |
-                                    RETURNING_SAFE | UNAVAILABLE} -> VERIFYING_STEP -> DISPATCHING ...
-                 -> VERIFYING_GOAL -> COMPLETED | FAILED | CANCELLED | UNSUPPORTED
-                    VERIFYING_STEP -> REPLANNING (at most MAX_REPLANS) -> DISPATCHING
+    INTERPRETING -> DISPATCHING -> DELEGATING -> REVIEWING -> DISPATCHING ... -> VERIFYING_GOAL
+                                                     |-> REPLANNING (bounded, objective-preserving) -> DISPATCHING
+    terminal: COMPLETED | FAILED | CANCELLED | UNSUPPORTED
 
-Agents (logical responsibilities, one shared Gemma / YOLO instance):
-  planning      Roles.plan_goal (Gemma, capability-constrained JSON, deterministic validation)
-  perception    capabilities.run_observe / run_describe_scene / run_answer / run_locate (YOLO + depth + Gemma)
-  manipulation  capabilities.run_pick_place (the validated PickPlaceWorkflow skill) / run_return_home
-  verification  inside the skills (contact, camera placement, HOME joints) + VERIFYING_STEP / VERIFYING_GOAL here
-  exploration   capabilities.run_inspect / run_explore (agent/exploration.py viewpoint planner, wrist camera)
-Safety: the planner can only name capabilities from agent/capabilities.py; every motion still goes through
-SkillPlanner + CollisionChecker + RosExecutor + the simulator's safety layer.
+Workers (agent/workers.py; logical roles in this process, one shared Gemma / YOLO / ROS bridge):
+  planning      goal -> plan (Roles.plan_goal), multi-object decomposition over measured objects (decompose)
+  perception    observe, describe_scene, answer, locate
+  exploration   inspect, explore (wrist-camera viewpoints, agent/exploration.py)
+  manipulation  pick, place, pick_place, return_home (the validated PickPlaceWorkflow in three modes)
+  verification  goal conditions over measured state (agent/goals.py) + the skills' own physical checks
+Safety: the planner names only registry capabilities; every motion goes through SkillPlanner + CollisionChecker
++ RosExecutor + the simulator's safety layer; workers never start other workers.
 """
 
 from __future__ import annotations
 
+import copy
 import sqlite3
 import time
+from dataclasses import asdict
 from pathlib import Path
 from typing import TypedDict
 
@@ -30,34 +32,33 @@ from langgraph.graph import END, StateGraph
 from agent import capabilities as caps
 from agent.config import Budgets
 from agent.eventlog import EventLog
+from agent.goals import GoalEvaluator, derive_conditions
 from agent.vlm_roles import VLMFailure
+from agent.workers import WorkerRegistry
 from agent.world_state import Step, TaskState
 
-STATES = ["INTERPRETING", "DISPATCHING", "OBSERVING_SCENE", "REPORTING_SCENE", "ANSWERING", "LOCATING", "INSPECTING",
-          "EXPLORING", "MANIPULATING",
-          "RETURNING_SAFE", "UNAVAILABLE", "VERIFYING_STEP", "REPLANNING", "VERIFYING_GOAL"]
+STATES = ["INTERPRETING", "DISPATCHING", "DELEGATING", "REVIEWING", "REPLANNING", "VERIFYING_GOAL"]
 TERMINAL = ["COMPLETED", "FAILED", "CANCELLED", "UNSUPPORTED"]
-NODE_OF = {"observe": "OBSERVING_SCENE", "describe_scene": "REPORTING_SCENE", "answer": "ANSWERING", "locate": "LOCATING",
-           "inspect": "INSPECTING", "explore": "EXPLORING",
-           "pick_place": "MANIPULATING", "return_home": "RETURNING_SAFE"}
-NEEDS_OBSERVATION = {"describe_scene", "answer", "locate", "inspect", "explore"}
+NEEDS_OBSERVATION = {"describe_scene", "answer", "locate", "inspect", "explore", "decompose"}
+MOTION = {"pick", "place", "pick_place", "return_home", "inspect", "explore"}
+MANIPULATION = {"pick", "place", "pick_place"}
 MAX_REPLANS = 1
-MAX_STEPS_EXECUTED = 10  # hard bound on capability executions per instruction (plans + replans)
+MAX_STEPS_EXECUTED = 14  # hard bound on worker delegations per instruction
+MAX_INSPECTIONS_FOR_ANSWER = 2
 RECOVERABLE = {"insufficient_info", "infeasible", "failed"}  # may be replanned once; unsafe / cancelled never
-# capabilities that can achieve a failed step's objective in a replan (the step itself always can)
-ALTERNATIVES = {"answer": {"describe_scene"}, "describe_scene": {"answer"}}
+ALTERNATIVES = {"answer": {"describe_scene"}, "describe_scene": {"answer"}, "pick_place": {"place"}}
+PRONOUNS = {"it", "that", "this", "this one", "that one", "the object", "the held object", "#held"}
 
 
 def achieves(step_cap: str, failed_cap: str) -> bool:
     return step_cap == failed_cap or step_cap in ALTERNATIVES.get(failed_cap, set())
 
 
-CONSUMERS = {"describe_scene", "answer", "locate", "inspect", "pick_place", "explore"}  # steps that use an observation
+CONSUMERS = {"describe_scene", "answer", "locate", "inspect", "pick_place", "pick", "place", "explore", "decompose"}
 
 
 def complete_plan(plan, instruction: str) -> list[str]:
-    """Deterministic, logged completions of the planner's output (generic rules, not command templates):
-    an observation nobody uses is reported to the user; a question gets an answer step. Returns the rules applied."""
+    """Deterministic, logged completions of the planner's output (generic rules, not command templates)."""
     from agent.vlm_roles import PlanStep
     applied = []
     if instruction.strip().endswith("?") and not {"answer", "locate", "describe_scene"} & {s.do for s in plan.steps}:
@@ -71,6 +72,17 @@ def complete_plan(plan, instruction: str) -> list[str]:
         plan.steps.append(PlanStep(do="describe_scene"))
         applied.append("observation without a consumer -> describe_scene")
     return applied
+
+
+def _ref_texts(args: dict) -> list[str]:
+    out = []
+    for k in ("object", "reference"):
+        v = args.get(k)
+        if isinstance(v, dict) and v.get("text"):
+            out.append(v["text"])
+    if args.get("target"):
+        out.append(args["target"])
+    return out
 
 
 class GoalState(TypedDict, total=False):
@@ -88,6 +100,9 @@ class GoalSupervisor:
         self.ctx: caps.Context | None = None
         self.executed = 0
         self.failed_motion = 0
+        self.current: Step | None = None
+        self.last_result = None
+        self.reg = WorkerRegistry(log, self._executors(), caps.SPECS)
         g = StateGraph(GoalState)
         for s in STATES:
             g.add_node(s, self._wrap(s, getattr(self, "_" + s.lower())))
@@ -100,13 +115,35 @@ class GoalSupervisor:
         self.conn = sqlite3.connect(str(self.run_dir / "checkpoints.sqlite"), check_same_thread=False)
         self.graph = g.compile(checkpointer=SqliteSaver(self.conn))
 
-    # ------------------------------------------------------------------------------------ plumbing
+    # ----------------------------------------------------------------------------------- workers
+    def _executors(self) -> dict:
+        def later_manip(req):
+            return any(s.capability in MANIPULATION for s in self.ts.remaining(self.current))
+
+        def last_motion(req):
+            return not any(s.capability in MOTION for s in self.ts.remaining(self.current))
+        return {
+            "observe": ("perception", lambda c, a, r: caps.run_observe(c, a, clear_view=later_manip(r))),
+            "describe_scene": ("perception", lambda c, a, r: caps.run_describe_scene(c, a)),
+            "answer": ("perception", lambda c, a, r: caps.run_answer(c, a)),
+            "locate": ("perception", lambda c, a, r: caps.run_locate(c, a)),
+            "inspect": ("exploration", lambda c, a, r: caps.run_inspect(c, a)),
+            "explore": ("exploration", lambda c, a, r: caps.run_explore(c, a)),
+            "pick": ("manipulation", lambda c, a, r: caps.run_pick(c, a, self.current.index)),
+            "place": ("manipulation", lambda c, a, r: caps.run_place(c, a, last_motion(r), self.current.index)),
+            "pick_place": ("manipulation", lambda c, a, r: caps.run_pick_place(c, a, last_motion(r), self.current.index)),
+            "return_home": ("manipulation", lambda c, a, r: caps.run_return_home(c, a)),
+            "decompose": ("planning", lambda c, a, r: caps.run_decompose(c, a)),
+        }
+
+    # ---------------------------------------------------------------------------------- plumbing
     def _wrap(self, name, fn):
         def node(state: GoalState) -> dict:
             self.log("state", state=name, level="goal")
             t = time.monotonic()
             out = fn(state)
             if self.ts is not None:
+                self.ts.workers = self.reg.snapshot()
                 self.ts.save(self.run_dir)
             return {**out, "timeline": list(state.get("timeline", [])) + [{"state": name, "seconds": round(time.monotonic() - t, 2)}]}
         return node
@@ -115,132 +152,183 @@ class GoalSupervisor:
         self.ts.status, self.ts.outcome, self.ts.message = status.lower(), outcome, message
         return {"next": status}
 
-    def _set_plan(self, plan, first_index: int = 1) -> None:
-        self.ts.goal, self.ts.success_condition = plan.goal, plan.success
-        new = [Step(first_index + i, st.capability, st.args) for i, st in enumerate(plan.steps)]
-        self.ts.plan = [s for s in self.ts.plan if s.status != "pending"] + new
-        self.log("goal_plan", goal=plan.goal, success=plan.success, reason=plan.reason,
-                 steps=[{"index": s.index, "capability": s.capability, "args": s.args} for s in new])
+    def _context(self) -> str:
+        t = self.tools
+        if t.held_object is not None:
+            o = t.world.objects.get(t.held_object)
+            d = (o.description or {}) if o is not None else {}
+            return f"The robot is HOLDING an object ({d.get('colour', '')} {d.get('name', '')})."
+        if t.last_referent is not None:
+            return "The robot's gripper is empty. The last instruction handled one object (\"it\" may mean it)."
+        return ""
 
-    # -------------------------------------------------------------------------------------- states
+    def _add_steps(self, steps, origin: str, after: Step | None = None) -> list[Step]:
+        """steps: [(capability, args)] -> ledger Steps inserted after `after` (or appended)."""
+        nxt = max([s.index for s in self.ts.plan], default=0) + 1
+        new = [Step(nxt + i, c, copy.deepcopy(a), worker=self.reg.worker_of(c), origin=origin) for i, (c, a) in enumerate(steps)]
+        for i, st in enumerate(new):  # sequential dependency: each step needs the previous one
+            st.depends_on = [new[i - 1].index] if i else []
+        if after is None:
+            self.ts.plan.extend(new)
+        else:
+            rest = self.ts.remaining(after)
+            keep = [s for s in self.ts.plan if s not in rest]
+            self.ts.plan = keep + new + rest
+        self.log("goal_plan", goal=self.ts.goal, origin=origin, reason="",
+                 steps=[{"index": s.index, "capability": s.capability, "args": s.args, "worker": s.worker} for s in new])
+        return new
+
+    def _refresh_conditions(self) -> None:
+        explicit = [c for c in self.ts.conditions if c.get("source") == "explicit"]
+        live = [(s.capability, s.args) for s in self.ts.plan if s.status not in ("skipped", "replaced")
+                and s.capability not in ("observe", "decompose")]
+        self.ts.conditions = explicit or [{**c, "source": "derived"} for c in derive_conditions(live)]
+
+    # ------------------------------------------------------------------------- state-aware binding
+    def _bind_refs(self, step: Step) -> str | None:
+        """Pronouns -> the held / last-handled object (#id); returns a reason if a reference cannot be bound."""
+        t = self.tools
+        for k in ("object", "reference"):
+            v = step.args.get(k)
+            if isinstance(v, dict) and (v.get("text") or "").strip().lower() in PRONOUNS:
+                who = t.held_object if t.held_object is not None else t.last_referent
+                if who is None:
+                    return f"it is unclear what {v['text']!r} refers to (nothing held, nothing handled before)"
+                self.log("binding", text=v["text"], world_id=who,
+                         reason="held object" if t.held_object is not None else "last handled object")
+                v["text"] = f"#{who}"
+        return None
+
+    def _adapt_to_robot_state(self, step: Step) -> None:
+        """Deterministic, logged adjustment from the measured robot state: never regrasp a held object."""
+        held = self.tools.held_object
+        obj = (step.args.get("object") or {}).get("text") if isinstance(step.args.get("object"), dict) else None
+        if held is not None and obj == f"#{held}" and step.capability == "pick_place":
+            step.capability, step.worker = "place", "manipulation"
+            self.log("plan_adjusted", index=step.index, change="pick_place -> place", reason=f"#{held} is already held")
+            self._refresh_conditions()
+
+    # ----------------------------------------------------------------------------------- states
     def _interpreting(self, state) -> dict:
         try:
-            plan = self.tools.roles.plan_goal(state["instruction"], caps.planner_menu())
+            plan = self.tools.roles.plan_goal(state["instruction"], caps.planner_menu(), context=self._context())
         except VLMFailure as exc:
-            return self._finish("FAILED", "failed", f"I could not turn the instruction into steps I can do ({exc}). I can "
-                                "observe and describe the table, answer questions about it, find a described object, move "
-                                "objects onto / next to others and return HOME.")
+            return self._finish("FAILED", "failed", f"I could not turn the instruction into steps I can do ({exc}). "
+                                + self._capabilities_line())
         applied = complete_plan(plan, state["instruction"])
         if applied:
             self.log("plan_completed", rules=applied)
-        self._set_plan(plan)
+        self.ts.goal, self.ts.success_condition = plan.goal, plan.success
         if not plan.steps:
             return self._finish("UNSUPPORTED", "unsupported", f"I cannot do that with my current capabilities: "
-                                f"{plan.reason or 'no matching capability'}. I can observe and describe the table, answer "
-                                "questions about it, move objects onto / next to others and return HOME.")
+                                f"{plan.reason or 'no matching capability'}. " + self._capabilities_line())
+        self._add_steps([(st.capability, st.args) for st in plan.steps], "planner")
+        self._refresh_conditions()
+        self.log("goal_conditions", goal=plan.goal, conditions=self.ts.conditions)
         return {"next": "DISPATCHING"}
+
+    @staticmethod
+    def _capabilities_line() -> str:
+        return ("I can observe and describe the table, answer questions about it, find or inspect a described object "
+                "(also behind others), pick up an object and hold it, place a held object, move one object onto / next to "
+                "another, plan multi-object moves over the measured objects, and return HOME.")
 
     def _dispatching(self, state) -> dict:
         step = self.ts.current()
         if step is None:
             return {"next": "VERIFYING_GOAL"}
         if self.executed >= MAX_STEPS_EXECUTED:
-            return self._finish("FAILED", "failed", f"stopped after {MAX_STEPS_EXECUTED} steps without reaching the goal")
-        spec = caps.SPECS[step.capability]
-        if not spec.implemented:
-            return {"next": "UNAVAILABLE"}
-        step.status = "running"
-        self.log("step", event="start", index=step.index, capability=step.capability, args=step.args, safety=spec.safety)
-        # perception precondition: describe / answer need a fresh observation of the scene
+            return self._finish("FAILED", "failed", f"stopped after {MAX_STEPS_EXECUTED} subtasks without reaching the goal")
+        before = copy.deepcopy(step.args)
+        why = self._bind_refs(step)
+        if step.args != before:
+            self._refresh_conditions()  # derived conditions now name the bound object (#id), not the pronoun
+        if why:
+            step.status, step.outcome, step.summary = "failed", "insufficient_info", why
+            return self._finish("CANCELLED", "insufficient_info", why + " — please name the object.")
+        self._adapt_to_robot_state(step)
         if step.capability in NEEDS_OBSERVATION and not self.tools.is_fresh(self.ctx.obs):
             self.log("step", event="auto_observe", index=step.index, reason="no fresh observation")
             r = caps.run_observe(self.ctx, {}, clear_view=False)
             if r.outcome != "completed":
-                return self._step_done(step, r)
-        return {"next": NODE_OF[step.capability]}
+                step.status, step.outcome, step.summary = "failed", r.outcome, r.summary
+                self.last_result = None
+                return {"next": "REVIEWING"}
+        self.current = step
+        return {"next": "DELEGATING"}
 
-    def _step_done(self, step: Step, r: caps.StepResult, t0: float | None = None) -> dict:
-        step.status = "done" if r.outcome == "completed" else "failed"
-        step.outcome, step.summary = r.outcome, r.summary
-        step.seconds = caps.elapsed(t0) if t0 else 0.0
-        self.executed += 1
-        self.ts.actions.append({"index": step.index, "capability": step.capability, "outcome": r.outcome,
-                                "seconds": step.seconds})
-        self.log("step", event="end", index=step.index, capability=step.capability, outcome=r.outcome,
-                 summary=r.summary[:300], seconds=step.seconds)
-        return {"next": "VERIFYING_STEP"}
-
-    def _later_motion(self, step: Step) -> bool:
-        return any(s.capability in caps.MOTION for s in self.ts.remaining(step))
-
-    def _observing_scene(self, state) -> dict:
-        step, t0 = self.ts.current(), time.monotonic()
-        # park the arm out of the view only if a manipulation step follows (it reuses this cleared-view observation;
-        # inspect / explore plan their own camera motion and do not need it)
-        clear = any(s.capability == "pick_place" for s in self.ts.remaining(step))
-        return self._step_done(step, caps.run_observe(self.ctx, step.args, clear_view=clear), t0)
-
-    def _reporting_scene(self, state) -> dict:
-        step, t0 = self.ts.current(), time.monotonic()
-        return self._step_done(step, caps.run_describe_scene(self.ctx, step.args), t0)
-
-    def _answering(self, state) -> dict:
-        step, t0 = self.ts.current(), time.monotonic()
-        return self._step_done(step, caps.run_answer(self.ctx, step.args), t0)
-
-    def _locating(self, state) -> dict:
-        step, t0 = self.ts.current(), time.monotonic()
-        return self._step_done(step, caps.run_locate(self.ctx, step.args), t0)
-
-    def _inspecting(self, state) -> dict:
-        step, t0 = self.ts.current(), time.monotonic()
-        return self._step_done(step, caps.run_inspect(self.ctx, step.args), t0)
-
-    def _exploring(self, state) -> dict:
-        step, t0 = self.ts.current(), time.monotonic()
-        return self._step_done(step, caps.run_explore(self.ctx, step.args), t0)
-
-    def _manipulating(self, state) -> dict:
-        step, t0 = self.ts.current(), time.monotonic()
-        final_home = not self._later_motion(step)  # HOME once per instruction, after the last motion step
-        return self._step_done(step, caps.run_pick_place(self.ctx, step.args, final_home, step.index), t0)
-
-    def _returning_safe(self, state) -> dict:
-        step, t0 = self.ts.current(), time.monotonic()
-        return self._step_done(step, caps.run_return_home(self.ctx, step.args), t0)
-
-    def _unavailable(self, state) -> dict:
-        step = self.ts.current()
+    def _delegating(self, state) -> dict:
+        step = self.current
         step.status = "running"
-        return self._step_done(step, caps.run_unimplemented(self.ctx, step.capability, step.args))
+        refs = _ref_texts(step.args)
+        req = self.reg.request(self.ts.instruction[:40], step.capability, step.args,
+                               objective=f"{step.capability} {', '.join(refs)}".strip(), object_refs=refs,
+                               state_refs=[self.ctx.obs.frame_id] if self.ctx.obs is not None else [],
+                               depends_on=[f"step{d}" for d in step.depends_on])
+        step.task_id, step.worker = req.task_id, req.worker
+        self.log("step", event="start", index=step.index, capability=step.capability, args=step.args,
+                 safety=req.safety, worker=req.worker, task_id=req.task_id)
+        t0 = time.monotonic()
+        res = self.reg.dispatch(req, self.ctx)
+        step.status = "done" if res.status == "completed" else "failed"
+        step.outcome, step.summary, step.seconds = res.outcome, res.summary, round(time.monotonic() - t0, 1)
+        step.result = {k: v for k, v in asdict(res).items() if k != "data"}
+        self.executed += 1
+        self.ts.bindings.update({k: v for k, v in (res.data.get("bindings") or {}).items() if v is not None})
+        self.ts.actions.append({"index": step.index, "capability": step.capability, "worker": res.worker,
+                                "status": res.status, "outcome": res.outcome, "seconds": step.seconds})
+        self.log("step", event="end", index=step.index, capability=step.capability, outcome=res.outcome,
+                 status=res.status, worker=res.worker, summary=res.summary[:300], seconds=step.seconds)
+        self.last_result = res
+        return {"next": "REVIEWING"}
 
-    def _verifying_step(self, state) -> dict:
+    def _reviewing(self, state) -> dict:
+        """Critic of one result: adapt the plan from its evidence (the supervisor decides; workers only advise)."""
         step = next(s for s in reversed(self.ts.plan) if s.status in ("done", "failed"))
+        res = self.last_result
+        data = res.data if res is not None else {}
         if step.outcome == "completed":
+            if step.capability == "decompose":  # planning worker returned concrete steps + final conditions
+                self._add_steps(data.get("steps", []), "decomposition", after=step)
+                explicit = [{**c, "source": "explicit"} for c in data.get("conditions", [])]
+                if explicit:
+                    self.ts.conditions = explicit
+                else:
+                    self._refresh_conditions()
+                self.log("goal_conditions", goal=self.ts.goal, conditions=self.ts.conditions, origin="decomposition")
+            if (step.capability == "answer" and data.get("certain") is False and data.get("check_closer_world")
+                    and not any(s.capability == "inspect" for s in self.ts.plan) and caps.SPECS["inspect"].implemented):
+                ids = data["check_closer_world"][:MAX_INSPECTIONS_FOR_ANSWER]
+                step.status = "replaced"
+                self.log("subtask", reason=f"answer uncertain from the table view: closer look at "
+                                           f"{['#%d' % i for i in ids]}, then answer again")
+                self._add_steps([("inspect", {"target": f"#{i}"}) for i in ids] + [("answer", dict(step.args))],
+                                "subtask policy", after=step)
             return {"next": "DISPATCHING"}
-        # information-gathering subtask (deterministic): a target not visible to the table camera -> explore
-        # hidden regions once, then look for it again; exploring itself never counts as finding it
+        for s in self.ts.remaining(step):  # nothing after a failed step runs on stale assumptions (may be re-added)
+            s.status = "skipped"
+        # information-gathering subtask: a target not visible to the table camera -> explore once, then locate again
         if (step.capability == "locate" and step.outcome == "insufficient_info" and caps.SPECS["explore"].implemented
                 and not any(s.capability == "explore" for s in self.ts.plan) and self.executed < MAX_STEPS_EXECUTED - 2):
             step.status = "replaced"
-            nxt = max(s.index for s in self.ts.plan) + 1
-            new = [Step(nxt, "explore", {"target": step.args.get("target"), "near": None}),
-                   Step(nxt + 1, "locate", dict(step.args))]
-            rest = self.ts.remaining(step)
-            self.ts.plan = [s for s in self.ts.plan if s not in rest] + new + [Step(s.index + 2, s.capability, s.args) for s in rest]
-            self.log("subtask", reason=f"{step.args.get('target')!r} not visible to the table camera: explore hidden regions, then locate again",
-                     steps=[{"index": s.index, "capability": s.capability} for s in new])
+            for s in self.ts.plan:
+                if s.status == "skipped" and s.index > step.index:
+                    s.status = "pending"
+            self.log("subtask", reason=f"{step.args.get('target')!r} not visible to the table camera: explore hidden "
+                                       "regions, then locate again")
+            self._add_steps([("explore", {"target": step.args.get("target"), "near": None}), ("locate", dict(step.args))],
+                            "subtask policy", after=step)
             return {"next": "DISPATCHING"}
-        for s in self.ts.remaining(step):  # nothing after a failed step runs on stale assumptions
-            s.status = "skipped"
         if step.outcome == "cancelled":
-            return self._finish("CANCELLED", "cancelled", step.summary)
-        if step.outcome == "ambiguous":  # reported, not guessed (pick_place asks the user itself)
+            return self._finish("CANCELLED", "cancelled", step.summary + self._done_so_far())
+        if step.outcome == "ambiguous":
             return self._finish("CANCELLED", "ambiguous", step.summary + self._done_so_far())
         if step.outcome == "unsupported":
-            return self._finish("UNSUPPORTED", "unsupported", f"Step {step.index} ({step.capability}) is not possible yet: "
+            return self._finish("UNSUPPORTED", "unsupported", f"Step {step.index} ({step.capability}) is not possible: "
                                 f"{step.summary}" + self._done_so_far())
-        if step.outcome in RECOVERABLE and self.ts.replans < MAX_REPLANS and self.executed < MAX_STEPS_EXECUTED:
+        self.ts.attempted.append({"capability": step.capability, "args": step.args, "outcome": step.outcome})
+        deterministic = step.outcome == "infeasible"  # e.g. out of reach: re-planning the same move cannot help
+        if step.outcome in RECOVERABLE and not deterministic and self.ts.replans < MAX_REPLANS and self.executed < MAX_STEPS_EXECUTED:
             self.failed_motion = getattr(self.tools, "motion_count", 0)
             return {"next": "REPLANNING"}
         return self._finish("FAILED", step.outcome, f"Step {step.index} ({step.capability}) {step.outcome}: {step.summary}"
@@ -249,18 +337,17 @@ class GoalSupervisor:
     def _replanning(self, state) -> dict:
         self.ts.replans += 1
         failed = next(s for s in reversed(self.ts.plan) if s.status == "failed")
-        failed_motion = self.failed_motion
-        note = (f"{state['instruction']}\n(Previous attempt: step '{failed.capability}' with {failed.args} ended "
-                f"'{failed.outcome}': {failed.summary[:200]}. Plan again from the current situation.)")
+        tried = "; ".join(f"{a['capability']} {a['args']} -> {a['outcome']}" for a in self.ts.attempted)[:400]
+        note = f"{state['instruction']}\n(Already tried, do not repeat: {tried}. Plan again from the current situation.)"
         try:
-            plan = self.tools.roles.plan_goal(note, caps.planner_menu())
+            plan = self.tools.roles.plan_goal(note, caps.planner_menu(), context=self._context())
         except VLMFailure as exc:
             return self._finish("FAILED", failed.outcome, f"{failed.summary} (replanning failed: {exc})")
-        unchanged = getattr(self.tools, "motion_count", 0) == failed_motion
+        unchanged = getattr(self.tools, "motion_count", 0) == self.failed_motion
         if not any(achieves(st.capability, failed.capability) for st in plan.steps):
             why = f"the new plan no longer pursues the failed step ({failed.capability})"
-        elif unchanged and any(st.capability == failed.capability and st.args == failed.args for st in plan.steps):
-            why = "the new plan repeats the failed step in an unchanged situation"
+        elif unchanged and any((st.capability, st.args) == (a["capability"], a["args"]) for st in plan.steps for a in self.ts.attempted):
+            why = "the new plan repeats an attempted step in an unchanged situation"
         else:
             why = None
         if why:
@@ -268,49 +355,74 @@ class GoalSupervisor:
             return self._finish("FAILED", failed.outcome, f"Step {failed.index} ({failed.capability}) {failed.outcome}: "
                                 f"{failed.summary}. Replanning offered nothing different." + self._done_so_far())
         self.log("replan", accepted=True)
-        failed.status = "replaced"  # superseded by the new plan; kept in the record
-        self._set_plan(plan, first_index=max(s.index for s in self.ts.plan) + 1)
+        failed.status = "replaced"
+        self._add_steps([(st.capability, st.args) for st in plan.steps], "replan")
+        self._refresh_conditions()
         return {"next": "DISPATCHING"}
 
     def _verifying_goal(self, state) -> dict:
+        """The original objective is the final authority: every desired-final-state condition is evaluated over
+        measured state (Gemma answers count only as 'model', never as verified)."""
         steps = [s for s in self.ts.plan if s.status not in ("skipped", "replaced")]
-        ok = steps and all(s.status == "done" and s.outcome == "completed" for s in steps)
-        if not ok:
-            return self._finish("FAILED", "failed", "not every step was verified" + self._done_so_far())
+        if not steps or not all(s.status == "done" and s.outcome == "completed" for s in steps):
+            return self._finish("FAILED", "failed", "not every step was completed" + self._done_so_far())
         for r in (s for s in self.ts.plan if s.status == "replaced"):  # a replaced step's objective must be achieved later
-            if not any(s.index > r.index and achieves(s.capability, r.capability) for s in steps):
+            if r.origin != "subtask policy" and not any(s.index > r.index and achieves(s.capability, r.capability) for s in steps):
                 return self._finish("FAILED", r.outcome or "failed", f"Step {r.index} ({r.capability}) {r.outcome}: {r.summary}; "
                                     "the replanned steps did not achieve it." + self._done_so_far() + " I did not report success.")
-        evidence = [v.get("check") for v in self.ts.verified if v.get("pass")]
-        self.log("goal_verified", steps=len(steps), evidence=evidence)
-        supporting = {"observe", "explore"}  # information gathering; never the answer itself
-        result = [s for s in steps if s.capability not in supporting and s.summary]  # what the user asked for first
+        ev = GoalEvaluator(self.tools, self.ts)
+        results = [ev.evaluate(c, self.ts.bindings) for c in self.ts.conditions]
+        self.ts.goal_check = [{"condition": r.condition, "satisfied": r.satisfied, "confidence": r.confidence,
+                               "evidence": r.evidence, "bound": r.bound} for r in results]
+        self.log("goal_check", results=self.ts.goal_check)
+        false = [r for r in results if r.satisfied is False]
+        unknown = [r for r in results if r.satisfied is None and r.confidence != "model"]
+        summary = self._result_message(steps)
+
+        def fmt(rs):
+            return "; ".join(f"{r.condition['pred']}({', '.join(map(str, r.condition.get('args', [])))}): {r.evidence}" for r in rs)
+        if false:
+            return self._finish("FAILED", "failed", f"The steps ran, but the goal is not met: {fmt(false)}.\n{summary}\n"
+                                "I did not report success.")
+        if unknown:
+            return self._finish("FAILED", "insufficient_info", f"The steps ran, but the evidence does not show the goal: "
+                                f"{fmt(unknown)}.\n{summary}")
+        model = [r for r in results if r.confidence == "model"]
+        return self._finish("COMPLETED", "completed", summary + (" (answer from Gemma, not independently verified)" if model else ""))
+
+    @staticmethod
+    def _result_message(steps) -> str:
+        supporting = {"observe", "explore", "decompose"}
+        result = [s for s in steps if s.capability not in supporting and s.summary]
         support = [s for s in steps if s.capability in supporting and s.summary]
         msg = "\n".join(s.summary for s in result) or "\n".join(s.summary for s in support)
         if result and support:
             msg += "\n(" + "; ".join(s.summary for s in support[-2:]) + ")"
-        return self._finish("COMPLETED", "completed", msg)
+        return msg
 
     def _done_so_far(self) -> str:
         done = [f"{s.index}. {s.capability}" for s in self.ts.plan if s.status == "done"]
         return f" Completed before that: {', '.join(done)}." if done else ""
 
-    # ---------------------------------------------------------------------------------------- run
+    # --------------------------------------------------------------------------------------- run
     def run(self, instruction: str, thread_id: str = "run") -> dict:
         t0 = time.monotonic()
         self.ts = TaskState(instruction)
         self.ctx = caps.Context(self.tools, self.log, self.run_dir, self.responder, self.budgets, self.ts)
-        self.log("instruction", text=instruction)
+        self.ctx.vlm_calls = lambda: getattr(self.tools.roles, "calls", 0)
+        self.log("instruction", text=instruction, held=self.tools.held_object, last_referent=self.tools.last_referent)
         final = self.graph.invoke({"instruction": instruction, "timeline": []},
-                                  {"configurable": {"thread_id": thread_id}, "recursion_limit": 120})
+                                  {"configurable": {"thread_id": thread_id}, "recursion_limit": 200})
         status = final["timeline"][-1]["state"]
+        self.ts.workers = self.reg.snapshot()
         self.ts.save(self.run_dir)
         report = {"instruction": instruction, "status": status, "outcome": self.ts.outcome, "message": self.ts.message,
-                  "seconds": round(time.monotonic() - t0, 1), "goal": self.ts.goal,
-                  "plan": [{"index": s.index, "capability": s.capability, "args": s.args, "status": s.status,
-                            "outcome": s.outcome, "seconds": s.seconds} for s in self.ts.plan],
+                  "seconds": round(time.monotonic() - t0, 1), "goal": self.ts.goal, "conditions": self.ts.conditions,
+                  "goal_check": self.ts.goal_check, "bindings": self.ts.bindings,
+                  "plan": [{"index": s.index, "capability": s.capability, "args": s.args, "worker": s.worker, "status": s.status,
+                            "outcome": s.outcome, "seconds": s.seconds, "origin": s.origin} for s in self.ts.plan],
                   "verifications": self.ts.verified, "questions": self.ts.questions, "replans": self.ts.replans,
-                  "timeline": final["timeline"], "failure": None if status == "COMPLETED" else {"cls": self.ts.outcome,
-                                                                                               "reason": self.ts.message}}
+                  "holding": self.tools.held_object, "timeline": final["timeline"],
+                  "failure": None if status == "COMPLETED" else {"cls": self.ts.outcome, "reason": self.ts.message}}
         self.log("report", status=status, message=self.ts.message)
         return report

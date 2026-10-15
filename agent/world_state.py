@@ -28,6 +28,11 @@ class Step:
     outcome: str | None = None  # one of OUTCOMES once finished
     summary: str = ""
     seconds: float = 0.0
+    worker: str = ""  # assigned worker (agent.workers)
+    task_id: str = ""  # WorkerRequest.task_id once delegated
+    depends_on: list = field(default_factory=list)  # indices of steps that must be done first
+    result: dict = field(default_factory=dict)  # WorkerResult (without bulky data)
+    origin: str = "planner"  # planner | completion rule | subtask policy | decomposition | replan
 
 
 @dataclass
@@ -42,6 +47,11 @@ class TaskState:
     actions: list[dict] = field(default_factory=list)  # capability calls with outcome and duration
     questions: list[dict] = field(default_factory=list)
     replans: int = 0
+    bindings: dict = field(default_factory=dict)  # reference text / "#id" -> world object id (from worker results)
+    conditions: list = field(default_factory=list)  # desired final state (agent.goals predicates)
+    goal_check: list = field(default_factory=list)  # evaluation of the conditions (satisfied, confidence, evidence)
+    attempted: list = field(default_factory=list)  # (capability, args) already tried and failed (no identical retry)
+    workers: dict = field(default_factory=dict)  # registry snapshot at the end
     status: str = "running"  # running | completed | failed | cancelled | unsupported
     outcome: str | None = None
     message: str = ""
