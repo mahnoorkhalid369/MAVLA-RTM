@@ -12,7 +12,7 @@ collision-checked and verified as before).
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Callable
 
 import numpy as np
@@ -31,6 +31,7 @@ class CapabilitySpec:
     failures: str
     verification: str
     implemented: bool = True
+    effect: str = "none"  # none | sensing | object_change (agent/authority.py): what running it may change
 
 
 @dataclass
@@ -40,7 +41,7 @@ class StepResult:
     data: dict = field(default_factory=dict)
 
 
-SPECS: dict[str, CapabilitySpec] = {s.name: s for s in [
+_SPECS = [
     CapabilitySpec("observe", "look at the table now and measure every object", '{"do": "observe"}',
                    "read_only", "cameras streaming", "fresh observation in the task state (facts + Gemma descriptions)",
                    "no frame; no objects measured", "at least one object measured, or reported as none"),
@@ -84,7 +85,10 @@ SPECS: dict[str, CapabilitySpec] = {s.name: s for s in [
                    '{"do": "explore", "object": "<words>", "near": "<words for an object it may be behind, or null>"}', "motion",
                    "nothing held", "wrist observations of hidden regions in the world model; arm back at HOME",
                    "no hidden region / no safe viewpoint / not found", "finding is decided by locate, not by moving"),
-]}
+]
+EFFECT = {"pick": "object_change", "place": "object_change", "pick_place": "object_change", "inspect": "sensing",
+          "explore": "sensing", "return_home": "sensing"}  # everything else: none (read-only)
+SPECS: dict[str, CapabilitySpec] = {s.name: replace(s, effect=EFFECT.get(s.name, "none")) for s in _SPECS}
 
 MOTION = {n for n, s in SPECS.items() if s.safety == "motion"}
 
@@ -259,12 +263,16 @@ def run_locate(ctx: Context, args: dict) -> StepResult:
                             for k in r.candidates)
             return StepResult("ambiguous", f"several objects could be {text!r}: {lst}")
         return StepResult("insufficient_info", f"I do not see {text!r} from the current view")
+    where = _location_check(ctx, r.id, args)  # measured location constraint first: appearance cannot override it
+    if where is not None:
+        return where
     try:
         c = ctx.tools.confirm(ctx.obs, r.id, text)
     except VLMFailure as exc:
         return StepResult("failed", f"could not confirm {text!r}: {exc}")
     g = ctx.obs.measured[r.id]
-    ctx.log("located", text=text, mark=r.id, confirm=c.match, centre=g["centre"])
+    ctx.log("located", text=text, mark=r.id, confirm=c.match, centre=g["centre"],
+            relation=(args or {}).get("relation"), anchor=(args or {}).get("anchor"))
     if c.match != "yes":
         return StepResult("insufficient_info", f"object {r.id} might be {text!r} but the check on its crop said {c.match}")
     return StepResult("completed", f"{text!r} is object {r.id} at x {g['centre'][0] * 1000:+.0f} mm, y {g['centre'][1] * 1000:+.0f} mm "
@@ -272,6 +280,30 @@ def run_locate(ctx: Context, args: dict) -> StepResult:
                                    "[position measured; identity from Gemma, confirmed on its crop]",
                       {"mark": r.id, "bindings": {text: ctx.obs.object_ids.get(r.id)},
                        "evidence": [{"kind": "frame", "id": ctx.obs.frame_id, "mark": r.id}]})
+
+
+def _location_check(ctx: Context, mark: int, args: dict) -> StepResult | None:
+    """The request said WHERE the object is (args relation + anchor, e.g. in the buffer tray): the candidate must
+    satisfy it on the measured geometry (Tools.relation_holds). None = satisfied or no constraint."""
+    rel, anchor = (args or {}).get("relation"), (args or {}).get("anchor")
+    if not (rel and anchor):
+        return None
+    text = (args or {}).get("target", "")
+    try:
+        a = ctx.tools.resolve(ctx.obs, anchor)
+    except VLMFailure as exc:
+        return StepResult("failed", f"could not find {anchor!r} to check where {text!r} is: {exc}")
+    if a.id is None or a.id == mark:
+        return StepResult("insufficient_info", f"I do not see {anchor!r}, so I cannot check that {text!r} is {rel} it")
+    ok = ctx.tools.relation_holds(ctx.obs.measured[mark], ctx.obs.measured[a.id], rel)
+    g, ga = ctx.obs.measured[mark]["centre"], ctx.obs.measured[a.id]["centre"]
+    ctx.log("location_check", text=text, mark=mark, relation=rel, anchor=anchor, anchor_mark=a.id, holds=bool(ok),
+            centre=g, anchor_centre=ga)
+    if ok:
+        return None
+    return StepResult("insufficient_info", f"object {mark} may look like {text!r}, but it is not {rel} {anchor!r} "
+                      f"(measured at x {g[0] * 1000:+.0f}, y {g[1] * 1000:+.0f} mm; {anchor!r} is object {a.id} at "
+                      f"x {ga[0] * 1000:+.0f}, y {ga[1] * 1000:+.0f} mm), so I do not use it")
 
 
 def _find_in(ctx: Context, wobs, text: str) -> StepResult | None:
@@ -319,9 +351,10 @@ def _find_in(ctx: Context, wobs, text: str) -> StepResult | None:
                        "evidence": [{"kind": "frame", "id": wobs.frame_id, "mark": k}]})
 
 
-def _target_mark(ctx: Context, text: str) -> tuple[int | None, StepResult | None]:
-    """Resolve + confirm a described object in the current (table) observation, like locate."""
-    r = run_locate(ctx, {"target": text})
+def _target_mark(ctx: Context, text: str, args: dict | None = None) -> tuple[int | None, StepResult | None]:
+    """Resolve + confirm a described object in the current (table) observation, like locate (with its location
+    constraint, if the request gave one)."""
+    r = run_locate(ctx, {"target": text, "relation": (args or {}).get("relation"), "anchor": (args or {}).get("anchor")})
     if r.outcome != "completed":
         return None, r
     return r.data["mark"], None
@@ -361,7 +394,7 @@ def run_inspect(ctx: Context, args: dict) -> StepResult:
     t, t0 = ctx.tools, time.monotonic()
     if t.world.holding is not None:
         return StepResult("unsafe", "not inspecting while holding an object")
-    mark, fail = _target_mark(ctx, text)
+    mark, fail = _target_mark(ctx, text, args)
     if fail is not None:
         return fail
     g = ctx.obs.measured[mark]

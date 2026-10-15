@@ -22,7 +22,7 @@ STATUSES = ("pending", "running", "completed", "failed", "blocked", "cancelled",
 # step outcome (agent/world_state.OUTCOMES) -> worker status
 STATUS_OF = {"completed": "completed", "insufficient_info": "insufficient_info", "ambiguous": "blocked",
              "unsupported": "blocked", "infeasible": "failed", "unsafe": "failed", "failed": "failed",
-             "cancelled": "cancelled"}
+             "cancelled": "cancelled", "unauthorized": "blocked"}
 
 
 @dataclass
@@ -93,8 +93,22 @@ class WorkerRegistry:
                              [spec.preconditions] if spec else [], spec.effects if spec else "",
                              spec.safety if spec else "read_only", {}, list(depends_on or []))
 
-    def dispatch(self, req: WorkerRequest, ctx) -> WorkerResult:
+    def dispatch(self, req: WorkerRequest, ctx, authority=None) -> WorkerResult:
+        """Run one operation. Authorization comes first: a capability whose effect class (CapabilitySpec.effect)
+        is not granted by the request's authority is refused here, before its executor runs, whatever plan
+        asked for it. authority None = least privilege."""
         w = self.workers[req.worker]
+        spec = self.specs.get(req.capability)
+        effect = getattr(spec, "effect", "object_change")  # unknown -> most restricted
+        grants = tuple(getattr(authority, "grants", None) or ("none", "sensing"))
+        if effect not in grants:
+            why = (f"{req.capability} would change objects ({effect}); the request ("
+                   f"{getattr(authority, 'kind', 'unknown')}) does not ask for that, so it is not authorized")
+            self.log("authorization", task_id=req.task_id, capability=req.capability, effect=effect, grants=list(grants),
+                     allowed=False, reason=why)
+            res = WorkerResult(req.task_id, req.worker, "blocked", "unauthorized", why, {}, confidence="none", failure_reason=why)
+            self.log("worker_result", **{k: v for k, v in asdict(res).items() if k != "data"}, data_keys=[])
+            return res
         w.status, w.current_task = "running", req.task_id
         self.log("delegate", **{k: v for k, v in asdict(req).items() if k not in ("preconditions",)})
         t0 = time.monotonic()

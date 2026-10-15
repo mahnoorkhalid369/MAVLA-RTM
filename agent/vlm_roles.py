@@ -116,8 +116,9 @@ class PlanStep(BaseModel):
     relation: Literal["on", "next_to", "left_of", "right_of", "in_front_of", "behind"] | None = None
     target: str | None = None  # place / pick_place: destination object
     frame: Literal["robot", "camera"] = "robot"
-    object_relation: Literal["next_to", "left_of", "right_of", "in_front_of", "behind", "on"] | None = None
-    object_anchor: str | None = None  # "the <A> that is next to the <B>": object_relation next_to, object_anchor <B>
+    object_relation: Literal["next_to", "left_of", "right_of", "in_front_of", "behind", "on", "in"] | None = None
+    object_anchor: str | None = None  # "the <A> that is next to the <B>": object_relation next_to, object_anchor <B>;
+    # "the <A> in the <B>": object_relation in (inside <B>'s footprint), object_anchor <B>
     question: str | None = None  # answer
     near: str | None = None  # explore: an object the thing may be hidden behind
     goal: str | None = None  # decompose: the goal to plan over the measured scene
@@ -142,8 +143,8 @@ class PlanStep(BaseModel):
         if self.do == "place":
             return {"object": {"text": self.object or "it", "relation": None, "anchor": None}, "relation": self.relation,
                     "reference": {"text": self.target, "relation": None, "anchor": None}, "frame": self.frame}
-        if self.do in ("locate", "inspect"):
-            return {"target": self.object}
+        if self.do in ("locate", "inspect"):  # the location constraint travels with the target (checked on measurements)
+            return {"target": self.object, "relation": self.object_relation, "anchor": self.object_anchor}
         if self.do == "explore":
             return {"target": self.object, "near": self.near}
         if self.do == "answer":
@@ -221,6 +222,18 @@ class Confirmation(BaseModel):
 
 
 HIDING_WORDS = re.compile(r"\b(behind|under|beneath|below|inside)\b", re.I)  # English prepositions of hiding
+# A location phrase in the user's request ("in the buffer tray", "at the front of the incoming rack"): its anchor must
+# survive into the plan's steps (validation only: a missing anchor is rejected and asked again, never invented).
+LOCATION_PHRASE = re.compile(
+    r"\b(?:at the front of|at the back of|in front of|on top of|next to|left of|right of|inside|behind|beside|near|in|on)"
+    r"\s+(?:the|a|an)\s+([a-z0-9][a-z0-9\- ]*?)(?=\s*(?:[,.?!;]|$|\band\b|\bthat\b|\bwhich\b|\bwith\b|\bfrom\b|\bto\b|\bfor\b))",
+    re.I)
+WORKSPACE_WORDS = {"table", "bench", "workspace", "floor", "scene", "work surface"}  # the whole scene, not an anchor
+
+
+def location_anchors(instruction: str) -> list[str]:
+    return [m.group(1).strip().lower() for m in LOCATION_PHRASE.finditer(instruction or "")
+            if m.group(1).strip().lower() not in WORKSPACE_WORDS]
 
 
 class VLMFailure(RuntimeError):
@@ -275,6 +288,7 @@ Examples:
 "is there a <A> left of the <B>?" -> {{"goal": "answer", "steps": [{{"do": "observe"}}, {{"do": "answer", "question": "is there a <A> left of the <B>?"}}], "reason": "look and answer"}}
 "where is the <A>?" -> {{"goal": "find <A>", "steps": [{{"do": "observe"}}, {{"do": "locate", "object": "<A>"}}], "reason": "look and find"}}
 "move closer and inspect the <A>" -> {{"goal": "close look at <A>", "steps": [{{"do": "observe"}}, {{"do": "inspect", "object": "<A>"}}], "reason": "close-up"}}
+"inspect the <A> in the <B>" -> {{"goal": "close look at <A> in <B>", "steps": [{{"do": "observe"}}, {{"do": "inspect", "object": "<A>", "object_relation": "in", "object_anchor": "<B>"}}], "reason": "close-up of the one in <B>"}}
 "find the thing behind the <B>" -> {{"goal": "find what is behind <B>", "steps": [{{"do": "observe"}}, {{"do": "explore", "object": "thing", "near": "<B>"}}, {{"do": "locate", "object": "thing"}}], "reason": "hidden region"}}
 "line up all <A> by size" -> {{"goal": "<A> in a row by size", "steps": [{{"do": "observe"}}, {{"do": "decompose", "goal": "line up all <A> by size"}}], "reason": "depends on the measured objects"}}"""
 
@@ -334,6 +348,20 @@ CONFIRM_PROMPT = """Look at the object at full brightness in this picture (every
 Answer with ONE JSON object only: {{"match": "yes" | "no" | "unsure", "reason": "<short>"}}"""
 
 
+class RequestKind(BaseModel):
+    kind: Literal["question", "description", "action"]
+    evidence: str = ""
+
+
+REQUEST_SYSTEM = """Read the user's request to a robot arm and say what KIND of request it is. Use only the user's words.
+"question": the user wants information (an answer): which, what, how many, where, is there ...
+"description": the user wants the robot to look and report or describe, or to look closer / inspect something.
+"action": the user asks the robot to CHANGE the world: move, pick up, put, place, stack, sort, arrange, hand over objects.
+A question that asks the robot to do something ("can you put the <A> on the <B>?") is an action.
+"evidence": copy, word for word, the part of the request that shows the kind.
+Answer with ONE JSON object only: {"kind": "question" | "description" | "action", "evidence": "<words copied from the request>"}"""
+
+
 class Roles:
     def __init__(self, vlm: VLM, log=None, thinking: bool = False) -> None:
         self.vlm, self.log, self.thinking = vlm, log, thinking
@@ -378,6 +406,13 @@ class Roles:
                                  "unless the user describes where the object to move is now")
         return self._call("parse", TaskSpec, f"Instruction: {instruction}", system=PARSE_SYSTEM, check=check)
 
+    def classify_request(self, instruction: str) -> RequestKind:
+        """What the request asks for (agent/authority.py turns it into permissions). Sees only the user's words."""
+        def check(r: RequestKind):
+            if r.kind == "action" and not r.evidence.strip():
+                raise ValueError("an action needs the user's words that ask for it in evidence")
+        return self._call("request", RequestKind, f"Request: {instruction}", system=REQUEST_SYSTEM, check=check, max_new_tokens=80)
+
     def plan_goal(self, instruction: str, menu: str, max_steps: int = 6, context: str = "") -> GoalPlan:
         """Goal -> capability plan (one call). Validated deterministically: capability names (schema enum), the keys
         each capability needs (placeholder strings like "null" count as missing), step count, consistency rules."""
@@ -408,6 +443,12 @@ class Roles:
                     raise ValueError(f"step {i}: {st.do} needs object")
                 elif st.do == "answer" and not (st.question or "").strip():
                     raise ValueError(f"step {i}: answer needs question")
+            said = " ".join(str(x or "") for st in p.steps for x in (st.object, st.object_anchor, st.target, st.near,
+                                                                    st.question, st.goal)).lower()
+            lost = [a for a in location_anchors(instruction) if a not in said]
+            if lost and p.steps:
+                raise ValueError(f"the user located the object with {lost}: keep it in the step (object_relation + "
+                                 "object_anchor, e.g. \"object_relation\": \"in\", \"object_anchor\": \"" + lost[0] + "\")")
         text = f"{context}\nInstruction: {instruction}" if context else f"Instruction: {instruction}"
         return self._call("plan", GoalPlan, text, system=PLAN_SYSTEM.format(menu=menu), check=check, max_new_tokens=300)
 

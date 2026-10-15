@@ -339,6 +339,13 @@ class Tools:
     def relation_holds(self, target: dict, anchor: dict, relation: str, frame: str = "robot") -> bool:
         """Deterministic check of a relational REFERENCE from measured positions (ARCHITECTURE §3.8)."""
         t, a = np.asarray(target["centre"]), np.asarray(anchor["centre"])
+        if relation == "in":  # inside the anchor's measured top-face rectangle (rack slot, tray), not above its top
+            yaw = np.radians(anchor.get("yaw_deg") or 0.0)
+            d = t[:2] - a[:2]
+            local = np.array([np.cos(yaw) * d[0] + np.sin(yaw) * d[1], -np.sin(yaw) * d[0] + np.cos(yaw) * d[1]])
+            ext = anchor.get("extents") or [anchor["footprint"][0], anchor["footprint"][0]]
+            inside = abs(local[0]) <= ext[0] / 2 + 0.01 and abs(local[1]) <= ext[1] / 2 + 0.01
+            return bool(inside and target["support_z"] <= anchor["top_z"] + 0.01)
         if relation == "on":
             return abs(target["support_z"] - anchor["top_z"]) < 0.01 and np.hypot(*(t[:2] - a[:2])) < max(anchor["footprint"]) / 2
         gap = np.hypot(*(t[:2] - a[:2])) - (max(target["footprint"]) + max(anchor["footprint"])) / 2

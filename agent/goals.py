@@ -152,8 +152,18 @@ class GoalEvaluator:
         return order_pos == order_key, "measured", f"by position {order_pos}, by {by} {order_key}"
 
     def _answered(self, ids, c):
-        a = self.s.hypotheses.get("answers") or []
-        return (bool(a) or None), "model", "answer produced by Gemma from the measured object list (not verified)"
+        """The question got an answer: an answer step's (Gemma, unverified) certain, non-empty answer, or a completed
+        locate (measured). A scene report is NOT an answer; an uncertain answer is not one either."""
+        answers = [a for a in (self.s.hypotheses.get("answers") or []) if str(a.get("answer", "")).strip()]
+        located = [a for a in self.s.actions if a.get("capability") == "locate" and a.get("status") == "completed"]
+        if answers:
+            last = answers[-1]
+            if last.get("certain") is False:
+                return False, "model", f"the answer is not certain: {last.get('answer')!r}"
+            return True, "model", "answer produced by Gemma from the measured object list (not verified)"
+        if located:
+            return True, "measured", "answered by locating the object (measured position)"
+        return False, "measured", "no answer was produced for this question (a scene report is not an answer)"
 
     def _reported(self, ids, c):
         return bool(self.s.facts.get("objects")), "measured", "report lists measured objects"

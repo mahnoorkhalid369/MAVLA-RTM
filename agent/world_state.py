@@ -16,7 +16,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 # Outcome classes for a step or a whole goal (requested distinction; "completed" = verified success)
-OUTCOMES = ("completed", "unsupported", "insufficient_info", "ambiguous", "infeasible", "unsafe", "cancelled", "failed")
+OUTCOMES = ("completed", "unsupported", "insufficient_info", "ambiguous", "infeasible", "unsafe", "cancelled", "failed",
+            "unauthorized")  # unauthorized: the user's request does not permit this effect (agent/authority.py)
 
 
 @dataclass
@@ -51,6 +52,8 @@ class TaskState:
     conditions: list = field(default_factory=list)  # desired final state (agent.goals predicates)
     goal_check: list = field(default_factory=list)  # evaluation of the conditions (satisfied, confidence, evidence)
     attempted: list = field(default_factory=list)  # (capability, args) already tried and failed (no identical retry)
+    authority: dict = field(default_factory=dict)  # RequestAuthority of this instruction (from the user's words only)
+    refused: list = field(default_factory=list)  # steps refused for lack of authority (never executed)
     workers: dict = field(default_factory=dict)  # registry snapshot at the end
     status: str = "running"  # running | completed | failed | cancelled | unsupported
     outcome: str | None = None

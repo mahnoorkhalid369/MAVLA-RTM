@@ -19,6 +19,11 @@ from tests.test_supervisor_goal import GoalTools  # noqa: E402
 PICK = '{"goal": "hold it", "steps": [{"do": "pick", "object": "%s"}]}'
 PLACE = '{"goal": "placed", "steps": [{"do": "place", "object": "it", "relation": "%s", "target": "%s"}]}'
 LOOK = '{"goal": "report", "steps": [{"do": "observe"}, {"do": "describe_scene"}]}'
+# each instruction first gets the request classification (agent/authority.py), then the plan
+REQ_PICK = '{"kind": "action", "evidence": "Pick up"}'
+REQ_PUT = '{"kind": "action", "evidence": "Put it"}'
+REQ_LOOK = '{"kind": "description", "evidence": "Take a look"}'
+REQ_DANCE = '{"kind": "action", "evidence": "Do a dance"}'
 NAMES = {"a": 1, "sample A1": 1, "c": 3, "processing rack": 2}
 
 
@@ -62,7 +67,7 @@ def new_session(monkeypatch, tmp_path):
 
 def test_two_instructions_in_one_session_share_the_referent(new_session):
     make, run = new_session
-    s = make([PICK % "a", PLACE % ("next_to", "c")])
+    s = make([REQ_PICK, PICK % "a", REQ_PUT, PLACE % ("next_to", "c")])
     r1, _ = run(s, "Pick up a.")
     r2, ev = run(s, "Put it beside c.")
     assert (r1["status"], r1["holding"]) == ("COMPLETED", 1)
@@ -76,7 +81,7 @@ def test_two_instructions_in_one_session_share_the_referent(new_session):
 
 def test_pick_sample_a1_then_put_it_in_the_processing_rack(new_session):
     make, run = new_session
-    s = make([PICK % "sample A1", PLACE % ("on", "processing rack")])
+    s = make([REQ_PICK, PICK % "sample A1", REQ_PUT, PLACE % ("on", "processing rack")])
     run(s, "Pick up sample A1.")
     r, ev = run(s, "Put it in the processing rack.")
     assert r["status"] == "COMPLETED" and r["plan"][0]["capability"] == "place"
@@ -87,8 +92,8 @@ def test_pick_sample_a1_then_put_it_in_the_processing_rack(new_session):
 
 def test_a_new_session_does_not_inherit_held_state(new_session):
     make, run = new_session
-    run(make([PICK % "a"]), "Pick up a.")
-    fresh = make([PLACE % ("next_to", "c")])
+    run(make([REQ_PICK, PICK % "a"]), "Pick up a.")
+    fresh = make([REQ_PUT, PLACE % ("next_to", "c")])
     r, ev = run(fresh, "Put it beside c.")
     assert len(SessionTools.instances) == 2 and SessionTools.instances[1].held_object is None
     assert r["status"] == "CANCELLED" and r["outcome"] == "insufficient_info" and SessionTools.instances[1].executed == []
@@ -98,7 +103,7 @@ def test_a_new_session_does_not_inherit_held_state(new_session):
 def test_failed_and_cancelled_instructions_do_not_corrupt_the_session(new_session):
     make, run = new_session
     bad = '{"steps": [{"do": "dance"}]}'  # rejected twice -> the instruction fails at interpretation
-    s = make([PICK % "a", bad, bad, PLACE % ("next_to", "zz"), PLACE % ("next_to", "c")])
+    s = make([REQ_PICK, PICK % "a", REQ_DANCE, bad, bad, REQ_PUT, PLACE % ("next_to", "zz"), REQ_PUT, PLACE % ("next_to", "c")])
     run(s, "Pick up a.")
     r_fail, _ = run(s, "Do a dance.")
     t = SessionTools.instances[0]
@@ -113,7 +118,7 @@ def test_failed_and_cancelled_instructions_do_not_corrupt_the_session(new_sessio
 
 def test_goal_conditions_do_not_leak_into_the_next_instruction(new_session):
     make, run = new_session
-    s = make([PICK % "a", LOOK])
+    s = make([REQ_PICK, PICK % "a", REQ_LOOK, LOOK])
     r1, _ = run(s, "Pick up a.")
     r2, _ = run(s, "Take a look at the table.")
     assert [c["pred"] for c in r1["conditions"]] == ["holding"]
@@ -125,7 +130,7 @@ def test_a_dropped_object_is_not_trusted_as_held(new_session):
     """Remembered 'held' but the fingers are open at the next instruction: the claim is dropped, the object's pose
     is unknown, and no place motion runs."""
     make, run = new_session
-    s = make([PICK % "a", PLACE % ("next_to", "c")])
+    s = make([REQ_PICK, PICK % "a", REQ_PUT, PLACE % ("next_to", "c")])
     run(s, "Pick up a.")
     t = SessionTools.instances[0]
     t.contact, n = [False], len(t.executed)
@@ -138,7 +143,7 @@ def test_a_dropped_object_is_not_trusted_as_held(new_session):
 
 def test_losing_the_object_during_the_instruction_blocks_the_place(new_session):
     make, run = new_session
-    s = make([PICK % "a", PLACE % ("next_to", "c")])
+    s = make([REQ_PICK, PICK % "a", REQ_PUT, PLACE % ("next_to", "c")])
     run(s, "Pick up a.")
     t = SessionTools.instances[0]
     t.contact, n = [True, False], len(t.executed)  # verified at the start, gone by the place step

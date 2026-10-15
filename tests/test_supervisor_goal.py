@@ -53,7 +53,11 @@ class GoalTools(StubTools):
             if isinstance(p, Exception):
                 raise p
             return p
-        self.roles = SimpleNamespace(plan_goal=plan_goal, answer=lambda q, facts, ids: answer or SceneAnswer(answer="two", object_ids=[1]))
+        from agent.vlm_roles import RequestKind
+        # the request classifier (agent/authority.py): tests set request_kind; "action" grants every effect
+        self.request_kind = "action"
+        self.roles = SimpleNamespace(plan_goal=plan_goal, answer=lambda q, facts, ids: answer or SceneAnswer(answer="two", object_ids=[1]),
+                                     classify_request=lambda text: RequestKind(kind=tools.request_kind, evidence=text))
 
     def execute(self, steps, label):
         self.motion_count += 1

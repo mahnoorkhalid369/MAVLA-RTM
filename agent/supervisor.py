@@ -29,6 +29,7 @@ from typing import TypedDict
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, StateGraph
 
+from agent import authority as authority_mod
 from agent import capabilities as caps
 from agent.config import Budgets
 from agent.eventlog import EventLog
@@ -57,11 +58,13 @@ def achieves(step_cap: str, failed_cap: str) -> bool:
 CONSUMERS = {"describe_scene", "answer", "locate", "inspect", "pick_place", "pick", "place", "explore", "decompose"}
 
 
-def complete_plan(plan, instruction: str) -> list[str]:
-    """Deterministic, logged completions of the planner's output (generic rules, not command templates)."""
+def complete_plan(plan, instruction: str, kind: str | None = None) -> list[str]:
+    """Deterministic, logged completions of the planner's output (generic rules, not command templates).
+    kind: the request kind from agent/authority.py ("question" needs an answering step: a scene report is not one)."""
     from agent.vlm_roles import PlanStep
     applied = []
-    if instruction.strip().endswith("?") and not {"answer", "locate", "describe_scene"} & {s.do for s in plan.steps}:
+    answering = {"answer", "locate"} if kind == "question" else {"answer", "locate", "describe_scene"}
+    if (kind == "question" or instruction.strip().endswith("?")) and not answering & {s.do for s in plan.steps}:
         plan.steps.append(PlanStep(do="answer", question=instruction.strip()))
         applied.append("question without an answer step -> answer")
     for i, st in enumerate(list(plan.steps)):  # exploring is never finding: an explore must be followed by locate
@@ -97,6 +100,7 @@ class GoalSupervisor:
         self.budgets = budgets or Budgets()
         self.responder = responder
         self.ts: TaskState | None = None
+        self.authority = authority_mod.least_privilege("not classified yet")
         self.ctx: caps.Context | None = None
         self.executed = 0
         self.failed_motion = 0
@@ -117,8 +121,9 @@ class GoalSupervisor:
 
     # ----------------------------------------------------------------------------------- workers
     def _executors(self) -> dict:
-        def later_manip(req):
-            return any(s.capability in MANIPULATION for s in self.ts.remaining(self.current))
+        def later_manip(req):  # only manipulation this request authorizes counts (no parking for refused steps)
+            return any(s.capability in MANIPULATION and self.authority.allows(caps.SPECS[s.capability].effect)
+                       for s in self.ts.remaining(self.current))
 
         def last_motion(req):
             return not any(s.capability in MOTION for s in self.ts.remaining(self.current))
@@ -179,10 +184,14 @@ class GoalSupervisor:
         return new
 
     def _refresh_conditions(self) -> None:
+        request = [c for c in self.ts.conditions if c.get("source") == "request"]  # from the user's request: always kept
         explicit = [c for c in self.ts.conditions if c.get("source") == "explicit"]
-        live = [(s.capability, s.args) for s in self.ts.plan if s.status not in ("skipped", "replaced")
+        live = [(s.capability, s.args) for s in self.ts.plan if s.status not in ("skipped", "replaced", "refused")
                 and s.capability not in ("observe", "decompose")]
-        self.ts.conditions = explicit or [{**c, "source": "derived"} for c in derive_conditions(live)]
+        derived = [{**c, "source": "derived"} for c in derive_conditions(live)]
+        if any(c["pred"] == "answered" for c in request):  # the request's own question already stands for the answer
+            derived = [c for c in derived if c["pred"] != "answered"]
+        self.ts.conditions = request + (explicit or derived)
 
     # ------------------------------------------------------------------------- state-aware binding
     def _bind_refs(self, step: Step) -> str | None:
@@ -210,12 +219,17 @@ class GoalSupervisor:
 
     # ----------------------------------------------------------------------------------- states
     def _interpreting(self, state) -> dict:
+        # authority first, from the request alone; no plan (Gemma's or decomposed) can change it afterwards
+        self.authority = authority_mod.classify(state["instruction"], self.tools.roles)
+        self.ts.authority = self.authority.to_dict()
+        self.log("authority", request_kind=self.authority.kind, grants=list(self.authority.grants),
+                 evidence=self.authority.evidence, source=self.authority.source, note=self.authority.note)
         try:
             plan = self.tools.roles.plan_goal(state["instruction"], caps.planner_menu(), context=self._context())
         except VLMFailure as exc:
             return self._finish("FAILED", "failed", f"I could not turn the instruction into steps I can do ({exc}). "
                                 + self._capabilities_line())
-        applied = complete_plan(plan, state["instruction"])
+        applied = complete_plan(plan, state["instruction"], self.authority.kind)
         if applied:
             self.log("plan_completed", rules=applied)
         self.ts.goal, self.ts.success_condition = plan.goal, plan.success
@@ -223,6 +237,8 @@ class GoalSupervisor:
             return self._finish("UNSUPPORTED", "unsupported", f"I cannot do that with my current capabilities: "
                                 f"{plan.reason or 'no matching capability'}. " + self._capabilities_line())
         self._add_steps([(st.capability, st.args) for st in plan.steps], "planner")
+        if self.authority.kind == "question":  # the goal of a question is its answer (a report alone is not one)
+            self.ts.conditions = [{"pred": "answered", "args": [state["instruction"]], "source": "request"}]
         self._refresh_conditions()
         self.log("goal_conditions", goal=plan.goal, conditions=self.ts.conditions)
         return {"next": "DISPATCHING"}
@@ -269,7 +285,7 @@ class GoalSupervisor:
         self.log("step", event="start", index=step.index, capability=step.capability, args=step.args,
                  safety=req.safety, worker=req.worker, task_id=req.task_id)
         t0 = time.monotonic()
-        res = self.reg.dispatch(req, self.ctx)
+        res = self.reg.dispatch(req, self.ctx, self.authority)
         step.status = "done" if res.status == "completed" else "failed"
         step.outcome, step.summary, step.seconds = res.outcome, res.summary, round(time.monotonic() - t0, 1)
         step.result = {k: v for k, v in asdict(res).items() if k != "data"}
@@ -289,8 +305,15 @@ class GoalSupervisor:
         data = res.data if res is not None else {}
         if step.outcome == "completed":
             if step.capability == "decompose":  # planning worker returned concrete steps + final conditions
-                self._add_steps(data.get("steps", []), "decomposition", after=step)
-                explicit = [{**c, "source": "explicit"} for c in data.get("conditions", [])]
+                steps = data.get("steps", [])
+                allowed = [(c, a) for c, a in steps if self.authority.allows(caps.SPECS[c].effect)]
+                refused = [(c, a) for c, a in steps if (c, a) not in allowed]
+                if refused:  # a decomposition cannot add effects the user did not ask for
+                    self.log("authorization", origin="decomposition", allowed=False, refused=[c for c, _ in refused],
+                             reason=f"the request ({self.authority.kind}) does not authorize changing objects")
+                    self.ts.refused += [{"capability": c, "args": a, "origin": "decomposition"} for c, a in refused]
+                self._add_steps(allowed, "decomposition", after=step)
+                explicit = [{**c, "source": "explicit"} for c in data.get("conditions", [])] if not refused else []
                 if explicit:
                     self.ts.conditions = explicit
                 else:
@@ -304,6 +327,15 @@ class GoalSupervisor:
                                            f"{['#%d' % i for i in ids]}, then answer again")
                 self._add_steps([("inspect", {"target": f"#{i}"}) for i in ids] + [("answer", dict(step.args))],
                                 "subtask policy", after=step)
+            return {"next": "DISPATCHING"}
+        if step.outcome == "unauthorized":  # refused before execution: drop it (and later steps of the same kind), go on
+            step.status = "refused"
+            self.ts.refused.append({"capability": step.capability, "args": step.args, "origin": step.origin})
+            for s in self.ts.remaining(step):
+                if not self.authority.allows(caps.SPECS[s.capability].effect):
+                    s.status = "refused"
+                    self.ts.refused.append({"capability": s.capability, "args": s.args, "origin": s.origin})
+            self._refresh_conditions()
             return {"next": "DISPATCHING"}
         for s in self.ts.remaining(step):  # nothing after a failed step runs on stale assumptions (may be re-added)
             s.status = "skipped"
@@ -363,7 +395,7 @@ class GoalSupervisor:
     def _verifying_goal(self, state) -> dict:
         """The original objective is the final authority: every desired-final-state condition is evaluated over
         measured state (Gemma answers count only as 'model', never as verified)."""
-        steps = [s for s in self.ts.plan if s.status not in ("skipped", "replaced")]
+        steps = [s for s in self.ts.plan if s.status not in ("skipped", "replaced", "refused")]
         if not steps or not all(s.status == "done" and s.outcome == "completed" for s in steps):
             return self._finish("FAILED", "failed", "not every step was completed" + self._done_so_far())
         for r in (s for s in self.ts.plan if s.status == "replaced"):  # a replaced step's objective must be achieved later
@@ -388,7 +420,10 @@ class GoalSupervisor:
             return self._finish("FAILED", "insufficient_info", f"The steps ran, but the evidence does not show the goal: "
                                 f"{fmt(unknown)}.\n{summary}")
         model = [r for r in results if r.confidence == "model"]
-        return self._finish("COMPLETED", "completed", summary + (" (answer from Gemma, not independently verified)" if model else ""))
+        refused = (f" I did not {', '.join(sorted({r['capability'] for r in self.ts.refused}))}: your request did not ask me to "
+                   "change any objects." if self.ts.refused else "")
+        return self._finish("COMPLETED", "completed", summary + (" (answer from Gemma, not independently verified)" if model else "")
+                            + refused)
 
     @staticmethod
     def _result_message(steps) -> str:
@@ -422,7 +457,8 @@ class GoalSupervisor:
                   "plan": [{"index": s.index, "capability": s.capability, "args": s.args, "worker": s.worker, "status": s.status,
                             "outcome": s.outcome, "seconds": s.seconds, "origin": s.origin} for s in self.ts.plan],
                   "verifications": self.ts.verified, "questions": self.ts.questions, "replans": self.ts.replans,
-                  "holding": self.tools.held_object, "timeline": final["timeline"],
+                  "holding": self.tools.held_object, "timeline": final["timeline"], "authority": self.ts.authority,
+                  "refused": self.ts.refused,
                   "failure": None if status == "COMPLETED" else {"cls": self.ts.outcome, "reason": self.ts.message}}
         self.log("report", status=status, message=self.ts.message)
         return report

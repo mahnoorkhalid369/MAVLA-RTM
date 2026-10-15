@@ -43,10 +43,14 @@ def test_registry_routes_capabilities_to_workers_and_wraps_results():
     assert not reg.snapshot()["perception"]["can_move_robot"]
     ok = reg.dispatch(reg.request("g", "locate", {"target": "x"}), SimpleNamespace())
     assert (ok.task_id, ok.status, ok.data["bindings"]) == ("t1", "completed", {"x": 4})
-    bad = reg.dispatch(reg.request("g", "pick", {}), SimpleNamespace())  # a crash is a failure, never a success
+    from agent.authority import from_classification
+    blocked = reg.dispatch(reg.request("g", "pick", {}), SimpleNamespace())  # no authority given: least privilege
+    assert (blocked.status, blocked.outcome) == ("blocked", "unauthorized")
+    act = from_classification("pick up x", "action", "pick up x")
+    bad = reg.dispatch(reg.request("g", "pick", {}), SimpleNamespace(), act)  # a crash is a failure, never a success
     assert bad.status == "failed" and "ZeroDivisionError" in bad.failure_reason
     assert reg.snapshot()["manipulation"]["status"] == "failed"
-    assert [k for k, _ in log] == ["delegate", "worker_result"] * 2
+    assert [k for k, _ in log] == ["delegate", "worker_result", "authorization", "worker_result", "delegate", "worker_result"]
 
 
 # ---------------------------------------------------------------------------------------------- goals
