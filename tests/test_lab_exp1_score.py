@@ -19,8 +19,8 @@ def fake_run(tmp_path):
             x, y, z = o["spawn_pose"]["xyz"]
             h = o["dimensions"]["height"]
             objs.append({"mark": k, "world_id": k + world_offset, "centre_m": [x + 0.004, y, z + h / 2], "height_m": h})
-            descs[str(k)] = {"name": "test tube" if o["attributes"]["container"] == "tube" else "vial",
-                             "colour": o["attributes"]["cap_colour"] if k % 2 else "grey"}
+            descs[str(k + world_offset)] = {"name": "test tube" if o["attributes"]["container"] == "tube" else "vial",
+                                            "colour": o["attributes"]["cap_colour"] if k % 2 else "grey"}  # by world id
         fx = next(f for f in meta["fixtures"] if f["id"] == "inspection_station")
         objs.append({"mark": 99, "world_id": 99, "centre_m": [fx["pos"][0], fx["pos"][1], 0.006], "height_m": 0.012})
         st = {"facts": {"camera": "table", "objects": objs}, "hypotheses": {"descriptions": descs}}
@@ -58,3 +58,25 @@ def test_scorer_identity_is_stable_when_world_ids_repeat(tmp_path):
     (tmp_path / "03" / "task_state.json").unlink()  # only 01 and 02 observe the table
     rep = score(tmp_path, meta, truth)
     assert rep["summary"]["identity_stable"] == f"{len(gt) - 1}/{len(gt) - 1}"
+
+
+def test_descriptions_are_looked_up_by_world_id_not_by_mark(tmp_path):
+    """Regression (Experiment 1 erratum): world ids differ from marks (a fixture seen as two masks shares one world
+    id, so every later mark is shifted). Descriptions are stored by world id; reading them by mark misattributes."""
+    meta = generate("laboratory", "easy", 42).metadata()
+    gt = [o for o in meta["objects"] if o["category"] in ("sample_tube", "sample_vial")][:2]
+    truth = {"sim_time": 3.0, "objects": {o["id"]: {"position": o["spawn_pose"]["xyz"], "quat_wxyz": [1, 0, 0, 0]} for o in gt}}
+    d = tmp_path / "01"
+    d.mkdir()
+    objs, descs = [], {}
+    for k, o in enumerate(gt, 1):
+        x, y, z = o["spawn_pose"]["xyz"]
+        objs.append({"mark": k, "world_id": k + 10, "centre_m": [x, y, z + 0.05], "height_m": 0.1})
+        descs[str(k + 10)] = {"name": o["attributes"]["container"], "colour": o["attributes"]["cap_colour"]}  # correct one
+        descs[str(k)] = {"name": "board", "colour": "nothing like it"}  # what a mark-keyed lookup would wrongly read
+    (d / "task_state.json").write_text(json.dumps({"facts": {"camera": "table", "objects": objs},
+                                                   "hypotheses": {"descriptions": descs}}))
+    (d / "events.jsonl").write_text("")
+    (d / "result.json").write_text(json.dumps({"status": "COMPLETED", "seconds": 1.0}))
+    rep = score(tmp_path, meta, truth)
+    assert rep["summary"]["cap_colour_named"] == "2/2" and rep["summary"]["type_named"] == "2/2"

@@ -109,7 +109,8 @@ def score(run: Path, meta: dict, truth: dict) -> dict:
                 world_ids[gid][d.name] = o.get("world_id")
                 top_true = pos[gid][2] + gt[gid]["dimensions"]["height"]
                 top_meas = o["centre_m"][2] + o["height_m"] / 2
-                desc = descs.get(str(o["mark"])) or {}
+                # TaskState.record_observation stores descriptions by WORLD id (not by image mark)
+                desc = descs.get(str(o.get("world_id"))) or {}
                 text = " ".join(str(desc.get(k, "")) for k in ("name", "colour", "shape", "material")).lower()
                 pc = rep["per_container"][gid].setdefault("observations", {})
                 pc[d.name] = {"xy_error_mm": round(dist * 1000, 1), "top_error_mm": round((top_meas - top_true) * 1000, 1),
@@ -119,7 +120,7 @@ def score(run: Path, meta: dict, truth: dict) -> dict:
             fps = [o for o in objs if str(o["mark"]) not in matched_marks]
             inst["unmatched_measurements"] = [{"mark": o["mark"], "centre_mm": [round(v * 1000) for v in o["centre_m"]],
                                                "fixture": fixture_at(meta, o["centre_m"][:2]),
-                                               "gemma": (descs.get(str(o["mark"])) or {}).get("name")} for o in fps]
+                                               "gemma": (descs.get(str(o.get("world_id"))) or {}).get("name")} for o in fps]
         for e in ev:
             if e["kind"] == "inspection":
                 wxy = (e.get("wrist_centre") or e.get("table_centre") or [None, None])[:2]
