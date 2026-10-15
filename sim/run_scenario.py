@@ -1,10 +1,17 @@
-"""Live simulation of an ACTIVE-PERCEPTION TEST SCENE (sim/scenarios/<name>.json), without changing the
-frozen default scene: fills sim.scene_objects.OBJECTS (the dict the frozen sim/scene.py and sim/run_live.py
-read) with the scenario's objects before the frozen run_live starts, and replaces placeholder prims by YCB
-meshes after the frozen setup_scene. Ground truth for every scenario object comes from run_live's own
+"""Live simulation of a TEST SCENE without changing the frozen default scene: fills sim.scene_objects.OBJECTS
+(the dict the frozen sim/scene.py and sim/run_live.py read) before the frozen run_live starts, and finishes the
+scene after the frozen setup_scene. Ground truth for every scenario object comes from run_live's own
 /sim/ground_truth/objects publisher (evaluation only).
 
+Two kinds of scenes:
+  JSON scenes (sim/scenarios/<name>.json, active perception):  --scenario ap_occlusion
+  scenario library (sim/scenario_lib, procedural workstations): --scenario laboratory --difficulty medium --seed 42
+
     python -m sim.run_scenario --scenario ap_occlusion [--headless]
+    python -m sim.run_scenario --scenario laboratory --difficulty hard --seed 7 [--headless]
+
+Library scenes also write their ground-truth metadata to out/scenarios/live/<id>_<difficulty>_s<seed>.json
+(for evaluation; the agent never reads it).
 """
 
 from __future__ import annotations
@@ -20,14 +27,30 @@ ROOT = Path(__file__).resolve().parents[1]
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--scenario", required=True)
+ap.add_argument("--difficulty", default="easy", help="library scenes: easy | medium | hard")
+ap.add_argument("--seed", type=int, default=0, help="library scenes: random seed (deterministic layout)")
 args, rest = ap.parse_known_args()
-SPEC = json.loads((ROOT / "sim" / "scenarios" / f"{args.scenario}.json").read_text())
-ASSETS = json.loads((ROOT / "data" / "assets" / "asset_dims.json").read_text())
+sys.path.insert(0, str(ROOT))
+from sim.scenario_lib import SCENARIOS  # noqa: E402  (pure data)
+
+LIBRARY = args.scenario in SCENARIOS
+SPEC = {"objects": [], "name": args.scenario} if LIBRARY else json.loads((ROOT / "sim" / "scenarios" / f"{args.scenario}.json").read_text())
+ASSETS = json.loads((ROOT / "data" / "assets" / "asset_dims.json").read_text()) if not LIBRARY else {}
 
 import sim.scene_objects as so  # noqa: E402  (pure data; no Isaac import)
 
 YCB = {}
+SC = None
 so.OBJECTS.clear()
+if LIBRARY:
+    from sim.scenario_lib import generate
+    from sim.scenario_lib.build import install
+
+    SC = generate(args.scenario, args.difficulty, args.seed)
+    install(SC)
+    meta = ROOT / "out" / "scenarios" / "live" / f"{SC.id}_{SC.difficulty}_s{SC.seed}.json"
+    meta.parent.mkdir(parents=True, exist_ok=True)
+    meta.write_text(json.dumps(SC.metadata(), indent=1))
 for o in SPEC["objects"]:
     if o["shape"] == "ycb":
         sx, sy_up, sz = ASSETS[o["asset"]]["size"]  # Axis_Aligned YCB: +Y is up
@@ -47,6 +70,12 @@ _original_setup = rl.setup_scene
 
 async def setup_with_meshes(*a, **k):
     await _original_setup(*a, **k)
+    if SC is not None:
+        from sim.scenario_lib.build import populate
+        p = populate(SC)
+        print(f"[run_scenario] {SC.id} ({SC.difficulty}, seed {SC.seed}): {len(p['objects'])} objects, "
+              f"{len(p['fixtures'])} fixtures, {len(p['decor'])} decor groups", flush=True)
+        return
     import isaacsim.core.experimental.utils.stage as stage_utils
     from pxr import Gf, PhysxSchema, UsdGeom, UsdPhysics
 
