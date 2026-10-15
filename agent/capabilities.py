@@ -110,10 +110,25 @@ class Context:
 
 
 def _failure_outcome(cls: str | None, reason: str) -> str:
+    """PickPlaceWorkflow failure class -> supervisor outcome. The supervisor replans only "failed" and
+    "insufficient_info"; "infeasible", "unsafe", "cancelled" and "unsupported" end the goal without new motion.
+      infeasible  deterministic planning error (Tools.deterministic: out of reach, too wide, no free spot, ...):
+                  the same action can never succeed, so replanning it would only cost a Gemma call
+      planning    a non-deterministic planning error left after the workflow's own re-observation retries (e.g. a
+                  collision with the current layout): recoverable, an alternative action may work -> "failed"
+      home        the manipulation ran but HOME was not attempted / not reached: stop; replanning would command
+                  new manipulation from an unverified pose -> "unsafe"
+      execution   "unsafe" when the safety layer rejected a trajectory, otherwise "failed" (e.g. controller timeout,
+                  object lost in transport)
+      grasp, placement, perception, understanding -> "failed" (recoverable), except perception that found nothing
+      asked       the person cancelled, did not answer, or rejected the candidate -> "cancelled"
+    """
     if cls in ("asked",):
         return "cancelled"
-    if cls == "planning":
+    if cls == "infeasible":
         return "infeasible"
+    if cls == "home":
+        return "unsafe"
     if cls == "execution" and "safety" in (reason or "").lower():
         return "unsafe"
     if cls == "perception" and ("nothing matches" in reason or "no objects" in reason):

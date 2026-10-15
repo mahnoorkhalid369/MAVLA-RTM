@@ -24,10 +24,19 @@ def plan(*steps, reason=""):
 
 
 class GoalTools(StubTools):
-    """StubTools + what the goal supervisor needs; plans are scripted."""
+    """StubTools + what the goal supervisor needs; plans are scripted. Relations are judged with the real
+    Tools.relation_holds geometry; placing a held object follows the requested relation and reference
+    (misplace=True keeps the old fixed spot on top of object 2: a wrong placement for negative tests)."""
 
-    def __init__(self, plans, answer=None, **kw):
+    from agent.tools import Tools as _T
+    relation_holds = _T.relation_holds
+    _direction = _T._direction
+    del _T
+
+    def __init__(self, plans, answer=None, misplace=False, **kw):
         super().__init__(**kw)
+        from agent.config import Relations
+        self.rel, self.misplace = Relations(), misplace
         self.plans, self.plan_calls, self.perceived, self.parks = list(plans), [], 0, 0
         self.motion_count, self.view_cleared_at = 0, -1
         tools = self
@@ -43,6 +52,22 @@ class GoalTools(StubTools):
     def execute(self, steps, label):
         self.motion_count += 1
         return super().execute(steps, label)
+
+    def plan_place_held(self, rel, rid, frame, q):
+        """The held object goes where the relation says, from the reference's measured geometry: on its top, or
+        beside it (3 cm gap) in the relation's direction (next_to: the reference's right)."""
+        p = super().plan_place_held(rel, rid, frame, q)
+        if self.misplace:
+            return p
+        g, h = self.world.objects[rid].geometry, self.held_geom
+        if rel == "on":
+            xy, top = np.asarray(g["centre"][:2]), g["top_z"] + h["height"]
+        else:
+            d = np.array([1.0, 0.0]) if rel == "next_to" else self._direction(rel, np.asarray(g["centre"][:2]), frame)
+            xy = np.asarray(g["centre"][:2]) + d * (max(g["footprint"]) / 2 + max(h["footprint"]) / 2 + 0.03)
+            top = h["height"]
+        p.target_centre, p.target_top = [float(xy[0]), float(xy[1]), top - h["height"] / 2], float(top)
+        return p
 
     def verify_placement(self, plan):
         v = super().verify_placement(plan)

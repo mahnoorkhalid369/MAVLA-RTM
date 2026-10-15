@@ -100,6 +100,16 @@ def test_follow_up_pronoun_binds_to_the_held_object_and_places_it(tmp_path):
     assert all(g["satisfied"] for g in r["goal_check"])
 
 
+def test_placing_far_from_the_reference_is_not_success(tmp_path):
+    """Negative: the held object ends 680 mm from c (wrong spot): measured goal check says no."""
+    t = session([plan(PICK_A), plan(("place", {"object": "it", "relation": "next_to", "target": "c"}))], misplace=True)
+    run_in(tmp_path, "1", t, instruction="Pick up a.")
+    r, _ = run_in(tmp_path, "2", t, instruction="Put it beside c.")
+    assert r["status"] == "FAILED" and "goal is not met" in r["message"] and "did not report success" in r["message"]
+    nt = next(g for g in r["goal_check"] if g["condition"]["pred"] == "next_to")
+    assert nt["satisfied"] is False and nt["confidence"] == "measured" and "680 mm apart" in nt["evidence"]
+
+
 def test_pick_place_of_the_held_object_becomes_place(tmp_path):
     t = session([plan(PICK_A), plan(("pick_place", {"object": "it", "relation": "on", "target": "b"}))])
     run_in(tmp_path, "1", t)
@@ -128,6 +138,33 @@ def test_pronoun_with_nothing_to_refer_to_asks_for_the_object(tmp_path):
     t = session([plan(("place", {"object": "it", "relation": "on", "target": "b"}))])
     r, _ = run_in(tmp_path, "1", t)
     assert r["status"] == "CANCELLED" and r["outcome"] == "insufficient_info" and t.executed == []
+
+
+def test_failure_classes_map_to_replannable_or_final_outcomes():
+    from agent.capabilities import _failure_outcome as f
+    final = {"infeasible", "unsafe", "cancelled", "unsupported"}
+    assert f("infeasible", "carry above target: out of reach") == "infeasible"
+    assert f("planning", "lift: collision, held with tube_3") == "failed"  # may change with new observations
+    assert f("home", "HOME not reached: max joint error 2.1 deg") == "unsafe"  # no new motion from an unverified pose
+    assert f("execution", "x: safety layer rejected the trajectory: joint limit") == "unsafe"
+    assert f("execution", "x: did not reach the goal: 3.00 deg off (controller timeout)") == "failed"
+    assert f("asked", "no answer within 120 s") == "cancelled"
+    assert f("perception", "nothing matches 'zz'") == "insufficient_info"
+    assert {f(c, "r") for c in ("grasp", "placement", "understanding", "perception", None)} == {"failed"}
+    assert not {f(c, "r") for c in ("planning", "grasp", "placement")} & final
+
+
+def test_nondeterministic_planning_failure_is_still_replanned(tmp_path, monkeypatch):
+    """Useful replanning is kept: a collision-type planning error (not deterministic) gets one replan."""
+    from control.motion import PlanningError
+    t = session([plan(PICK_A), plan(PICK_A)])
+
+    def collides(*a, **k):
+        raise PlanningError("descend to grasp: collision, pads with tube_3 (0.4 mm)")
+    monkeypatch.setattr(t, "plan_pick", collides)
+    r, ev = run_in(tmp_path, "1", t)
+    assert r["status"] == "FAILED" and r["replans"] == 1 and len(t.plan_calls) == 2 and t.executed == []
+    assert [e["accepted"] for e in ev if e["kind"] == "replan"] == [False]  # same step, unchanged situation
 
 
 def test_deterministic_infeasibility_is_not_replanned(tmp_path, monkeypatch):
