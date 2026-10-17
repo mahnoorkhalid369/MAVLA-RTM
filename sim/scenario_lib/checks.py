@@ -1,7 +1,7 @@
 """Offline design checks of a generated scenario (no simulator): interpenetration at spawn, workspace and
 keep-clear zones, table-camera visibility of each object's top (ray casting against every collider AND the robot
 at HOME), top-down grasp and placement feasibility with the project's own planner + collision checker (control/,
-unchanged), and wrist-camera viewpoint feasibility with the existing viewpoint planner (agent/exploration.py,
+unchanged), and wrist-camera viewpoint feasibility with the existing viewpoint planner (perception/viewpoints.py,
 unchanged, used read-only).
 
 Intent rules (problems if violated): an object the table camera cannot see at all must have role "occluded";
@@ -139,7 +139,7 @@ def placement_feasibility(sc: Scenario, yaws=(0.0, 90.0)) -> dict:
 def view_feasibility(sc: Scenario, targets: dict) -> dict:
     """Wrist-camera access: targets = {name: world point}; the existing viewpoint planner (camera look-at IK,
     line of sight clear of every collider, collision-checked path from HOME) must find a viewpoint."""
-    from agent.exploration import ViewpointPlanner
+    from perception.viewpoints import ViewpointPlanner
     from control.collision import Box
     from control.robot import ARM_HOME
 

@@ -18,12 +18,12 @@ pytest.importorskip("langgraph")
 from tests.support.fakes import StubTools, geom  # noqa: E402,F401  (shared fakes; other test modules import them from tests.support)
 from tests.support.runners import TASK, run_workflow as run  # noqa: E402,F401
 
-from agent.geometry import measure  # noqa: E402
+from perception.geometry import measure  # noqa: E402
 from agent.eventlog import EventLog  # noqa: E402
 from agent.pick_place import PickPlaceWorkflow  # noqa: E402
 from agent.tools import Tools  # noqa: E402
 from agent.vlm_roles import Roles, RecordedVLM, VLMFailure  # noqa: E402
-from agent.world import WorldModel  # noqa: E402
+from perception.world_model import WorldModel  # noqa: E402
 from control.motion import PlanningError  # noqa: E402
 from control.robot import table_camera_pose  # noqa: E402
 
@@ -240,7 +240,7 @@ def test_park_pose_choice_counts_blocked_camera_rays():
 
 
 def test_describe_one_per_isolated_crop():
-    from agent.somark import isolate
+    from perception.somark import isolate
     rgb = np.full((100, 100, 3), 200, np.uint8)
     m = np.zeros((100, 100), bool)
     m[40:60, 40:60] = True

@@ -127,7 +127,7 @@ def main() -> int:
     from agent.vlm_roles import GemmaVLM
     print("[agent] loading Gemma ...", flush=True)
     vlm = GemmaVLM()
-    from agent.detector import YoloDetector
+    from perception.detector import YoloDetector
     print("[agent] loading the detector ...", flush=True)
     detector = YoloDetector(a.weights, a.imgsz, a.conf)
     print("[agent] models loaded", flush=True)

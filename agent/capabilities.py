@@ -375,7 +375,7 @@ def _wrist_observation(ctx: Context, target_world: np.ndarray, target_id: int | 
     mark = near[0] if near and np.hypot(*(np.array(wobs.measured[near[0]]["centre"][:2]) - target_world[:2])) < 0.06 else None
     desc = None
     if mark is not None:
-        crop = __import__("agent.somark", fromlist=["isolate"]).isolate(wobs.rgb, wobs.marks[mark])
+        crop = __import__("perception.somark", fromlist=["isolate"]).isolate(wobs.rgb, wobs.marks[mark])
         desc = t.roles.describe_one(crop).model_dump()
         wobs.descriptions[mark] = desc
         if assoc[mark]["world_id"] is not None:
@@ -386,7 +386,7 @@ def _wrist_observation(ctx: Context, target_world: np.ndarray, target_id: int | 
 def run_inspect(ctx: Context, args: dict) -> StepResult:
     """Closer look at one described, visible object with the wrist camera. Read-only for the scene; moves
     the arm (collision-checked) and returns HOME (verified) at the end."""
-    from agent.exploration import ViewpointPlanner
+    from perception.viewpoints import ViewpointPlanner
     from control.kinematics import Kinematics
     from control.motion import joint_move
     from control.robot import ARM_SPEED
@@ -454,7 +454,7 @@ def run_explore(ctx: Context, args: dict) -> StepResult:
     object named in `near` if given, else the largest shadows), at most MAX_EXPLORE_VIEWPOINTS collision-checked
     wrist viewpoints, then HOME. Moving the camera is not finding: the result says what was newly seen; the
     supervisor decides the goal with locate."""
-    from agent.exploration import ViewpointPlanner, shadow_points
+    from perception.viewpoints import ViewpointPlanner, shadow_points
     from control.kinematics import Kinematics
     from control.motion import joint_move
     from control.robot import ARM_SPEED
@@ -479,7 +479,7 @@ def run_explore(ctx: Context, args: dict) -> StepResult:
     for point, behind_id in regions:
         q0 = t.bridge.q()
         tp = time.monotonic()
-        from agent.exploration import REGION_HEIGHT, REGION_RADIUS
+        from perception.viewpoints import REGION_HEIGHT, REGION_RADIUS
         plan = vp.plan(point, q0, t.obstacles(), region_radius=REGION_RADIUS, region_height=REGION_HEIGHT,
                        elevations=(70.0, 55.0, 40.0))  # steeper views see further behind an occluder
         ctx.log("exploration", purpose="explore", target=text, region=[round(v, 3) for v in point], behind=behind_id,

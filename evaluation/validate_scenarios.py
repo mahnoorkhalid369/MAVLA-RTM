@@ -94,7 +94,7 @@ def wrist_inspection(sc, robot, idx, out: Path, target_id: str) -> dict:
     unmodified viewpoint planner (camera look-at IK + collision-checked against the scene's colliders) and is SET
     directly in this validation (no commanded motion, no agent); the arm goes back to HOME afterwards."""
     from control.collision import Box
-    from agent.exploration import ViewpointPlanner
+    from perception.viewpoints import ViewpointPlanner
     f = next((f for f in sc.fixtures if f.id == target_id), None)
     if f is None:
         return {"ok": False, "reason": f"no fixture {target_id}"}
@@ -113,7 +113,7 @@ def wrist_inspection(sc, robot, idx, out: Path, target_id: str) -> dict:
     for _ in range(30):
         app.update()
     from control.kinematics import Kinematics
-    from agent.exploration import CAM_TIP
+    from perception.viewpoints import CAM_TIP
     k = Kinematics(tip=CAM_TIP)
     q_meas = robot.get_dof_positions(dof_indices=idx).numpy()[0]
     import isaacsim.core.experimental.utils.stage as su

@@ -12,8 +12,8 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from agent.detector import YoloDetector  # noqa: E402
-from agent.somark import draw_marks, draw_names, isolate  # noqa: E402
+from perception.detector import YoloDetector  # noqa: E402
+from perception.somark import draw_marks, draw_names, isolate  # noqa: E402
 from agent.vlm_roles import GemmaVLM, Roles  # noqa: E402
 from seg.evaluate import iou_matrix  # noqa: E402
 

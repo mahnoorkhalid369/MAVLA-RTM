@@ -30,8 +30,8 @@ def main() -> int:
     ap.add_argument("--out", required=True)
     ap.add_argument("--modes", nargs="+", default=["single", "batched"])
     a = ap.parse_args()
-    from agent.detector import YoloDetector
-    from agent.somark import draw_marks
+    from perception.detector import YoloDetector
+    from perception.somark import draw_marks
     from agent.tools import Observation, Tools
     from agent.vlm_roles import GemmaVLM, Roles
     from seg.evaluate import iou_matrix

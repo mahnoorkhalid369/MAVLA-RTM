@@ -4,7 +4,7 @@ Input: a current-system-test folder (raw table RGB-D, the 18 raw YOLO masks of t
 masks, scenario metadata + ground truth in scoring_only/). Ground truth is used only to score.
 
 Approaches (none uses ground truth):
-  A  baseline        YOLO masks -> agent.geometry.measure (production path)
+  A  baseline        YOLO masks -> perception.geometry.measure (production path)
   B  protrusion split inside each YOLO mask: depth points standing > PROTRUDE above the mask's dominant surface
                      (histogram mode of z) form separate instances (8-connected image components); the rest stays as
                      the holder. Generic "objects in / on another object" rule, no object knowledge.
@@ -53,7 +53,7 @@ def iou(a, b):
 
 
 def approach_a(raw_masks, depth, K, T, robot):
-    from agent.geometry import measure
+    from perception.geometry import measure
     out = []
     for m in raw_masks:
         g, _ = measure(m, depth, K, T, robot)
@@ -63,7 +63,7 @@ def approach_a(raw_masks, depth, K, T, robot):
 
 
 def approach_b(raw_masks, depth, K, T, robot, W):
-    from agent.geometry import measure
+    from perception.geometry import measure
     out = []
     for m in raw_masks:
         g, _ = measure(m, depth, K, T, robot)
@@ -117,7 +117,7 @@ def split_by_world_xy(part, W, depth):
 
 
 def approach_b2(raw_masks, depth, K, T, robot, W):
-    from agent.geometry import measure
+    from perception.geometry import measure
     out = []
     for m, g in approach_b(raw_masks, depth, K, T, robot, W):
         pieces = split_by_world_xy(m, W, depth) if g["top_z"] > 0 and m.sum() < 5000 else [m]
@@ -132,7 +132,7 @@ def approach_b2(raw_masks, depth, K, T, robot, W):
 
 
 def approach_c(depth, K, T, robot, W):
-    from agent.geometry import measure
+    from perception.geometry import measure
     valid = (depth > 0.1) & (depth < 5)
     P = W[valid]
     r = np.hypot(P[:, 0], P[:, 1])
@@ -212,7 +212,7 @@ def score(instances, gt, truth, oracle, meta):
 
 
 def main(folder: str) -> int:
-    from agent.geometry import RobotVolume
+    from perception.geometry import RobotVolume
     from control.collision import CollisionChecker
     from control.kinematics import Kinematics
     from control.robot import ARM_HOME, gripper_gap, table_camera_pose

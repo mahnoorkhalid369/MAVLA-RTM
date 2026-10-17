@@ -1,6 +1,6 @@
 """Fakes of agent.tools.Tools for offline tests (no simulator, no GPU, no ROS).
 
-    geom(...)    a measured-geometry dict like agent.geometry.Measured.to_dict()
+    geom(...)    a measured-geometry dict like perception.geometry.Measured.to_dict()
     StubTools    scripted outcomes for each Tools method used by the pick-and-place workflow
     GoalTools    StubTools + what the goal supervisor needs (scripted plans, real relation geometry,
                  the real session hooks)
@@ -13,7 +13,7 @@ from types import SimpleNamespace
 import numpy as np
 
 from agent.vlm_roles import SceneAnswer
-from agent.world import WorldModel
+from perception.world_model import WorldModel
 
 
 def geom(x, y, top, fp=(0.04, 0.04), support=0.0, yaw=0.0):

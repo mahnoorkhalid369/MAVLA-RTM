@@ -32,10 +32,10 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
-    from agent.detector import YoloDetector
+    from perception.detector import YoloDetector
     from agent.ros_bridge import RosBridge
     from agent.tools import Tools
-    from agent.world import WorldModel
+    from perception.world_model import WorldModel
     from sim.scene_objects import OBJECTS
 
     bridge = RosBridge()

@@ -1,6 +1,6 @@
 """Perception configuration: depth-measurement thresholds and the fixed fixtures that are never objects.
 
-Used by agent/geometry.py (measurement and exclusion) and agent/tools (planning obstacles).
+Used by perception/geometry.py (measurement and exclusion) and agent/tools (planning obstacles).
 """
 
 from __future__ import annotations

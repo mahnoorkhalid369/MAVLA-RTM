@@ -50,7 +50,7 @@ def gt_masks(view: Path):
 
 
 def evaluate(view: Path, meta: dict, detector) -> dict:
-    from agent.geometry import RobotVolume
+    from perception.geometry import RobotVolume
     from control.collision import CollisionChecker
     from control.kinematics import Kinematics
     from control.robot import gripper_gap
@@ -129,7 +129,7 @@ def evaluate(view: Path, meta: dict, detector) -> dict:
 
 
 def main(root: str) -> int:
-    from agent.detector import YoloDetector
+    from perception.detector import YoloDetector
     from config.models import DETECTOR_CONF, DETECTOR_IMGSZ, YOLO_WEIGHTS
     detector = YoloDetector(str(YOLO_WEIGHTS), DETECTOR_IMGSZ, DETECTOR_CONF)
     rootp = Path(root)

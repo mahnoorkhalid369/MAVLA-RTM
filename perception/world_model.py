@@ -14,10 +14,18 @@ import numpy as np
 SAME_XY, SAME_TOP, SAME_FOOTPRINT = 0.03, 0.02, 0.02  # m: gates for "the same object"
 
 
+def same_place(a: dict, b: dict) -> bool:
+    """Two measured geometries (perception.geometry.Measured dicts) are the same object at the same place:
+    centre within SAME_XY, top height within SAME_TOP, long footprint side within SAME_FOOTPRINT. Used by the
+    world model (WorldModel.match) and by the session's description memory (agent.tools.DescriptionMemory)."""
+    return (np.hypot(a["centre"][0] - b["centre"][0], a["centre"][1] - b["centre"][1]) < SAME_XY
+            and abs(a["top_z"] - b["top_z"]) < SAME_TOP and abs(a["footprint"][0] - b["footprint"][0]) < SAME_FOOTPRINT)
+
+
 @dataclass
 class ObjectRecord:
     id: int
-    geometry: dict  # agent.geometry.Measured as a dict (latest)
+    geometry: dict  # perception.geometry.Measured as a dict (latest)
     description: dict | None = None  # VLM: {name, colour, shape, material}
     status: str = "on_surface"  # on_surface | held | occluded | missing
     first_seen: float = field(default_factory=time.time)
@@ -52,9 +60,10 @@ class WorldModel:
             if o.status == "held":
                 continue
             og = o.geometry
+            if not same_place(og, g):
+                continue
             d = float(np.hypot(og["centre"][0] - g["centre"][0], og["centre"][1] - g["centre"][1]))
-            if d < SAME_XY and abs(og["top_z"] - g["top_z"]) < SAME_TOP and \
-                    abs(og["footprint"][0] - g["footprint"][0]) < SAME_FOOTPRINT and d < best_d:
+            if d < best_d:
                 best, best_d = o.id, d
         return best
 

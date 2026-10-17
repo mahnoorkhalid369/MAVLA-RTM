@@ -155,7 +155,7 @@ class Run:
     def gt_viewpoint(self, target: dict, q_now) -> dict:
         """Evaluation-side check: does a collision-free wrist viewpoint for the intended container exist in the
         ground-truth scene (existing ViewpointPlanner, ground-truth colliders)?"""
-        from agent.exploration import ViewpointPlanner
+        from perception.viewpoints import ViewpointPlanner
         from control.collision import Box
         from sim.scenario_lib import generate
         from sim.scenario_lib.core import scenario_parts

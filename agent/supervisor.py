@@ -10,7 +10,7 @@ when the desired final state is verified over measured state.
 Workers (agent/workers.py; logical roles in this process, one shared Gemma / YOLO / ROS bridge):
   planning      goal -> plan (Roles.plan_goal), multi-object decomposition over measured objects (decompose)
   perception    observe, describe_scene, answer, locate
-  exploration   inspect, explore (wrist-camera viewpoints, agent/exploration.py)
+  exploration   inspect, explore (wrist-camera viewpoints, perception/viewpoints.py)
   manipulation  pick, place, pick_place, return_home (the validated PickPlaceWorkflow in three modes)
   verification  goal conditions over measured state (agent/goals.py) + the skills' own physical checks
 Safety: the planner names only registry capabilities; every motion goes through SkillPlanner + CollisionChecker

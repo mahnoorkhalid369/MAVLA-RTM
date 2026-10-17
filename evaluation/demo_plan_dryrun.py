@@ -3,7 +3,7 @@ the four rehearsal instructions with the agent planner. Object names are the sco
 import json, sys, time, numpy as np, cv2
 from pathlib import Path
 sys.path.insert(0, '.')
-from agent.geometry import measure, snap_supports
+from perception.geometry import measure, snap_supports
 from agent.tools import Tools
 from control.robot import ARM_HOME
 from control.motion import PlanningError

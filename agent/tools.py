@@ -17,9 +17,9 @@ import numpy as np
 
 from config.agent import Relations, Tolerances
 from config.perception import FIXTURES
-from agent.geometry import RobotVolume, measure, snap_supports
-from agent.somark import draw_marks, draw_names, grid, isolate, montage
-from agent.world import WorldModel
+from perception.geometry import RobotVolume, measure, snap_supports
+from perception.somark import draw_marks, draw_names, grid, isolate, montage
+from perception.world_model import WorldModel, same_place
 from control.collision import Box, CollisionChecker
 from control.kinematics import Kinematics
 from control.motion import PlanningError, joint_move
@@ -49,9 +49,7 @@ class DescriptionMemory:
 
     @staticmethod
     def _same_place(a: dict, b: dict) -> bool:
-        from agent.world import SAME_FOOTPRINT, SAME_TOP, SAME_XY
-        return (np.hypot(a["centre"][0] - b["centre"][0], a["centre"][1] - b["centre"][1]) < SAME_XY
-                and abs(a["top_z"] - b["top_z"]) < SAME_TOP and abs(a["footprint"][0] - b["footprint"][0]) < SAME_FOOTPRINT)
+        return same_place(a, b)
 
     def lookup(self, g: dict, colour: np.ndarray) -> dict | None:
         for eg, ec, d in self.entries:

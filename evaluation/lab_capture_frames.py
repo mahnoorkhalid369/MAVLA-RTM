@@ -154,7 +154,7 @@ def main() -> int:
                 views[name]["render_pose_error_mm"] = round(err, 2)
                 (out / name / "camera.json").write_text(json.dumps({"K": K, "T_world_cam": T_fk.tolist(), "q": q_meas.tolist()}))
             wrist_view("wrist_home", np.asarray(ARM_HOME, float))
-            from agent.exploration import ViewpointPlanner
+            from perception.viewpoints import ViewpointPlanner
             from control.collision import Box
             fx, ob = scenario_parts(sc)
             boxes = [Box(w.owner, w.centre, w.R, w.half) for w in fx + ob]
