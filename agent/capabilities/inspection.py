@@ -10,6 +10,7 @@ import numpy as np
 from agent.capabilities.manipulation import run_return_home
 from agent.capabilities.perception import _find_in, _target_mark
 from agent.capabilities.specs import Context, StepResult
+from perception.somark import isolate
 
 
 MAX_EXPLORE_VIEWPOINTS = 2
@@ -30,7 +31,7 @@ def _wrist_observation(ctx: Context, target_world: np.ndarray, target_id: int | 
     mark = near[0] if near and np.hypot(*(np.array(wobs.measured[near[0]]["centre"][:2]) - target_world[:2])) < 0.06 else None
     desc = None
     if mark is not None:
-        crop = __import__("perception.somark", fromlist=["isolate"]).isolate(wobs.rgb, wobs.marks[mark])
+        crop = isolate(wobs.rgb, wobs.marks[mark])
         desc = t.roles.describe_one(crop).model_dump()
         wobs.descriptions[mark] = desc
         if assoc[mark]["world_id"] is not None:
