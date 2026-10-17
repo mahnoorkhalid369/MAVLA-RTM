@@ -125,7 +125,8 @@ def test_resolve_rejects_unknown_id_and_null_without_ambiguity():
 def test_no_object_knowledge_or_ground_truth_in_agent_code():
     """Rules: no colour/shape words or object lists in prompts or code; no simulator ground truth."""
     words = re.compile(r"\b(red|green|blue|yellow|orange|purple|pink|white|black|tan|cube|cylinder|sphere|prism|box_\w+)\b", re.I)
-    for f in AGENT.glob("*.py"):
+    current_perception = [AGENT.parent / "perception" / f"{m}.py" for m in ("detector", "geometry", "somark", "world_model", "viewpoints")]
+    for f in [*AGENT.rglob("*.py"), *current_perception, *(AGENT.parent / "config").glob("*.py")]:  # agent code wherever it lives
         src = f.read_text()
         code = "\n".join(line.split("#")[0] for line in src.splitlines() if not line.strip().startswith(("#", '"""')))
         assert "ground_truth" not in code and ".truth" not in code, f.name
