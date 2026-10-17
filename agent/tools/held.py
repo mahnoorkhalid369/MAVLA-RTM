@@ -1,6 +1,6 @@
 """Session and held-object state.
 
-Owner: Tools (one per session, agent/run.py Session). What the robot holds is recorded here and nowhere else:
+Owner: Tools (one per session, agent/session.py). What the robot holds is recorded here and nowhere else:
     held               control.skills.Held body of the grasped object (None = nothing held)
     held_object        its world id
     held_geom          its measured geometry at the grasp

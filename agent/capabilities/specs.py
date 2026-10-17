@@ -86,10 +86,15 @@ SPECS: dict[str, CapabilitySpec] = {s.name: replace(s, effect=EFFECT.get(s.name,
 MOTION = {n for n, s in SPECS.items() if s.safety == "motion"}
 
 
-def planner_menu() -> str:
-    """The capability list as the planner sees it."""
+def planner_menu(specs: dict[str, CapabilitySpec] | None = None) -> str:
+    """The capability list as the planner sees it (default: SPECS)."""
     return "\n".join(f"- {s.name}: {s.summary}. args {s.args}" + ("" if s.implemented else " (not available yet)")
-                     for s in SPECS.values())
+                     for s in (SPECS if specs is None else specs).values())
+
+
+def available(disabled=()) -> dict[str, CapabilitySpec]:
+    """SPECS with the named capabilities marked not available (implemented=False); SPECS itself is never changed."""
+    return {n: (replace(s, implemented=False) if n in disabled else s) for n, s in SPECS.items()}
 
 
 @dataclass

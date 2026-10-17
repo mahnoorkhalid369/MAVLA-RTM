@@ -31,6 +31,7 @@ from langgraph.graph import END, StateGraph
 
 from agent import authority as authority_mod
 from agent import capabilities as caps
+from agent.controls import ExecutionControls
 from config.agent import Budgets
 from agent.eventlog import EventLog
 from agent.goals import GoalEvaluator, derive_conditions
@@ -44,7 +45,6 @@ TERMINAL = ["COMPLETED", "FAILED", "CANCELLED", "UNSUPPORTED"]
 NEEDS_OBSERVATION = {"describe_scene", "answer", "locate", "inspect", "explore", "decompose"}
 MOTION = {"pick", "place", "pick_place", "return_home", "inspect", "explore"}
 MANIPULATION = {"pick", "place", "pick_place"}
-MAX_REPLANS = 1
 MAX_STEPS_EXECUTED = 14  # hard bound on worker delegations per instruction
 MAX_INSPECTIONS_FOR_ANSWER = 2
 RECOVERABLE = {"insufficient_info", "infeasible", "failed"}  # may be replanned once; unsafe / cancelled never
@@ -58,9 +58,12 @@ class GoalState(TypedDict, total=False):
 
 
 class GoalSupervisor:
-    def __init__(self, tools, log: EventLog, run_dir: Path, responder, budgets: Budgets | None = None) -> None:
+    def __init__(self, tools, log: EventLog, run_dir: Path, responder, budgets: Budgets | None = None,
+                 controls: ExecutionControls | None = None) -> None:
         self.tools, self.log, self.run_dir = tools, log, Path(run_dir)
         self.budgets = budgets or Budgets()
+        self.controls = controls or ExecutionControls()  # disabled capabilities, replanning limit (agent/controls.py)
+        self.specs = caps.available(self.controls.disabled)  # capability specs as this supervisor offers them
         self.responder = responder
         self.ts: TaskState | None = None
         self.authority = authority_mod.least_privilege("not classified yet")
@@ -69,7 +72,7 @@ class GoalSupervisor:
         self.failed_motion = 0
         self.current: Step | None = None
         self.last_result = None
-        self.reg = WorkerRegistry(log, self._executors(), caps.SPECS)
+        self.reg = WorkerRegistry(log, self._executors(), self.specs)
         g = StateGraph(GoalState)
         for s in STATES:
             g.add_node(s, self._wrap(s, getattr(self, "_" + s.lower())))
@@ -85,12 +88,12 @@ class GoalSupervisor:
     # ----------------------------------------------------------------------------------- workers
     def _executors(self) -> dict:
         def later_manip(req):  # only manipulation this request authorizes counts (no parking for refused steps)
-            return any(s.capability in MANIPULATION and self.authority.allows(caps.SPECS[s.capability].effect)
+            return any(s.capability in MANIPULATION and self.authority.allows(self.specs[s.capability].effect)
                        for s in self.ts.remaining(self.current))
 
         def last_motion(req):
             return not any(s.capability in MOTION for s in self.ts.remaining(self.current))
-        return {
+        executors = {
             "observe": ("perception", lambda c, a, r: caps.run_observe(c, a, clear_view=later_manip(r))),
             "describe_scene": ("perception", lambda c, a, r: caps.run_describe_scene(c, a)),
             "answer": ("perception", lambda c, a, r: caps.run_answer(c, a)),
@@ -103,6 +106,15 @@ class GoalSupervisor:
             "return_home": ("manipulation", lambda c, a, r: caps.run_return_home(c, a)),
             "decompose": ("planning", lambda c, a, r: caps.run_decompose(c, a)),
         }
+        for name in self.controls.disabled & set(executors):  # disabled: refused as unsupported, never run
+            executors[name] = (executors[name][0], self._refuse_disabled(name))
+        return executors
+
+    def _refuse_disabled(self, name: str):
+        def refuse(c, a, r):
+            self.controls.notify("capability_refused", capability=name)
+            return caps.StepResult("unsupported", f"{name} is disabled {self.controls.disabled_reason}")
+        return refuse
 
     # ---------------------------------------------------------------------------------- plumbing
     def _wrap(self, name, fn):
@@ -188,7 +200,7 @@ class GoalSupervisor:
         self.log("authority", request_kind=self.authority.kind, grants=list(self.authority.grants),
                  evidence=self.authority.evidence, source=self.authority.source, note=self.authority.note)
         try:
-            plan = self.tools.roles.plan_goal(state["instruction"], caps.planner_menu(), context=self._context())
+            plan = self.tools.roles.plan_goal(state["instruction"], caps.planner_menu(self.specs), context=self._context())
         except VLMFailure as exc:
             return self._finish("FAILED", "failed", f"I could not turn the instruction into steps I can do ({exc}). "
                                 + self._capabilities_line())
@@ -269,7 +281,7 @@ class GoalSupervisor:
         if step.outcome == "completed":
             if step.capability == "decompose":  # planning worker returned concrete steps + final conditions
                 steps = data.get("steps", [])
-                allowed = [(c, a) for c, a in steps if self.authority.allows(caps.SPECS[c].effect)]
+                allowed = [(c, a) for c, a in steps if self.authority.allows(self.specs[c].effect)]
                 refused = [(c, a) for c, a in steps if (c, a) not in allowed]
                 if refused:  # a decomposition cannot add effects the user did not ask for
                     self.log("authorization", origin="decomposition", allowed=False, refused=[c for c, _ in refused],
@@ -283,7 +295,7 @@ class GoalSupervisor:
                     self._refresh_conditions()
                 self.log("goal_conditions", goal=self.ts.goal, conditions=self.ts.conditions, origin="decomposition")
             if (step.capability == "answer" and data.get("certain") is False and data.get("check_closer_world")
-                    and not any(s.capability == "inspect" for s in self.ts.plan) and caps.SPECS["inspect"].implemented):
+                    and not any(s.capability == "inspect" for s in self.ts.plan) and self.specs["inspect"].implemented):
                 ids = data["check_closer_world"][:MAX_INSPECTIONS_FOR_ANSWER]
                 step.status = "replaced"
                 self.log("subtask", reason=f"answer uncertain from the table view: closer look at "
@@ -295,7 +307,7 @@ class GoalSupervisor:
             step.status = "refused"
             self.ts.refused.append({"capability": step.capability, "args": step.args, "origin": step.origin})
             for s in self.ts.remaining(step):
-                if not self.authority.allows(caps.SPECS[s.capability].effect):
+                if not self.authority.allows(self.specs[s.capability].effect):
                     s.status = "refused"
                     self.ts.refused.append({"capability": s.capability, "args": s.args, "origin": s.origin})
             self._refresh_conditions()
@@ -303,7 +315,7 @@ class GoalSupervisor:
         for s in self.ts.remaining(step):  # nothing after a failed step runs on stale assumptions (may be re-added)
             s.status = "skipped"
         # information-gathering subtask: a target not visible to the table camera -> explore once, then locate again
-        if (step.capability == "locate" and step.outcome == "insufficient_info" and caps.SPECS["explore"].implemented
+        if (step.capability == "locate" and step.outcome == "insufficient_info" and self.specs["explore"].implemented
                 and not any(s.capability == "explore" for s in self.ts.plan) and self.executed < MAX_STEPS_EXECUTED - 2):
             step.status = "replaced"
             for s in self.ts.plan:
@@ -323,7 +335,7 @@ class GoalSupervisor:
                                 f"{step.summary}" + self._done_so_far())
         self.ts.attempted.append({"capability": step.capability, "args": step.args, "outcome": step.outcome})
         deterministic = step.outcome == "infeasible"  # e.g. out of reach: re-planning the same move cannot help
-        if step.outcome in RECOVERABLE and not deterministic and self.ts.replans < MAX_REPLANS and self.executed < MAX_STEPS_EXECUTED:
+        if step.outcome in RECOVERABLE and not deterministic and self.ts.replans < self.controls.max_replans and self.executed < MAX_STEPS_EXECUTED:
             self.failed_motion = getattr(self.tools, "motion_count", 0)
             return {"next": "REPLANNING"}
         return self._finish("FAILED", step.outcome, f"Step {step.index} ({step.capability}) {step.outcome}: {step.summary}"
@@ -335,7 +347,7 @@ class GoalSupervisor:
         tried = "; ".join(f"{a['capability']} {a['args']} -> {a['outcome']}" for a in self.ts.attempted)[:400]
         note = f"{state['instruction']}\n(Already tried, do not repeat: {tried}. Plan again from the current situation.)"
         try:
-            plan = self.tools.roles.plan_goal(note, caps.planner_menu(), context=self._context())
+            plan = self.tools.roles.plan_goal(note, caps.planner_menu(self.specs), context=self._context())
         except VLMFailure as exc:
             return self._finish("FAILED", failed.outcome, f"{failed.summary} (replanning failed: {exc})")
         unchanged = getattr(self.tools, "motion_count", 0) == self.failed_motion

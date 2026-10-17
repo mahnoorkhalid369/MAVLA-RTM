@@ -31,7 +31,7 @@ class SessionTools(GoalTools):
     """Constructed by Session exactly like agent.tools.Tools; resolves the lab-style names used below."""
     instances: list = []
 
-    def __init__(self, bridge, detector, roles, executor, log, run_dir, live=None, memory=None):
+    def __init__(self, bridge, detector, roles, executor, log, run_dir, live=None, memory=None, controls=None):
         super().__init__([])
         self.roles, self.log, self.run_dir, self.bridge = roles, log, run_dir, bridge
         SessionTools.instances.append(self)

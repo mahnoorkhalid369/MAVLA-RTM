@@ -122,6 +122,7 @@ class LineReader:
     def __init__(self, stream=None) -> None:
         self.q: queue.Queue = queue.Queue()
         self.stream = stream or sys.stdin
+        self.on_directive = None  # callable(line): lines starting with "@" go here, never to a reader (harnesses)
         threading.Thread(target=self._pump, daemon=True).start()
 
     @classmethod
@@ -136,14 +137,19 @@ class LineReader:
         self.q.put(None)  # EOF
 
     def get(self, timeout: float | None = None):
-        """Next line; None at EOF; raises TimeoutError if nothing arrives within timeout (None = wait)."""
-        try:
-            line = self.q.get(timeout=timeout)
-        except queue.Empty:
-            raise TimeoutError from None
-        if line is None:
-            self.q.put(None)  # EOF stays EOF for every later reader
-        return line
+        """Next line; None at EOF; raises TimeoutError if nothing arrives within timeout (None = wait).
+        With on_directive set, "@..." lines are handed to it and the next line is read."""
+        while True:
+            try:
+                line = self.q.get(timeout=timeout)
+            except queue.Empty:
+                raise TimeoutError from None
+            if line is None:
+                self.q.put(None)  # EOF stays EOF for every later reader
+                return line
+            if self.on_directive is None or not line.startswith("@"):
+                return line
+            self.on_directive(line)
 
 
 class TerminalResponder:

@@ -46,7 +46,10 @@ def stop_sim(p: subprocess.Popen | None) -> None:
         os.killpg(p.pid, signal.SIGKILL)
 
 
-def main() -> int:
+def main(controls=None, on_directive=None) -> int:
+    """controls: agent.controls.ExecutionControls for this process (default: normal operation).
+    on_directive: called with every input line that starts with "@" (harness directives); such lines are not
+    instructions or answers (agent.ask.LineReader.on_directive)."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--instruction", help="one instruction (otherwise: interactive prompt)")
     ap.add_argument("--out", default=str(ROOT / "out/demo" / time.strftime("%Y-%m-%d") / time.strftime("live_%H%M%S")))
@@ -68,6 +71,8 @@ def main() -> int:
     a = ap.parse_args()
     out = Path(a.out)
     from agent.ask import LineReader, ScriptedResponder, TerminalResponder
+    if on_directive is not None:
+        LineReader.shared().on_directive = on_directive
     from config.agent import Budgets
     timeout = Budgets().question_timeout_s if a.ask_timeout is None else a.ask_timeout
     responder = TerminalResponder(timeout_s=timeout) if a.ask == "terminal" else ScriptedResponder(["cancel"])
@@ -102,7 +107,7 @@ def main() -> int:
             executor.spin(0.2)
         executor.wait_sim(3.0)
         print("[agent] ready", flush=True)
-        session = Session(bridge, detector, vlm, executor, responder, live, memory)
+        session = Session(bridge, detector, vlm, executor, responder, live, memory, controls=controls)
         if a.instruction:
             r = session.run(a.instruction, out)
             print(f"[agent] {r['status']}: {r['message']}", flush=True)

@@ -24,10 +24,11 @@ class Session:
     a place). Nothing is written to disk for the next session: a new process starts with an empty world and
     nothing held."""
 
-    def __init__(self, bridge, detector, vlm, executor, responder, live=None, memory=None) -> None:
+    def __init__(self, bridge, detector, vlm, executor, responder, live=None, memory=None, controls=None) -> None:
         self.id = time.strftime("session_%Y%m%d_%H%M%S")
         self.bridge, self.detector, self.vlm, self.executor = bridge, detector, vlm, executor
         self.responder, self.live, self.memory = responder, live, memory
+        self.controls = controls  # agent.controls.ExecutionControls or None (normal operation)
         self.tools = None
         self.count = 0
 
@@ -46,11 +47,13 @@ class Session:
             log("session", session_id=self.id, instruction_index=self.count, reused_state=self.tools is not None)
             roles = Roles(self.vlm, log)
             if self.tools is None:
-                self.tools = Tools(self.bridge, self.detector, roles, self.executor, log, out, self.live, self.memory)
+                self.tools = Tools(self.bridge, self.detector, roles, self.executor, log, out, self.live, self.memory,
+                                   controls=self.controls)
                 self.tools.revalidate_held()
             else:
                 self.tools.begin_instruction(log, roles, out)
-            report = GoalSupervisor(self.tools, log, out, self.responder).run(instruction, thread_id=f"{self.id}_{self.count:02d}")
+            report = GoalSupervisor(self.tools, log, out, self.responder, controls=self.controls).run(
+                instruction, thread_id=f"{self.id}_{self.count:02d}")
         except Exception as exc:  # an unexpected error is a failure, never a success
             log("error", error=repr(exc))
             report = {"instruction": instruction, "status": "FAILED", "failure": {"cls": "internal", "reason": repr(exc)},

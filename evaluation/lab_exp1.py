@@ -17,7 +17,7 @@ Preflight before each inspection (all must pass, else the instruction is skipped
 Stop conditions (checked live during motion from /joint_states + ground truth, and after every instruction):
   an object moved > 3 mm (unexpected contact), the gripper closed (> 2 deg), no joint state for > 3 s while moving
   (connection lost), an "unsafe" outcome or safety-layer rejection, robot not back at HOME after an inspection.
-  On a stop both processes are terminated at once; failed motions are never retried (agent: MAX_REPLANS = 0).
+  On a stop both processes are terminated at once; failed motions are never retried (agent: max_replans = 0, agent/controls.py).
 Outputs: <out>/NN/ (agent per instruction), protocol.jsonl (every gate / preflight / stop decision), phaseB/
 (joint + truth recordings, collision re-check), scoring_only/ (ground truth: never read by the agent), score.json.
 """
@@ -260,7 +260,7 @@ class Run:
         """Re-check the EXECUTED joint trajectory (recorded /joint_states) against the ground-truth colliders: zero
         margins = actual contact, default margins = the planner's clearance."""
         from control.collision import Box, CollisionChecker, Margins
-        from control.robot import ARM_JOINTS, GRIPPER_JOINT
+        from control.robot import ARM_JOINTS
         from sim.scenario_lib import generate
         from sim.scenario_lib.core import scenario_parts
         rec_f = self.out / "phaseB" / f"motion_{self.n:02d}.jsonl"
