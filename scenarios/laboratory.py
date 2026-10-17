@@ -9,7 +9,7 @@ camera. Back wall, reagent shelf, fume hood and sign are visual-only decor beyon
 
 Rigid bodies only (no liquids). Tubes 30 x 100 mm + 34 x 14 mm cap, vials 24 x 48 mm + 26 x 12 mm cap: within
 the 2F-85's 80 mm grip. Every zone is placed where the table camera sees it past the robot at HOME and where the
-project's planner reaches it (sim/scenario_lib/checks.py). Spacing follows the gripper: the open pads reach ~75 mm
+project's planner reaches it (scenarios/checks.py). Spacing follows the gripper: the open pads reach ~75 mm
 from the object centre along the closing direction, so neighbours in that direction are >= 90-100 mm apart;
 receiving rack holes are 56 mm so a held tube keeps the planner's 10 mm clearance while it is lowered.
 """
@@ -18,8 +18,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from sim.scenario_lib.core import Label, Light, Part, Placer, Region, Scenario, jitter, rot_z
-from sim.scenario_lib.parts import (box_obj, capped_container, panel, plinth, rack, shelf_unit, sign, surface, tray,
+from scenarios.core import Label, Light, Part, Placer, Region, Scenario, jitter, rot_z
+from scenarios.parts import (box_obj, capped_container, panel, plinth, rack, shelf_unit, sign, surface, tray,
                                     zone_outline)
 
 ID = "laboratory"
@@ -66,7 +66,7 @@ def _sample_ids(rng, n):
 
 def inspection_station(pos) -> tuple:
     """Low white pad (static) with a printed target ring: put a sample here for a wrist-camera close look."""
-    from sim.scenario_lib.core import Fixture
+    from scenarios.core import Fixture
     parts = [Part("box", (0, 0, PAD_T / 2), (0.14, 0.14, PAD_T), (0.95, 0.95, 0.95), material="matte",
                   name="inspection_station/base"),
              Part("cylinder", (0, 0, PAD_T + 0.0002), (0.070, 0.070, 0.0004), (0.08, 0.08, 0.08), collide=False),

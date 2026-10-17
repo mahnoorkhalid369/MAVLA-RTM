@@ -6,17 +6,17 @@ autonomous manipulation has been run in this scene yet.
 ```bash
 .venv/bin/python -m sim.run_scenario --scenario laboratory --difficulty {easy|medium|hard} --seed 42 [--headless]
 .venv/bin/python evaluation/validate_scenarios.py --scenario laboratory --seed 42 --reload --drop-mm 10 [--resume]
-.venv/bin/python -m sim.scenario_lib.checks --scenario laboratory --difficulty hard --seed 42 --out design.json
+.venv/bin/python -m scenarios.checks --scenario laboratory --difficulty hard --seed 42 --out design.json
 ```
 
 Library conventions, loading and the validator are described in [README.md](README.md).
 
 | Item | File |
 |---|---|
-| Scene definition | `sim/scenario_lib/laboratory.py` |
-| Builders | `sim/scenario_lib/parts.py` |
-| Isaac builder | `sim/scenario_lib/build.py` |
-| Offline checks | `sim/scenario_lib/checks.py` |
+| Scene definition | `scenarios/laboratory.py` |
+| Builders | `scenarios/parts.py` |
+| Isaac builder | `scenarios/build.py` |
+| Offline checks | `scenarios/checks.py` |
 
 ## 1. Purpose
 

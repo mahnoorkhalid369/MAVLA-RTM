@@ -1,16 +1,16 @@
 """Validate scenario-library scenes in Isaac Sim (headless, no ROS, no agent, no robot motion).
 
-For each difficulty: build the scene exactly as sim/run_scenario.py does (frozen setup_scene + scenario_lib
+For each difficulty: build the scene exactly as sim/run_scenario.py does (frozen setup_scene + scenarios
 install / populate), hold the arm at HOME, settle physics, then check
   robot + gripper articulation present (6 arm joints + finger joint), both cameras render (RGB + depth)
   every object spawned as a rigid body; no object below the floor; settled displacement / tilt (stability)
-  interpenetration of the SETTLED poses (pure geometry, scenario_lib.core.penetration)
+  interpenetration of the SETTLED poses (pure geometry, scenarios.core.penetration)
 and save table-camera, wrist-camera and overview images. With --reload, the same (scenario, difficulty, seed)
 is rebuilt in the same process (new stage) and the settled poses are compared (reproducible reload).
 Physics runs on the GPU (as the live simulator); the images come from a second build with CPU physics, because
 headless without the ROS bridge the GPU pipeline leaves the wrist camera prim at its zero-joint USD pose.
 Design checks (visibility, grasp / placement feasibility with the unchanged planner) come from
-sim/scenario_lib/checks.py and are stored next to the results.
+scenarios/checks.py and are stored next to the results.
 
     .venv/bin/python evaluation/validate_scenarios.py --scenario laboratory [--difficulty easy medium hard]
            [--seed 42] [--settle 3.0] [--reload] [--no-design]
@@ -60,9 +60,9 @@ from isaacsim.core.experimental.prims import Articulation, RigidPrim  # noqa: E4
 from isaacsim.core.simulation_manager import SimulationManager  # noqa: E402
 
 from control.robot import ARM_HOME, ARM_JOINTS, GRIPPER_JOINT, GRIPPER_OPEN  # noqa: E402
-from sim.scenario_lib import generate  # noqa: E402
-from sim.scenario_lib.build import install, overview_camera, populate  # noqa: E402
-from sim.scenario_lib.core import WorldPart, penetration, rot_z, scenario_parts  # noqa: E402
+from scenarios import generate  # noqa: E402
+from scenarios.build import install, overview_camera, populate  # noqa: E402
+from scenarios.core import WorldPart, penetration, rot_z, scenario_parts  # noqa: E402
 from sim.scene import ROBOT_PATH, add_table_camera, add_wrist_camera, setup_scene  # noqa: E402
 
 DT = 1 / 120
@@ -300,7 +300,7 @@ def start_design(level: str, out: Path):
     if args.resume and f.exists():
         return None, f
     f.parent.mkdir(parents=True, exist_ok=True)
-    cmd = [sys.executable, "-m", "sim.scenario_lib.checks", "--scenario", args.scenario, "--difficulty", level,
+    cmd = [sys.executable, "-m", "scenarios.checks", "--scenario", args.scenario, "--difficulty", level,
            "--seed", str(args.seed), "--out", str(f)]
     print(f"[validate] {level} | design: started in a subprocess (limit {args.design_timeout:.0f} s)", flush=True)
     return subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True), f

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from sim.scenario_lib.core import Fixture, Label, Obj, Part
+from scenarios.core import Fixture, Label, Obj, Part
 
 DENSITY = {"plastic": 950.0, "glass": 2500.0, "wood": 600.0, "cardboard": 250.0, "metal": 7800.0, "foam": 60.0}
 

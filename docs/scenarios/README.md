@@ -75,9 +75,9 @@ Results go to `out/scenarios/<scenario>/<difficulty>_s<seed>/`:
   collision-checked against the scene's colliders. The joint state is set directly; no motion is commanded and
   no agent runs. An image is saved only if the rendered camera is within 5 mm of the arm's FK.
 
-**Offline (`sim/scenario_lib/checks.py`), using the project's own planner and collision checker, unchanged.**
+**Offline (`scenarios/checks.py`), using the project's own planner and collision checker, unchanged.**
 The validator runs these as a separate plain-Python subprocess, in parallel with the builds, with a time limit
-(`python -m sim.scenario_lib.checks ...`).
+(`python -m scenarios.checks ...`).
 
 - Spawn interpenetration of colliders.
 - The frozen props (microphone, camera stand) stay clear.
@@ -98,10 +98,10 @@ These are planning-feasibility checks, not executed manipulation.
 
 | File | Role |
 |---|---|
-| `sim/scenario_lib/core.py` | Data model and geometry. Pure Python and numpy, no Isaac Sim. Defines `Scenario`, `Obj`, `Fixture`, `Part`, `Label`, `Region`, `Light`, the deterministic `Placer`, the interpenetration test and `metadata()`. |
-| `sim/scenario_lib/parts.py` | Reusable procedural fixtures and objects: `rack` (slot labels), `tray` (striped rims), `plinth`, `surface`, `zone_outline`, `panel`, `sign`, `shelf_unit`, `capped_container`, `box_obj`. |
-| `sim/scenario_lib/<scenario>.py` | One scenario: `build(difficulty, seed) -> Scenario`. Difficulty is a `CONFIG` table (counts, occluders, look-alikes, occupied destinations, unreachable items), not separate scene code. |
-| `sim/scenario_lib/build.py` | Isaac side: `install()` and `populate()` (see below). |
+| `scenarios/core.py` | Data model and geometry. Pure Python and numpy, no Isaac Sim. Defines `Scenario`, `Obj`, `Fixture`, `Part`, `Label`, `Region`, `Light`, the deterministic `Placer`, the interpenetration test and `metadata()`. |
+| `scenarios/parts.py` | Reusable procedural fixtures and objects: `rack` (slot labels), `tray` (striped rims), `plinth`, `surface`, `zone_outline`, `panel`, `sign`, `shelf_unit`, `capped_container`, `box_obj`. |
+| `scenarios/<scenario>.py` | One scenario: `build(difficulty, seed) -> Scenario`. Difficulty is a `CONFIG` table (counts, occluders, look-alikes, occupied destinations, unreachable items), not separate scene code. |
+| `scenarios/build.py` | Isaac side: `install()` and `populate()` (see below). |
 | `sim/run_scenario.py` | Adds `--difficulty` and `--seed` for library scenes. The JSON scenes run exactly as before. |
 
 What `build.py` does:

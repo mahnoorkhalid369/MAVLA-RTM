@@ -58,7 +58,7 @@ def main(controls=None, on_directive=None) -> int:
     ap.add_argument("--conf", type=float, default=DETECTOR_CONF)
     ap.add_argument("--start-sim", action="store_true", help="start Isaac Sim after loading the models")
     ap.add_argument("--gui", action="store_true", help="with --start-sim: show the Isaac Sim window")
-    ap.add_argument("--scenario", help="with --start-sim: an active-perception test scene (sim/scenarios/<name>.json)")
+    ap.add_argument("--scenario", help="with --start-sim: an active-perception test scene (scenarios/scenes/<name>.json)")
     ap.add_argument("--sim-flag", help="write this file when the models are loaded (rehearsal harness)")
     ap.add_argument("--ask", choices=["terminal", "scripted"], default="terminal",
                     help="who answers clarification questions: the person at this terminal (default) or, for "

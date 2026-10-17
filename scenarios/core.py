@@ -1,5 +1,5 @@
 """Scenario library core: pure data + numpy (no Isaac Sim), so layouts can be generated, checked and tested
-offline and built identically in the simulator by sim/scenario_lib/build.py.
+offline and built identically in the simulator by scenarios/build.py.
 
 A scenario is a function (difficulty config, seeded rng) -> Scenario:
   fixtures  static rigid parts (racks, trays, bins): boxes / cylinders with colliders, never moved by physics

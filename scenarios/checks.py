@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from sim.scenario_lib.core import (DECOR_MIN_RADIUS, KEEP_CLEAR, REACH_MAX, Scenario, overlaps, scenario_parts,
+from scenarios.core import (DECOR_MIN_RADIUS, KEEP_CLEAR, REACH_MAX, Scenario, overlaps, scenario_parts,
                                    world_parts)
 
 __all__ = ["grasp_feasibility", "placement_feasibility", "static_report", "top_visibility", "view_feasibility"]
@@ -215,12 +215,12 @@ def static_report(sc: Scenario, reach: bool = True) -> dict:
 
 
 def main(argv=None) -> int:
-    """python -m sim.scenario_lib.checks --scenario laboratory --difficulty easy --seed 42 --out design.json
+    """python -m scenarios.checks --scenario laboratory --difficulty easy --seed 42 --out design.json
     Runs outside Isaac Sim (pure numpy), so the validator can run it as a subprocess with a timeout."""
     import argparse
     import json
     import time
-    from sim.scenario_lib import generate
+    from scenarios import generate
     ap = argparse.ArgumentParser()
     ap.add_argument("--scenario", required=True)
     ap.add_argument("--difficulty", required=True)

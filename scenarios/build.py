@@ -1,4 +1,4 @@
-"""Build a scenario_lib Scenario into the Isaac Sim stage (import only after the SimulationApp exists).
+"""Build a scenarios Scenario into the Isaac Sim stage (import only after the SimulationApp exists).
 
     install(sc)                 # BEFORE the frozen setup_scene: fill sim.scene_objects.OBJECTS with placeholders,
                                 # so run_live's ground-truth publisher covers every scenario object by name
@@ -17,9 +17,9 @@ from pathlib import Path
 
 import numpy as np
 
-from sim.scenario_lib.core import Label, Part, Scenario
+from scenarios.core import Label, Part, Scenario
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[1]
 TEXTURES = ROOT / "out" / "scenario_textures"
 FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 # visual material presets: roughness, metallic, specular (UsdPreviewSurface, specular workflow)

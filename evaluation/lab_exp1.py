@@ -157,8 +157,8 @@ class Run:
         ground-truth scene (existing ViewpointPlanner, ground-truth colliders)?"""
         from perception.viewpoints import ViewpointPlanner
         from control.collision import Box
-        from sim.scenario_lib import generate
-        from sim.scenario_lib.core import scenario_parts
+        from scenarios import generate
+        from scenarios.core import scenario_parts
         sc = generate("laboratory", "easy", self.seed)
         obj = next(o for o in sc.objects if o.attributes.get("container") == target["container"]
                    and o.attributes.get("cap_colour") == target["cap_colour"]
@@ -261,8 +261,8 @@ class Run:
         margins = actual contact, default margins = the planner's clearance."""
         from control.collision import Box, CollisionChecker, Margins
         from control.robot import ARM_JOINTS
-        from sim.scenario_lib import generate
-        from sim.scenario_lib.core import scenario_parts
+        from scenarios import generate
+        from scenarios.core import scenario_parts
         rec_f = self.out / "phaseB" / f"motion_{self.n:02d}.jsonl"
         recs = [json.loads(x) for x in rec_f.read_text().splitlines() if x.strip().endswith("}")]
         qs = [[dict(zip(r["name"], r["position"]))[n] for n in ARM_JOINTS] for r in recs if r["kind"] == "joints"]

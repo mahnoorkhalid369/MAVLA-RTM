@@ -1,12 +1,12 @@
-"""Scenario library (sim/scenario_lib): deterministic generation, spawn geometry, difficulty features,
+"""Scenario library (scenarios/): deterministic generation, spawn geometry, difficulty features,
 ground-truth metadata and the easy level's grasp feasibility with the unchanged planner. No simulator."""
 
 import numpy as np
 import pytest
 
-from sim.scenario_lib import DIFFICULTIES, SCENARIOS, generate
-from sim.scenario_lib.checks import grasp_feasibility, static_report, top_visibility
-from sim.scenario_lib.core import REACH_MAX, penetration, world_parts
+from scenarios import DIFFICULTIES, SCENARIOS, generate
+from scenarios.checks import grasp_feasibility, static_report, top_visibility
+from scenarios.core import REACH_MAX, penetration, world_parts
 
 CASES = [(n, d) for n in SCENARIOS for d in DIFFICULTIES]
 
@@ -77,7 +77,7 @@ def test_lab_visibility_matches_the_design_including_the_robot():
     vis = top_visibility(h)
     assert vis["vial_hidden"] == 0.0 and all(v > 0 for k, v in vis.items() if k != "vial_hidden")
     # the robot itself hides part of the bench: the old processing-tray spot is invisible with the robot only
-    from sim.scenario_lib.checks import _ray_hits_spheres, _robot_spheres
+    from scenarios.checks import _ray_hits_spheres, _robot_spheres
     from control.robot import table_camera_pose
     c, r = _robot_spheres()
     assert _ray_hits_spheres(np.array([-0.62, 0.08, 0.06]), table_camera_pose()[:3, 3], c, r)
@@ -111,8 +111,8 @@ def test_easy_lab_every_container_has_a_planned_grasp():
 
 def test_label_textures_render(tmp_path, monkeypatch):
     pytest.importorskip("PIL")
-    from sim.scenario_lib import build
-    from sim.scenario_lib.core import Label
+    from scenarios import build
+    from scenarios.core import Label
     monkeypatch.setattr(build, "TEXTURES", tmp_path)
     p = build.label_texture(Label("A1", (0, 0, 0), (0.03, 0.02)))
     from PIL import Image

@@ -3,7 +3,7 @@
 import json
 
 from evaluation.lab_exp1_score import score
-from sim.scenario_lib import generate
+from scenarios import generate
 
 
 def fake_run(tmp_path):

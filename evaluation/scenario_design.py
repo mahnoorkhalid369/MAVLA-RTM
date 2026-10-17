@@ -47,7 +47,7 @@ def hits(p0, p1, c, h, yaw):
 
 
 def main(name):
-    spec = json.loads((ROOT / f"sim/scenarios/{name}.json").read_text())
+    spec = json.loads((ROOT / f"scenarios/scenes/{name}.json").read_text())
     cam = table_camera_pose()[:3, 3]
     B = boxes(spec)
     vis = {}

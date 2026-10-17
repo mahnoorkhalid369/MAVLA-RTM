@@ -1,7 +1,7 @@
 """Capture laboratory observations for OFFLINE segmentation evaluation (EVALUATION ONLY; Isaac Sim headless, no ROS,
 no agent, nothing commanded: the arm's joint state is SET for camera poses, as in evaluation/validate_scenarios.py).
 
-For each (difficulty, seed): build the scene (frozen setup_scene + scenario_lib), CPU physics (the wrist camera prim
+For each (difficulty, seed): build the scene (frozen setup_scene + scenarios/), CPU physics (the wrist camera prim
 follows the arm only with CPU physics headless, see docs/scenarios/LABORATORY.md), settle, then capture views:
   table        the fixed table camera
   wrist_home   the wrist camera with the arm at HOME
@@ -50,9 +50,9 @@ from isaacsim.core.simulation_manager import SimulationManager  # noqa: E402
 
 from control.kinematics import Kinematics  # noqa: E402
 from control.robot import ARM_HOME, ARM_JOINTS, GRIPPER_JOINT, GRIPPER_OPEN, table_camera_pose  # noqa: E402
-from sim.scenario_lib import generate  # noqa: E402
-from sim.scenario_lib.build import install, populate  # noqa: E402
-from sim.scenario_lib.core import scenario_parts  # noqa: E402
+from scenarios import generate  # noqa: E402
+from scenarios.build import install, populate  # noqa: E402
+from scenarios.core import scenario_parts  # noqa: E402
 from sim.scene import (CAM_HFOV_DEG, ROBOT_PATH, GRIPPER_PATH, add_table_camera, add_wrist_camera, find_prim_path,  # noqa: E402
                        setup_scene)
 

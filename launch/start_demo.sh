@@ -11,7 +11,7 @@
 #   ./launch/start_demo.sh --headless         # no Isaac Sim window (demo viewer still opens)
 #   ./launch/start_demo.sh --no-viewer        # terminal only (logs are printed here as well)
 #   ./launch/start_demo.sh --camera-windows   # also the raw wrist + table RGB-D windows
-#   ./launch/start_demo.sh --scenario ap_occlusion   # an active-perception test scene (sim/scenarios/)
+#   ./launch/start_demo.sh --scenario ap_occlusion   # an active-perception test scene (scenarios/scenes/)
 # Outputs: out/demo/<date>/live_<time>/<nn>/ (events.jsonl, images/, result.json); viewer feed out/demo/live/
 # Extra viewer options: DEMO_VIEWER_ARGS="--snapshot-every 3 --snapshot-dir out/demo/shots" ./launch/start_demo.sh
 

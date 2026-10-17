@@ -4,8 +4,8 @@ scene after the frozen setup_scene. Ground truth for every scenario object comes
 /sim/ground_truth/objects publisher (evaluation only).
 
 Two kinds of scenes:
-  JSON scenes (sim/scenarios/<name>.json, active perception):  --scenario ap_occlusion
-  scenario library (sim/scenario_lib, procedural workstations): --scenario laboratory --difficulty medium --seed 42
+  JSON scenes (scenarios/scenes/<name>.json, active perception):  --scenario ap_occlusion
+  scenario library (scenarios/, procedural workstations): --scenario laboratory --difficulty medium --seed 42
 
     python -m sim.run_scenario --scenario ap_occlusion [--headless]
     python -m sim.run_scenario --scenario laboratory --difficulty hard --seed 7 [--headless]
@@ -31,10 +31,10 @@ ap.add_argument("--difficulty", default="easy", help="library scenes: easy | med
 ap.add_argument("--seed", type=int, default=0, help="library scenes: random seed (deterministic layout)")
 args, rest = ap.parse_known_args()
 sys.path.insert(0, str(ROOT))
-from sim.scenario_lib import SCENARIOS  # noqa: E402  (pure data)
+from scenarios import SCENARIOS  # noqa: E402  (pure data)
 
 LIBRARY = args.scenario in SCENARIOS
-SPEC = {"objects": [], "name": args.scenario} if LIBRARY else json.loads((ROOT / "sim" / "scenarios" / f"{args.scenario}.json").read_text())
+SPEC = {"objects": [], "name": args.scenario} if LIBRARY else json.loads((ROOT / "scenarios" / "scenes" / f"{args.scenario}.json").read_text())
 ASSETS = json.loads((ROOT / "data" / "assets" / "asset_dims.json").read_text()) if not LIBRARY else {}
 
 import sim.scene_objects as so  # noqa: E402  (pure data; no Isaac import)
@@ -43,8 +43,8 @@ YCB = {}
 SC = None
 so.OBJECTS.clear()
 if LIBRARY:
-    from sim.scenario_lib import generate
-    from sim.scenario_lib.build import install
+    from scenarios import generate
+    from scenarios.build import install
 
     SC = generate(args.scenario, args.difficulty, args.seed)
     install(SC)
@@ -71,7 +71,7 @@ _original_setup = rl.setup_scene
 async def setup_with_meshes(*a, **k):
     await _original_setup(*a, **k)
     if SC is not None:
-        from sim.scenario_lib.build import populate
+        from scenarios.build import populate
         p = populate(SC)
         print(f"[run_scenario] {SC.id} ({SC.difficulty}, seed {SC.seed}): {len(p['objects'])} objects, "
               f"{len(p['fixtures'])} fixtures, {len(p['decor'])} decor groups", flush=True)
