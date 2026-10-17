@@ -15,7 +15,8 @@ from agent.goals import GoalEvaluator, derive_conditions  # noqa: E402
 from agent.vlm_roles import RecordedVLM, Roles, SceneAnswer, SubPlan  # noqa: E402
 from agent.workers import WorkerRegistry  # noqa: E402
 from agent.world_state import TaskState  # noqa: E402
-from tests.test_supervisor_goal import GoalTools, plan, run  # noqa: E402
+from tests.support.fakes import GoalTools  # noqa: E402
+from tests.support.runners import plan, run_supervisor as run  # noqa: E402
 
 PICK_A = ("pick", {"object": "a"})
 

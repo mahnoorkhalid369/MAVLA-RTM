@@ -14,7 +14,8 @@ pytest.importorskip("pydantic")
 pytest.importorskip("langgraph")
 
 from agent.ask import Answer, Candidate, LineReader, Question, ScriptedResponder, TerminalResponder, parse_answer  # noqa: E402
-from tests.test_agent import StubTools, run  # noqa: E402
+from tests.support.fakes import StubTools  # noqa: E402
+from tests.support.runners import run_workflow as run  # noqa: E402
 
 Q = Question("choose", "Which one?", "object", [
     Candidate(1, "yellow cube", (550, 150), 0.57, (40, 40, 40)),

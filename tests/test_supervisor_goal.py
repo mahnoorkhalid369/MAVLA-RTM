@@ -9,122 +9,22 @@ import pytest
 pytest.importorskip("pydantic")
 pytest.importorskip("langgraph")
 
+from tests.support.fakes import GoalTools  # noqa: E402,F401
+from tests.support.runners import plan, run_supervisor as run  # noqa: E402,F401
+
 from agent.ask import ScriptedResponder  # noqa: E402
 from agent.eventlog import EventLog  # noqa: E402
 from agent.supervisor import GoalSupervisor  # noqa: E402
 from agent.vlm_roles import GoalPlan, RecordedVLM, Roles, SceneAnswer, VLMFailure  # noqa: E402
-from tests.test_agent import StubTools  # noqa: E402
 
 PP = {"object": "a", "relation": "on", "target": "b"}
 PP2 = {**PP, "object": "c"}
 
 
-def plan(*steps, reason=""):
-    return GoalPlan(goal="g", steps=[{"do": c, **a} for c, a in steps], success="s", reason=reason)
 
 
-class GoalTools(StubTools):
-    """StubTools + what the goal supervisor needs; plans are scripted. Relations are judged with the real
-    Tools.relation_holds geometry; placing a held object follows the requested relation and reference
-    (misplace=True keeps the old fixed spot on top of object 2: a wrong placement for negative tests)."""
-
-    from agent.tools import Tools as _T
-    relation_holds = _T.relation_holds
-    _direction = _T._direction
-    begin_instruction = _T.begin_instruction  # session hooks: the real code
-    revalidate_held = _T.revalidate_held
-    OPEN_FINGER_DEG = _T.OPEN_FINGER_DEG
-    del _T
-
-    def log(self, *a, **k):  # replaced by the instruction's event log in sessions
-        pass
-
-    def __init__(self, plans, answer=None, misplace=False, **kw):
-        super().__init__(**kw)
-        from agent.config import Relations
-        self.rel, self.misplace = Relations(), misplace
-        self.plans, self.plan_calls, self.perceived, self.parks = list(plans), [], 0, 0
-        self.motion_count, self.view_cleared_at = 0, -1
-        tools = self
-
-        def plan_goal(text, menu, context=""):
-            tools.plan_calls.append(text)
-            p = tools.plans.pop(0)
-            if isinstance(p, Exception):
-                raise p
-            return p
-        from agent.vlm_roles import RequestKind
-        # the request classifier (agent/authority.py): tests set request_kind; "action" grants every effect
-        self.request_kind = "action"
-        self.roles = SimpleNamespace(plan_goal=plan_goal, answer=lambda q, facts, ids: answer or SceneAnswer(answer="two", object_ids=[1]),
-                                     classify_request=lambda text: RequestKind(kind=tools.request_kind, evidence=text))
-
-    def execute(self, steps, label):
-        self.motion_count += 1
-        return super().execute(steps, label)
-
-    def plan_place_held(self, rel, rid, frame, q):
-        """The held object goes where the relation says, from the reference's measured geometry: on its top, or
-        beside it (3 cm gap) in the relation's direction (next_to: the reference's right)."""
-        p = super().plan_place_held(rel, rid, frame, q)
-        if self.misplace:
-            return p
-        g, h = self.world.objects[rid].geometry, self.held_geom
-        if rel == "on":
-            xy, top = np.asarray(g["centre"][:2]), g["top_z"] + h["height"]
-        else:
-            d = np.array([1.0, 0.0]) if rel == "next_to" else self._direction(rel, np.asarray(g["centre"][:2]), frame)
-            xy = np.asarray(g["centre"][:2]) + d * (max(g["footprint"]) / 2 + max(h["footprint"]) / 2 + 0.03)
-            top = h["height"]
-        p.target_centre, p.target_top = [float(xy[0]), float(xy[1]), top - h["height"] / 2], float(top)
-        return p
-
-    def verify_placement(self, plan):
-        v = super().verify_placement(plan)
-        o = self.world.objects.get(plan.object_id)
-        if v["pass"] and o is not None:  # like Tools.verify_placement: the re-measured pose replaces the old one
-            from tests.test_agent import geom
-            h = o.geometry["height"]
-            o.geometry = geom(plan.target_centre[0], plan.target_centre[1], plan.target_top, support=plan.target_top - h)
-        return v
-
-    def park_for_view(self, xy):
-        self.parks += 1
-        self.view_cleared_at = self.motion_count
-        return {"ok": True}
-
-    def perceive(self, camera):
-        self.perceived += 1
-        o = super().perceive(camera)
-        o.camera, o.scores, o.excluded = "table", {k: 0.9 for k in o.marks}, []
-        o.taken_at, o.motion_count = 0.0, self.motion_count
-        o.cleared_view = self.view_cleared_at == self.motion_count
-        return o
-
-    def is_fresh(self, obs, need_clear_view=False):
-        return obs is not None and obs.motion_count == self.motion_count and (obs.cleared_view or not need_clear_view)
-
-    def view_blockage(self, q=None):
-        return 1, 36
-
-    def obstacles(self):
-        return []
-
-    def lexical_candidates(self, obs, text):
-        return []
-
-    def resolve(self, obs, text):
-        from agent.vlm_roles import Resolution
-        if text in self.ambiguous:
-            return Resolution(id=None, ambiguous=True, candidates=self.ambiguous[text])
-        return Resolution(id={"a": 1, "b": 2, "c": 3}.get(text, 2))
 
 
-def run(tmp_path, tools, responder=None, instruction="do it"):
-    log = EventLog(tmp_path / "events.jsonl")
-    r = GoalSupervisor(tools, log, tmp_path, responder or ScriptedResponder(["cancel"])).run(instruction)
-    log.close()
-    return r, [json.loads(line) for line in (tmp_path / "events.jsonl").read_text().splitlines()]
 
 
 def test_pick_and_place_goal_delegates_to_the_validated_skill(tmp_path):

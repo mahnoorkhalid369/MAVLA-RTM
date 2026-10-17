@@ -9,6 +9,19 @@
 | [REFACTOR_ROADMAP.md](REFACTOR_ROADMAP.md) | increments R0 … R10, functional fixes F1 … F5, acceptance criteria, rollback, risks |
 | [ENGINEERING_STANDARDS.md](ENGINEERING_STANDARDS.md) | packaging, naming, types, config, logging, tests, docs, artifacts, environments, CI tiers |
 
+**Start here (2026-10-17, revised objective: simple modular Python, no packaging):**
+
+| Document | Contents |
+|---|---|
+| [MODULE_GUIDE.md](MODULE_GUIDE.md) | where to find X; every folder and agent module; the simple target structure |
+| [EXECUTION_FLOW.md](EXECUTION_FLOW.md) | diagrams of the instruction path, and three traced examples with current failures marked |
+| [FUNCTIONALITY_MAP.md](FUNCTIONALITY_MAP.md) | every implemented function: file, callers, inputs/outputs, state, status, how to test |
+| [REFACTOR_CHANGELOG.md](REFACTOR_CHANGELOG.md) | before → after mapping of every move; the revised roadmap (supersedes REFACTOR_ROADMAP.md) |
+| [../DEVELOPER_GUIDE.md](../DEVELOPER_GUIDE.md) | commands to run and test each subsystem, with the Python environment for each |
+
+The six review documents above remain the reference for problems and debt. Their packaging proposals (`src/vt6l/`,
+`pyproject`, protocols) are superseded by REFACTOR_CHANGELOG.md.
+
 Earlier, phase-specific documents in this folder (`ARCHITECTURE.md`, `ACTIVE_PERCEPTION*.md`,
 `ORCHESTRATION_AUDIT.md`, `AUDIT.md`) remain as historical records.
 

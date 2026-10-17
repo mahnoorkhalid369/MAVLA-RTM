@@ -15,6 +15,9 @@ import pytest
 pytest.importorskip("pydantic")
 pytest.importorskip("langgraph")
 
+from tests.support.fakes import StubTools, geom  # noqa: E402,F401  (shared fakes; other test modules import them from tests.support)
+from tests.support.runners import TASK, run_workflow as run  # noqa: E402,F401
+
 from agent.geometry import measure  # noqa: E402
 from agent.eventlog import EventLog  # noqa: E402
 from agent.pick_place import PickPlaceWorkflow  # noqa: E402
@@ -80,11 +83,6 @@ def test_measure_rejects_tiny_mask():
 
 
 # ------------------------------------------------------------------------------------ world model
-def geom(x, y, top, fp=(0.04, 0.04), support=0.0, yaw=0.0):
-    h = top - support
-    return {"centre": [x, y, support + h / 2], "top_z": top, "height": h, "support_z": support, "yaw_deg": yaw,
-            "extents": list(fp), "footprint": [max(fp), min(fp)], "grasp_yaw_deg": yaw, "grasp_width": min(fp),
-            "symmetry_deg": 90.0 if abs(fp[0] - fp[1]) < 0.008 else 180.0, "tilt_deg": 0.5}
 
 
 def test_world_model_keeps_ids_by_geometry_only():
@@ -176,127 +174,10 @@ def test_relation_check_is_deterministic():
 
 
 # ------------------------------------------------------------------------------------- supervisor
-class StubTools:
-    """Scripted outcomes for each tool: tests the state machine, budgets and honesty of the verdict."""
-
-    OBJECTS = {1: (geom(0.55, 0.15, 0.04), {"name": "cube", "colour": "yellow"}),
-               2: (geom(0.55, 0.45, 0.05), {"name": "box", "colour": "tan"}),
-               3: (geom(0.0, 0.85, 0.04, fp=(0.05, 0.05)), {"name": "cube", "colour": "gold yellow"})}
-
-    def __init__(self, contact=(True,), placement=(True,), ambiguous=None, exec_fail=None, task="pick_place",
-                 home_ok=True, home_error_deg=0.1):
-        self.contact, self.placement = list(contact), list(placement)
-        self.home_ok, self.home_error_deg, self.home_calls = home_ok, home_error_deg, 0
-        self.resolved_refs, self.last_referent = {}, None
-        self.held = self.held_object = self.held_geom = self.held_close_target = None
-        self.ambiguous, self.exec_fail, self.task = ambiguous or {}, exec_fail, task
-        self.confirmed, self.planned = [], []
-        self.world = WorldModel()
-        self.ex = SimpleNamespace(safety_events=[], spin=lambda s: None)
-        self.bridge = SimpleNamespace(q=lambda: np.zeros(6))
-        self.held_box = None
-        self.executed = []
-        from agent.vlm_roles import TaskSpec
-        self.roles = SimpleNamespace(parse=lambda s: TaskSpec.model_validate(
-            {"task": self.task, "object": {"text": "a"}, "relation": "on", "reference": {"text": "b"}}))
-
-    def park_for_view(self, xy):
-        return {"ok": True}
-
-    def assume_placed(self, plan):
-        pass
-
-    def perceive(self, camera):
-        ids = self.ids = {k: self.world.observe(g, d) for k, (g, d) in self.OBJECTS.items()}
-        return SimpleNamespace(marks={k: None for k in self.OBJECTS}, measured={k: g for k, (g, _) in self.OBJECTS.items()},
-                               object_ids=ids, descriptions={k: d for k, (_, d) in self.OBJECTS.items()}, frame_id="t")
-
-    def describe(self, obs, marks=None):
-        pass
-
-    def shortlist(self, obs, texts):
-        self.shortlisted = texts
-
-    def update_world(self, obs):
-        return []
-
-    def resolve(self, obs, text):
-        from agent.vlm_roles import Resolution
-        if text in self.ambiguous:
-            return Resolution(id=None, ambiguous=True, candidates=self.ambiguous[text])
-        return Resolution(id=1 if text == "a" else 2)
-
-    def confirm(self, obs, mark, text):
-        from agent.vlm_roles import Confirmation
-        self.confirmed.append((mark, text))
-        return Confirmation(match="yes")
-
-    def relation_holds(self, *a):
-        return True
-
-    def plan_pick_place(self, oid, rel, rid, frame, q):
-        from control.skills import GripperStep, Held
-        self.planned.append((oid, rid))
-        return SimpleNamespace(object_id=oid, hover=["hover"], approach=["down", GripperStep(0.5, "close")], lift=["lift"],
-                               place=["carry", "lower", "open", "retreat"], held=Held(0.04, 0.02, 0, "obj_1", 0.04, 0.04),
-                               grasp={}, target_centre=[0.55, 0.45, 0.07], target_top=0.09, relation=rel, reference_id=rid)
-
-    def execute(self, steps, label):
-        self.executed.append(label)
-        ok = label != self.exec_fail
-        return SimpleNamespace(ok=ok, failed_step="x" if not ok else "", reason="safety layer rejected" if not ok else "")
-
-    def verify_contact(self, target):
-        return {"check": "contact", "pass": self.contact.pop(0) if len(self.contact) > 1 else self.contact[0]}
-
-    deterministic = staticmethod(lambda reason: "out of reach" in reason)
-
-    def set_held(self, plan, close_target):
-        self.held, self.held_object, self.held_close_target = plan.held, plan.object_id, close_target
-        self.held_geom = dict(self.world.objects[plan.object_id].geometry) if plan.object_id in self.world.objects else geom(0.5, 0.2, 0.04)
-        self.world.holding = plan.object_id
-
-    def clear_held(self):
-        self.held = self.held_object = self.held_geom = self.held_close_target = None
-        self.world.holding = None
-
-    def plan_pick(self, oid, q):
-        p = self.plan_pick_place(oid, "hold", None, "robot", q)
-        p.place = []
-        return p
-
-    def plan_place_held(self, rel, rid, frame, q):
-        p = self.plan_pick_place(self.held_object, rel, rid, frame, q)
-        p.hover, p.approach, p.lift = [], [], []
-        return p
-
-    def return_home(self):
-        self.home_calls += 1
-        if self.home_ok is True:
-            res = self.execute(["home"], "return HOME")
-            return {"ok": res.ok, "reason": res.reason, "result": res}
-        return {"ok": False, "reason": self.home_ok}
-
-    def verify_home(self):
-        return {"check": "home", "max_error_deg": self.home_error_deg, "tolerance_deg": 1.5, "tcp_error_mm": 0.5,
-                "pass": self.home_error_deg <= 1.5}
-
-    def verify_placement(self, plan):
-        ok = self.placement.pop(0) if len(self.placement) > 1 else self.placement[0]
-        return {"check": "placement", "pass": ok, "xy_error_mm": 3.0, "z_error_mm": 1.0, "tilt_deg": 0.4}
 
 
-TASK = {"object": {"text": "a"}, "relation": "on", "reference": {"text": "b"}, "frame": "robot"}
 
 
-def run(tmp_path, tools, instruction="put a on b", responder=None, task=None, final_home=True):
-    """Runs the pick-and-place skill (the planner's interpretation is given as `task`)."""
-    from agent.ask import ScriptedResponder
-    log = EventLog(tmp_path / "events.jsonl")
-    wf = PickPlaceWorkflow(tools, log, tmp_path, responder or ScriptedResponder(["cancel"]), final_home=final_home)
-    r = wf.run(instruction, task or TASK)
-    log.close()
-    return r, [json.loads(line) for line in (tmp_path / "events.jsonl").read_text().splitlines()]
 
 
 def test_supervisor_happy_path_completes_only_after_verification(tmp_path):

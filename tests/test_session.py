@@ -14,7 +14,7 @@ pytest.importorskip("langgraph")
 from agent.ask import ScriptedResponder  # noqa: E402
 from agent.run import Session  # noqa: E402
 from agent.vlm_roles import RecordedVLM  # noqa: E402
-from tests.test_supervisor_goal import GoalTools  # noqa: E402
+from tests.support.fakes import GoalTools  # noqa: E402
 
 PICK = '{"goal": "hold it", "steps": [{"do": "pick", "object": "%s"}]}'
 PLACE = '{"goal": "placed", "steps": [{"do": "place", "object": "it", "relation": "%s", "target": "%s"}]}'
