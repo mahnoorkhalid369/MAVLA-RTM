@@ -9,17 +9,20 @@
 | [REFACTOR_ROADMAP.md](REFACTOR_ROADMAP.md) | increments R0 … R10, functional fixes F1 … F5, acceptance criteria, rollback, risks |
 | [ENGINEERING_STANDARDS.md](ENGINEERING_STANDARDS.md) | packaging, naming, types, config, logging, tests, docs, artifacts, environments, CI tiers |
 
-**Start here (2026-10-17, revised objective: simple modular Python, no packaging):**
+**Start here (2026-10-17, revised objective: simple modular Python, no packaging).** The code was restructured
+on 2026-10-17 (commits `761ec65` … `46f0802`), and that restructuring is **NOT TESTED**: see
+REFACTOR_CHANGELOG.md for the changes, the risks and the order in which to verify them.
 
 | Document | Contents |
 |---|---|
-| [MODULE_GUIDE.md](MODULE_GUIDE.md) | where to find X; every folder and agent module; the simple target structure |
+| [MODULE_GUIDE.md](MODULE_GUIDE.md) | where to find X; the final directory structure; before → after module mapping |
 | [EXECUTION_FLOW.md](EXECUTION_FLOW.md) | diagrams of the instruction path, and three traced examples with current failures marked |
 | [FUNCTIONALITY_MAP.md](FUNCTIONALITY_MAP.md) | every implemented function: file, callers, inputs/outputs, state, status, how to test |
-| [REFACTOR_CHANGELOG.md](REFACTOR_CHANGELOG.md) | before → after mapping of every move; the revised roadmap (supersedes REFACTOR_ROADMAP.md) |
+| [REFACTOR_CHANGELOG.md](REFACTOR_CHANGELOG.md) | every move, split, consolidation and removal; state / config changes; compatibility risks; roadmap status (supersedes REFACTOR_ROADMAP.md) |
 | [../DEVELOPER_GUIDE.md](../DEVELOPER_GUIDE.md) | commands to run and test each subsystem, with the Python environment for each |
 
-The six review documents above remain the reference for problems and debt. Their packaging proposals (`src/vt6l/`,
+The review documents below describe the code as it was at `f094d2f`, before the restructuring. Their file paths are
+historical; MODULE_GUIDE.md §4 maps them to the current files. They remain the reference for problems and debt. Their packaging proposals (`src/vt6l/`,
 `pyproject`, protocols) are superseded by REFACTOR_CHANGELOG.md.
 
 Earlier, phase-specific documents in this folder (`ARCHITECTURE.md`, `ACTIVE_PERCEPTION*.md`,

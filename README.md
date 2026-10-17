@@ -1,5 +1,22 @@
 # Epson VT6L — Isaac Sim 6.1 simulation
 
+## Current layout (2026-10-17; restructured, NOT TESTED since)
+
+| Folder | What is there |
+|---|---|
+| `agent/` | the current agent: entry point `run.py`, `session.py`, `supervisor.py`, `capabilities/`, `tools/`, `vlm_roles/` (Gemma), `controls.py` |
+| `perception/` | YOLO detector, depth geometry, mark images, world model, wrist-camera viewpoints (+ shared / legacy helpers) |
+| `config/` | thresholds, tolerances, budgets, model paths |
+| `scenarios/` | scenario library (laboratory) and JSON test scenes; offline design checks |
+| `sim/` | Isaac Sim processes (`run_live.py` default scene, `run_scenario.py` test scenes) |
+| `control/`, `execution/`, `safety/` | frozen manipulation core (kinematics, planning, executor, joint limits) |
+| `evaluation/`, `experiments/` | experiment runners, scorers, studies; frozen baseline experiments |
+| `tests/` | offline tests (`tests/support/` shared fakes) |
+
+Start with `docs/architecture/MODULE_GUIDE.md` (where to find X), `docs/architecture/EXECUTION_FLOW.md` and
+`docs/DEVELOPER_GUIDE.md` (commands and Python environments). The sections below describe the earlier,
+legacy setup (`launch/run.sh`, `vlm/`, `ros_nodes/`), which is kept but not used by the current agent.
+
 ## Code layout
 Each folder has one job and runs in one Python environment.
 

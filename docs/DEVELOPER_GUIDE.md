@@ -8,6 +8,10 @@ Read first:
 
 All commands run from the repository root.
 
+> **The restructuring of 2026-10-17 is NOT TESTED.** The commands below were updated for the new layout, but
+> none of them has been run since. The expected counts ("expect: …") were measured before the restructuring.
+> `docs/architecture/REFACTOR_CHANGELOG.md` lists the risks to check and a suggested order.
+
 ## 0. Which Python for what
 
 | Environment | Use it for | Notes |
@@ -31,12 +35,12 @@ while the simulator runs.
 
 ```bash
 # Robot, safety, perception helpers, scenarios, scorers (agent tests are skipped here):
-/usr/bin/python3 -m pytest                                  # expect: 172 passed, 6 skipped
+/usr/bin/python3 -m pytest                                  # expect (before the restructuring): 172 passed, 6 skipped
 
 # The agent: supervisor, workflows, authorization, session, ask (mocked tools, scripted Gemma):
 env -u PYTHONPATH -u AMENT_PREFIX_PATH .venv-seg/bin/python -m pytest \
     tests/test_agent.py tests/test_agent_ask.py tests/test_supervisor_goal.py \
-    tests/test_orchestration.py tests/test_session.py tests/test_authority.py   # expect: 142 passed
+    tests/test_orchestration.py tests/test_session.py tests/test_authority.py   # expect (before): 142 passed
 
 # Frozen manipulation baseline unchanged:
 grep -v '^#' docs/baselines/manipulation_A_2026-10-14/MANIFEST.sha256 | sha256sum -c --quiet && echo FROZEN-OK
@@ -88,7 +92,51 @@ Other recorded calls: `t.plan_calls`, `t.home_calls`, `t.parks`. For the pick-an
 
 Expect failures at the current HEAD (BD-1).
 
+**Execution controls: blocked, dry-run, disabled, no replanning** (`agent/controls.py`). These are the explicit
+switches that replaced the Experiment 1 monkeypatches. Use them to run real code without robot motion:
+
+```python
+from pathlib import Path
+from agent.controls import ExecutionControls
+from agent.tools import Tools
+
+# Tools with no robot at all: a blocked or dry-run execute never touches the executor.
+t = Tools(bridge=None, detector=None, roles=None, executor=None, log=lambda *a, **k: print(a, k), run_dir=Path("."),
+          controls=ExecutionControls(motion="blocked"))
+r = t.execute([], "test move")      # expected: r.ok is False, a "tool execute_refused" event, motion_count unchanged
+t.controls.motion = "dry_run"
+r = t.execute([], "test move")      # expected: r.ok is False, a "tool execute_dry_run" event
+```
+
+```python
+from agent.ask import ScriptedResponder
+from agent.eventlog import EventLog
+from agent.supervisor import GoalSupervisor
+from tests.support.fakes import GoalTools
+from tests.support.runners import plan
+from agent.controls import ExecutionControls
+
+def test_disabled_capability(tmp_path):
+    t = GoalTools([plan(("pick_place", {"object": "a", "relation": "on", "target": "b"}))])
+    log = EventLog(tmp_path / "events.jsonl")
+    controls = ExecutionControls(disabled={"pick_place"}, max_replans=0)
+    r = GoalSupervisor(t, log, tmp_path, ScriptedResponder(["cancel"]), controls=controls).run("put a on b")
+    # expected (GoalTools classifies every request as an action): the step's outcome is "unsupported"
+    # ("pick_place is disabled by the execution controls"), r["status"] == "UNSUPPORTED", t.executed == []
+```
+
+The same controls go to the whole agent through `agent.run.main(controls=...)`. That is how
+`evaluation/lab_exp1_agent.py` runs Experiment 1: motion is blocked until an "@motion on" line, five
+capabilities are disabled, and replanning is off.
+
 ## 3. Load the laboratory scenario (Isaac Sim, no agent)
+
+The scenario code is in `scenarios/` (laboratory definition `scenarios/laboratory.py`; JSON scenes in
+`scenarios/scenes/`). Offline design checks, with no Isaac, run on the system Python:
+
+```bash
+/usr/bin/python3 -m scenarios.checks --scenario laboratory --difficulty easy --seed 42 --out out/dev/design.json
+```
 
 ```bash
 source /opt/ros/jazzy/setup.bash && export ROS_DOMAIN_ID=42 OMNI_KIT_ACCEPT_EULA=YES

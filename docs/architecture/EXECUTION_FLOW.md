@@ -1,5 +1,31 @@
 # Execution flow: what happens when you type an instruction
 
+> **The restructuring of 2026-10-17 is NOT TESTED.** This page describes the code after it. The flow, the
+> function names and the behaviour are unchanged; only the files moved (`REFACTOR_CHANGELOG.md`). Evidence
+> cited below was recorded before the restructuring.
+
+Where the functions named below live:
+
+| Name | File |
+|---|---|
+| `Session` | `agent/session.py` |
+| `GoalSupervisor` | `agent/supervisor.py` |
+| `complete_plan`, `achieves` | `agent/planning.py` |
+| `ExecutionControls` | `agent/controls.py` |
+| `run_observe`, `run_describe_scene`, `run_answer`, `run_locate`, `_location_check`, `_target_mark` | `agent/capabilities/perception.py` |
+| `run_inspect`, `run_explore`, `_wrist_observation` | `agent/capabilities/inspection.py` |
+| `run_pick`, `run_place`, `run_pick_place`, `run_return_home`, `_failure_outcome` | `agent/capabilities/manipulation.py` |
+| `run_decompose` | `agent/capabilities/planning.py` |
+| `Tools.perceive`, `describe`, `update_world`, `is_fresh` | `agent/tools/perception.py` |
+| `Tools.resolve`, `lexical_candidates`, `confirm`, `relation_holds` | `agent/tools/resolution.py` |
+| `Tools.plan_*`, `park_for_view`, `return_home`, `obstacles` | `agent/tools/manipulation.py` |
+| `Tools.execute` | `agent/tools/execution.py` |
+| `Tools.verify_*` | `agent/tools/verification.py` |
+| `Tools.set_held`, `clear_held`, `begin_instruction`, `revalidate_held` | `agent/tools/held.py` |
+| `Roles.*` | `agent/vlm_roles/roles.py` (prompts in `prompts.py`) |
+| `YoloDetector`, `measure`, `WorldModel`, `ViewpointPlanner` | `perception/detector.py`, `geometry.py`, `world_model.py`, `viewpoints.py` |
+| `TaskState` | `agent/task_state.py` |
+
 Every step below names the real function that runs it. Where a step currently fails or is untested live, the text
 says so, using the status words of `FUNCTIONALITY_MAP.md`. Known defects are BD-n (`TECHNICAL_DEBT.md` §2).
 
@@ -8,13 +34,13 @@ says so, using the status words of `FUNCTIONALITY_MAP.md`. Known defects are BD-
 ```mermaid
 sequenceDiagram
   participant U as User (stdin)
-  participant S as Session.run<br/>agent/run.py
+  participant S as Session.run<br/>agent/session.py
   participant G as GoalSupervisor<br/>agent/supervisor.py
   participant A as authority.classify<br/>agent/authority.py
-  participant L as Roles (Gemma)<br/>agent/vlm_roles.py
+  participant L as Roles (Gemma)<br/>agent/vlm_roles/roles.py
   participant R as WorkerRegistry.dispatch<br/>agent/workers.py
-  participant C as run_<capability><br/>agent/capabilities.py
-  participant T as Tools<br/>agent/tools.py
+  participant C as run_<capability><br/>agent/capabilities/
+  participant T as Tools<br/>agent/tools/
   participant X as RosExecutor (frozen)<br/>+ simulator safety layer
   participant V as GoalEvaluator<br/>agent/goals.py
 
@@ -64,7 +90,7 @@ stateDiagram-v2
   DISPATCHING --> FAILED: > MAX_STEPS_EXECUTED (14)
   DELEGATING --> REVIEWING
   REVIEWING --> DISPATCHING: completed / subtask inserted / step refused
-  REVIEWING --> REPLANNING: recoverable failure, replans < MAX_REPLANS (1)
+  REVIEWING --> REPLANNING: recoverable failure, replans < controls.max_replans (1)
   REVIEWING --> CANCELLED: cancelled / ambiguous
   REVIEWING --> UNSUPPORTED: unsupported
   REVIEWING --> FAILED: unsafe / infeasible / budget used
@@ -76,7 +102,7 @@ stateDiagram-v2
 
 | State | Function | What it does |
 |---|---|---|
-| INTERPRETING | `_interpreting` | `authority.classify` → `Roles.plan_goal` (Gemma, `PLAN_SYSTEM`) → `complete_plan` → `_add_steps`. Questions get the condition `answered(<instruction>)`; other conditions are derived from the steps (`goals.derive_conditions`). |
+| INTERPRETING | `_interpreting` | `authority.classify` → `Roles.plan_goal` (Gemma, `PLAN_SYSTEM`) → `complete_plan` (`agent/planning.py`) → `_add_steps`. Questions get the condition `answered(<instruction>)`; other conditions are derived from the steps (`goals.derive_conditions`). |
 | DISPATCHING | `_dispatching` | picks `TaskState.current()`, `_bind_refs` ("it" → `#id`), `_adapt_to_robot_state` (pick_place of the held object → place), auto-observe (`capabilities.run_observe`) if the step needs a fresh view (`NEEDS_OBSERVATION`, `Tools.is_fresh`) |
 | DELEGATING | `_delegating` | `WorkerRegistry.request` → `dispatch(req, ctx, authority)`; records the result in the ledger |
 | REVIEWING | `_reviewing` | the policy: decomposition insert (refusing out-of-authority steps), uncertain answer → inspect (≤ 2) + answer again, locate not visible → explore + locate, `unauthorized` → refuse and continue, otherwise stop or replan |
@@ -106,11 +132,11 @@ flowchart LR
   A[run_observe] -->|clear_view?| P[Tools.park_for_view]
   A --> B[Tools.perceive camera]
   B --> C[RosBridge.snapshot → Frame rgb, depth, K, q]
-  B --> D[YoloDetector.detect → masks + scores]
-  D --> E["geometry.measure(mask, depth, K, T, RobotVolume)\n→ Measured or excluded (robot / fixture / no points)"]
+  B --> D[perception/detector.py YoloDetector.detect → masks + scores]
+  D --> E["perception/geometry.py measure(mask, depth, K, T, RobotVolume)\n→ Measured or excluded (robot / fixture / no points)"]
   E --> F[snap_supports → Observation marks, measured, som image]
   F --> G["Tools.describe → DescriptionMemory / world match / Roles.describe_many (Gemma per crop)"]
-  G --> H["Tools.update_world → WorldModel.observe (match by centre 30 mm, top 20 mm, footprint) → world id"]
+  G --> H["Tools.update_world → perception/world_model.py WorldModel.observe (match by centre 30 mm, top 20 mm, footprint) → world id"]
   H --> I[TaskState.record_observation → facts + hypotheses]
 ```
 
@@ -152,8 +178,9 @@ references, remembered clarifications (`Tools.resolved_refs`) and user questions
 | Layer | Where | What it guarantees |
 |---|---|---|
 | Request authority | `agent/authority.py`, `WorkerRegistry.dispatch` | no object-changing capability unless the user's request is an action (BD-3: negated commands slip through) |
-| Viewpoint planning | `exploration.ViewpointPlanner.plan` (inspect / explore) | camera look-at IK, line of sight, pose and path collision-checked against measured obstacles (`Tools.obstacles`) |
+| Viewpoint planning | `perception/viewpoints.py` `ViewpointPlanner.plan` (inspect / explore) | camera look-at IK, line of sight, pose and path collision-checked against measured obstacles (`Tools.obstacles`) |
 | Grasp / place planning | `Tools.plan_pick_place` / `plan_pick` / `plan_place_held` → frozen `control.skills.SkillPlanner` with `control.collision.CollisionChecker` | collision-checked approach, grasp, lift, carry, place, retreat; deterministic infeasibility (out of reach, too wide) is not retried |
+| Execution controls | `agent/controls.py` `ExecutionControls`, checked first in `Tools.execute` | motion "real" sends the trajectory; "dry_run" / "blocked" log it and return a failed result without sending anything (default: real). **New, not tested** |
 | Execution | `Tools.execute` → frozen `execution/ros_executor.RosExecutor.execute` | trajectories streamed over ROS; reach checked |
 | Physical safety | frozen `sim/ros_control.JointCommandInterface` + `safety/joint_limits.JointLimits` | every command checked against joint limits and speeds in the simulator process, independent of the agent |
 | Verification | `Tools.verify_contact`, `verify_placement`, `verify_home`; `goals.py` | measured success, never assumed |
@@ -182,12 +209,12 @@ references, remembered clarifications (`Tools.resolved_refs`) and user questions
 ```mermaid
 flowchart TD
   subgraph L1["Level 1: inside pick-and-place (agent/pick_place.py)"]
-    F1[_fail cls, reason] --> B1{budget left for cls?\nconfig.Budgets.retries}
+    F1[_fail cls, reason] --> B1{budget left for cls?\nconfig/agent.py Budgets.retries}
     B1 -->|yes| RC[RECOVERING: grasp → reopen + lift + re-observe;\nplacement → look again; perception/planning → re-observe]
     B1 -->|no| FF[FAILED with cls]
     PE[PlanningError deterministic?\nTools.deterministic] -->|yes| FF
   end
-  subgraph L2["Level 2: capability result (agent/capabilities.py)"]
+  subgraph L2["Level 2: capability result (agent/capabilities/manipulation.py)"]
     FF --> MAP[_failure_outcome cls → outcome:\ninfeasible, failed, unsafe, cancelled, insufficient_info, unsupported]
   end
   subgraph L3["Level 3: supervisor review (agent/supervisor.py)"]
