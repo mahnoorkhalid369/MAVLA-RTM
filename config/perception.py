@@ -1,16 +1,13 @@
-"""Fixed knowledge of the agent: physical and safety configuration ONLY (no object knowledge).
+"""Perception configuration: depth-measurement thresholds and the fixed fixtures that are never objects.
 
-Everything about objects is discovered (masks), measured (depth) and described (VLM) at runtime.
+Used by agent/geometry.py (measurement and exclusion) and agent/tools (planning obstacles).
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-
-import numpy as np
+from dataclasses import dataclass
 
 from control.robot import TABLE_CAMERA_POSITION
-from sim.scene_objects import MIC_POSITION  # physical position of the microphone prop (configuration)
 
 GROUND_Z = 0.0  # m: the support surface (floor) of the work cell
 ABOVE_SUPPORT = 0.003  # m: depth points closer than this to the floor inside a mask edge are floor
@@ -23,6 +20,10 @@ MASK_ERODE_PX = 2  # pixels removed at mask edges (depth bleeding)
 MIN_POINTS = 30  # depth points needed to measure an object
 ROBOT_INFLATE = 0.01  # m: robot collision spheres are inflated by this for exclusion
 FIXTURE_INFLATE = 0.01
+
+# Floor position (m) of the microphone prop of the default scene: the same value as the frozen
+# sim/scene_objects.MIC_POSITION (copied so the agent does not import simulator modules).
+MIC_POSITION = (-0.45, 0.35, 0.0)
 
 
 @dataclass(frozen=True)
@@ -48,37 +49,3 @@ FIXTURES = _fixtures()
 # Used for perception exclusion ONLY (not a planning obstacle: the arm itself is inside it). The base
 # plate is 0.240 x 0.285 m (URDF); the closest workspace position is 0.34 m from the base axis.
 ROBOT_BASE_EXCLUSION = FixtureBox("robot_base_column", (0.0, 0.0, 0.25), (0.15, 0.16, 0.25))
-
-
-@dataclass
-class Tolerances:
-    """Placement success (the same numbers as Baseline A); never loosened to pass a test."""
-    xy_m: float = 0.010
-    z_m: float = 0.005
-    tilt_deg: float = 5.0
-    contact_deg: float = 1.5  # fingers stopping this far before the close target = contact
-    min_support_width_m: float = 0.030  # "on": the support's top must be at least this wide
-
-
-@dataclass
-class Budgets:
-    """Recovery budgets per failure class (approved)."""
-    retries: dict = field(default_factory=lambda: {"perception": 2, "planning": 2, "grasp": 1, "execution": 0,
-                                                    "placement": 1, "understanding": 0})
-    max_questions: int = 2
-    question_timeout_s: float = 120.0
-
-
-@dataclass
-class Relations:
-    """Placement relations (robot frame: +x = robot's right, +y = forward from the base)."""
-    gap_m: float = 0.02  # between footprints for next_to / directional relations
-    search_step_m: float = 0.01
-    search_max_m: float = 0.10
-    search_angles_deg: tuple = (0.0, 15.0, -15.0, 30.0, -30.0)
-    relation_check_max_gap_m: float = 0.15  # relational REFERENCE check: target within this of the anchor
-
-
-def unit(v) -> np.ndarray:
-    v = np.asarray(v, float)
-    return v / max(np.linalg.norm(v), 1e-9)

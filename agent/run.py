@@ -24,8 +24,9 @@ import sys
 import time
 from pathlib import Path
 
+from config.models import DETECTOR_CONF, DETECTOR_IMGSZ, YOLO_WEIGHTS
+
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_WEIGHTS = ROOT / "out/seg/runs/yolo11s_seg_r1/weights/best.pt"
 
 
 def start_sim(gui: bool, log: Path, scenario: str | None = None) -> subprocess.Popen:
@@ -96,9 +97,9 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--instruction", help="one instruction (otherwise: interactive prompt)")
     ap.add_argument("--out", default=str(ROOT / "out/demo" / time.strftime("%Y-%m-%d") / time.strftime("live_%H%M%S")))
-    ap.add_argument("--weights", default=str(DEFAULT_WEIGHTS))
-    ap.add_argument("--imgsz", type=int, default=1024)
-    ap.add_argument("--conf", type=float, default=0.25)
+    ap.add_argument("--weights", default=str(YOLO_WEIGHTS))
+    ap.add_argument("--imgsz", type=int, default=DETECTOR_IMGSZ)
+    ap.add_argument("--conf", type=float, default=DETECTOR_CONF)
     ap.add_argument("--start-sim", action="store_true", help="start Isaac Sim after loading the models")
     ap.add_argument("--gui", action="store_true", help="with --start-sim: show the Isaac Sim window")
     ap.add_argument("--scenario", help="with --start-sim: an active-perception test scene (sim/scenarios/<name>.json)")
@@ -114,7 +115,7 @@ def main() -> int:
     a = ap.parse_args()
     out = Path(a.out)
     from agent.ask import LineReader, ScriptedResponder, TerminalResponder
-    from agent.config import Budgets
+    from config.agent import Budgets
     timeout = Budgets().question_timeout_s if a.ask_timeout is None else a.ask_timeout
     responder = TerminalResponder(timeout_s=timeout) if a.ask == "terminal" else ScriptedResponder(["cancel"])
     from agent.live import LiveChannel

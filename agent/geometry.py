@@ -14,8 +14,8 @@ from dataclasses import asdict, dataclass
 import cv2
 import numpy as np
 
-from agent.config import (ABOVE_SUPPORT, FIXTURE_INFLATE, FIXTURES, GROUND_Z, ROBOT_BASE_EXCLUSION, MASK_ERODE_PX, MIN_POINTS, ROBOT_INFLATE,
-                          SUPPORT_SNAP, TOP_LAYER, UP_NORMAL)
+from config.perception import (ABOVE_SUPPORT, FIXTURE_INFLATE, FIXTURES, GROUND_Z, ROBOT_BASE_EXCLUSION, MASK_ERODE_PX, MIN_POINTS, ROBOT_INFLATE,
+                               SUPPORT_SNAP, TOP_LAYER, UP_NORMAL)
 from perception.grounding import footprint_yaw, grasp_pose
 
 

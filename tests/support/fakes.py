@@ -151,7 +151,7 @@ class GoalTools(StubTools):
 
     def __init__(self, plans, answer=None, misplace=False, **kw):
         super().__init__(**kw)
-        from agent.config import Relations
+        from config.agent import Relations
         self.rel, self.misplace = Relations(), misplace
         self.plans, self.plan_calls, self.perceived, self.parks = list(plans), [], 0, 0
         self.motion_count, self.view_cleared_at = 0, -1

@@ -25,7 +25,7 @@ from langgraph.graph import END, StateGraph
 
 from agent.ask import Answer, Candidate, Question
 from agent.eventlog import EventLog
-from agent.config import Budgets
+from config.agent import Budgets
 from agent.vlm_roles import VLMFailure
 from control.motion import PlanningError
 

@@ -31,7 +31,7 @@ from langgraph.graph import END, StateGraph
 
 from agent import authority as authority_mod
 from agent import capabilities as caps
-from agent.config import Budgets
+from config.agent import Budgets
 from agent.eventlog import EventLog
 from agent.goals import GoalEvaluator, derive_conditions
 from agent.vlm_roles import VLMFailure

@@ -24,7 +24,7 @@ def main() -> int:
     a = ap.parse_args()
     from agent import capabilities as caps
     from agent.ask import ScriptedResponder
-    from agent.config import Budgets
+    from config.agent import Budgets
     from agent.detector import YoloDetector
     from agent.eventlog import EventLog
     from agent.ros_bridge import RosBridge

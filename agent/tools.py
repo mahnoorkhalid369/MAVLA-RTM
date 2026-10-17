@@ -15,7 +15,8 @@ from dataclasses import dataclass, field
 import cv2
 import numpy as np
 
-from agent.config import FIXTURES, Relations, Tolerances, unit
+from config.agent import Relations, Tolerances
+from config.perception import FIXTURES
 from agent.geometry import RobotVolume, measure, snap_supports
 from agent.somark import draw_marks, draw_names, grid, isolate, montage
 from agent.world import WorldModel
@@ -24,6 +25,11 @@ from control.kinematics import Kinematics
 from control.motion import PlanningError, joint_move
 from control.robot import ARM_HOME, ARM_SPEED, gripper_gap, table_camera_pose
 from control.skills import Held, SkillPlanner
+
+
+def unit(v) -> np.ndarray:
+    v = np.asarray(v, float)
+    return v / max(np.linalg.norm(v), 1e-9)
 
 
 def mean_rgb(rgb: np.ndarray, mask: np.ndarray) -> np.ndarray:

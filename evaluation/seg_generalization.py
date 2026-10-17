@@ -130,8 +130,8 @@ def evaluate(view: Path, meta: dict, detector) -> dict:
 
 def main(root: str) -> int:
     from agent.detector import YoloDetector
-    from agent.run import DEFAULT_WEIGHTS
-    detector = YoloDetector(str(DEFAULT_WEIGHTS), 1024, 0.25)
+    from config.models import DETECTOR_CONF, DETECTOR_IMGSZ, YOLO_WEIGHTS
+    detector = YoloDetector(str(YOLO_WEIGHTS), DETECTOR_IMGSZ, DETECTOR_CONF)
     rootp = Path(root)
     out = {"params": {"PROTRUDE_m": sd.PROTRUDE, "MIN_PX": sd.MIN_PX, "CELL_m": sd.CELL, "OPEN_m": sd.OPEN,
                       "MATCH_XY": sd.MATCH_XY, "MATCH_IOU": sd.MATCH_IOU}, "frames": {}}
