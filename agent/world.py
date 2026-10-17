@@ -7,7 +7,7 @@ footprint); no names, colours or object lists. Visibility reasoning decides "occ
 from __future__ import annotations
 
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -137,21 +137,8 @@ class WorldModel:
                 o.description = description
         return status, oid
 
-    def mark_unseen(self, oid: int, visible_but_absent: bool) -> None:
-        """Visibility reasoning: occluded / out of view gives no evidence; 2 'visible but absent' -> missing."""
-        o = self.objects[oid]
-        if visible_but_absent:
-            o.absent_count += 1
-            if o.absent_count >= 2:
-                o.status = "missing"
-        elif o.status == "on_surface":
-            o.status = "occluded"
-
     def summary(self) -> list[dict]:
         return [{"id": o.id, "status": o.status, "description": o.description,
                  "centre_mm": [round(v * 1000) for v in o.geometry["centre"]],
                  "height_mm": round(o.geometry["height"] * 1000), "footprint_mm": [round(v * 1000) for v in o.geometry["footprint"]]}
                 for o in self.objects.values()]
-
-    def to_dict(self) -> dict:
-        return {"objects": {k: asdict(v) for k, v in self.objects.items()}, "next_id": self.next_id, "holding": self.holding}

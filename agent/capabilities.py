@@ -387,6 +387,7 @@ def run_inspect(ctx: Context, args: dict) -> StepResult:
     """Closer look at one described, visible object with the wrist camera. Read-only for the scene; moves
     the arm (collision-checked) and returns HOME (verified) at the end."""
     from agent.exploration import ViewpointPlanner
+    from control.kinematics import Kinematics
     from control.motion import joint_move
     from control.robot import ARM_SPEED
     from control.skills import MoveStep
@@ -409,7 +410,7 @@ def run_inspect(ctx: Context, args: dict) -> StepResult:
     if not plan.ok:
         return StepResult("infeasible", f"no safe inspection viewpoint for {text!r}: {plan.reason}", {"plan": plan.summary()})
     b = plan.best
-    res = t.execute([MoveStep(joint_move(Kinematics_tcp(), q0, b.q, ARM_SPEED), f"move wrist camera to inspect {text}")], "inspect view")
+    res = t.execute([MoveStep(joint_move(Kinematics(), q0, b.q, ARM_SPEED), f"move wrist camera to inspect {text}")], "inspect view")
     if not res.ok:
         return StepResult("unsafe" if "safety" in (res.reason or "").lower() else "failed", f"inspection move failed: {res.reason}")
     t.bridge.wait_still()
@@ -454,6 +455,7 @@ def run_explore(ctx: Context, args: dict) -> StepResult:
     wrist viewpoints, then HOME. Moving the camera is not finding: the result says what was newly seen; the
     supervisor decides the goal with locate."""
     from agent.exploration import ViewpointPlanner, shadow_points
+    from control.kinematics import Kinematics
     from control.motion import joint_move
     from control.robot import ARM_SPEED
     from control.skills import MoveStep
@@ -485,7 +487,7 @@ def run_explore(ctx: Context, args: dict) -> StepResult:
         tried.append({"region": point.tolist(), "behind": behind_id, "plan": plan.summary()})
         if not plan.ok:
             continue
-        res = t.execute([MoveStep(joint_move(Kinematics_tcp(), q0, plan.best.q, ARM_SPEED), f"move wrist camera to look behind object {behind_id}")], "explore view")
+        res = t.execute([MoveStep(joint_move(Kinematics(), q0, plan.best.q, ARM_SPEED), f"move wrist camera to look behind object {behind_id}")], "explore view")
         if not res.ok:
             run_return_home(ctx, {})
             return StepResult("unsafe" if "safety" in (res.reason or "").lower() else "failed", f"exploration move failed: {res.reason}")
@@ -512,11 +514,6 @@ def run_explore(ctx: Context, args: dict) -> StepResult:
     return StepResult("completed", f"Looked into {views} hidden region(s) with the wrist camera: {new_total} object(s) not "
                                    f"visible to the table camera" + (f"; {found.summary}" if found else f"; no {text!r} among them") + tail,
                       {**data, "found_summary": found.summary if found else None})
-
-
-def Kinematics_tcp():
-    from control.kinematics import Kinematics
-    return Kinematics()
 
 
 def _skill(ctx: Context, mode: str, task: dict, final_home: bool, step_no: int) -> StepResult:
@@ -609,12 +606,3 @@ def run_return_home(ctx: Context, args: dict) -> StepResult:
         return StepResult("completed", f"at HOME (max joint error {v['max_error_deg']} deg)")
     return StepResult("failed", f"HOME not reached: max joint error {v['max_error_deg']} deg > {v['tolerance_deg']} deg")
 
-
-def run_unimplemented(ctx: Context, name: str, args: dict) -> StepResult:
-    why = {"explore": "searching other viewpoints is not implemented yet: perception uses the fixed table camera "
-                      "only (the wrist camera is not used for perception), and the arm only moves aside to clear that view"}
-    return StepResult("unsupported", why.get(name, f"'{name}' is not available"))
-
-
-def elapsed(t0: float) -> float:
-    return round(time.monotonic() - t0, 1)

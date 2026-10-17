@@ -12,7 +12,6 @@ frame), the associated table-camera measurement, and the true centre; plus a pix
 import argparse
 import json
 import sys
-import threading
 import time
 from pathlib import Path
 

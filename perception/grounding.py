@@ -64,10 +64,6 @@ class ObjectEstimate:
     grasp_width: float = 0.0
     grasp_symmetry_deg: float = 180.0
 
-    def grasp_text(self) -> str:
-        return (f"grip yaw {self.grasp_yaw_deg:+.0f} deg, {self.grasp_width * 1000:.0f} mm across the fingers"
-                + (" (square/round: any quarter turn)" if self.grasp_symmetry_deg == 90.0 else ""))
-
     def pose_text(self) -> str:
         """'x 123 mm, y 456 mm, theta 12 deg' for logs."""
         x, y = self.position[0] * 1000, self.position[1] * 1000

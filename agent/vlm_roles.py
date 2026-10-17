@@ -46,37 +46,6 @@ class GemmaVLM:
             self.last_tokens = None
         return out
 
-    def _generate_batch_disabled(self, text: str, images: list, max_new_tokens: int) -> list[str]:
-        """DISABLED (benchmarked 2026-10-14): batched multimodal generation with left padding returned
-        invalid / pad-only rows for 7 of 9 crops and was not faster than single calls. Kept for reference;
-        describe_many falls back to one call per crop because GemmaVLM has no `generate_batch`."""
-        import torch
-
-        m = self.model
-        msgs = [[{"role": "user", "content": [{"type": "image", "image": m._image(img)}, {"type": "text", "text": text}]}]
-                for img in images]
-        tok = m.processor.tokenizer
-        old_side = tok.padding_side
-        tok.padding_side = "left"
-        try:
-            inputs = m.processor.apply_chat_template(msgs, tokenize=True, return_dict=True, return_tensors="pt",
-                                                     add_generation_prompt=True, enable_thinking=False,
-                                                     processor_kwargs={"padding": True}).to(m.model.device)
-            with torch.inference_mode():
-                out = m.model.generate(**inputs, max_new_tokens=max_new_tokens, do_sample=False)
-        finally:
-            tok.padding_side = old_side
-        n = inputs["input_ids"].shape[-1]
-        answers = []
-        pad = tok.pad_token_id
-        for i, row in enumerate(out):
-            raw = m.processor.decode(row[n:], skip_special_tokens=False)
-            prompt = inputs["input_ids"][i]
-            prompt = prompt[prompt != pad] if pad is not None else prompt  # this row's prompt without left padding
-            parsed = m.processor.parse_response(raw, prefix=prompt[None])
-            answers.append(str(parsed.get("content") if isinstance(parsed, dict) else parsed).strip())
-        return answers
-
 
 class RecordedVLM:
     """Replays recorded answers in order (tests: no GPU)."""

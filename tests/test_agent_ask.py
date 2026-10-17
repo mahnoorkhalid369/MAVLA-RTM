@@ -13,7 +13,7 @@ import pytest
 pytest.importorskip("pydantic")
 pytest.importorskip("langgraph")
 
-from agent.ask import Answer, Candidate, LineReader, Question, ScriptedResponder, TerminalResponder, parse_answer  # noqa: E402
+from agent.ask import Candidate, LineReader, Question, ScriptedResponder, TerminalResponder, parse_answer  # noqa: E402
 from tests.support.fakes import StubTools  # noqa: E402
 from tests.support.runners import run_workflow as run  # noqa: E402
 

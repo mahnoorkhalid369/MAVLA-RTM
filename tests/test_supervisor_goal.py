@@ -1,9 +1,7 @@
 """Goal supervisor (agent/supervisor.py), capabilities and planner validation, with mocked tools (no sim, no GPU)."""
 
 import json
-from types import SimpleNamespace
 
-import numpy as np
 import pytest
 
 pytest.importorskip("pydantic")
@@ -12,10 +10,7 @@ pytest.importorskip("langgraph")
 from tests.support.fakes import GoalTools  # noqa: E402,F401
 from tests.support.runners import plan, run_supervisor as run  # noqa: E402,F401
 
-from agent.ask import ScriptedResponder  # noqa: E402
-from agent.eventlog import EventLog  # noqa: E402
-from agent.supervisor import GoalSupervisor  # noqa: E402
-from agent.vlm_roles import GoalPlan, RecordedVLM, Roles, SceneAnswer, VLMFailure  # noqa: E402
+from agent.vlm_roles import RecordedVLM, Roles, VLMFailure  # noqa: E402
 
 PP = {"object": "a", "relation": "on", "target": "b"}
 PP2 = {**PP, "object": "c"}

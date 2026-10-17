@@ -3,7 +3,7 @@ via a one-image shortlist ("shortlist", rejected 2026-10-14) on
 today's capture, with the round-1 detector and the real Gemma. Ground truth (mask -> scene name) only
 scores the answers. Same Tools.resolve path (lexical cross-check, comparison) as the live agent.
 
-    .venv-seg/bin/python -m evaluation.demo_shortlist_bench --out out/perf/shortlist_bench.json
+    .venv-seg/bin/python -m evaluation.demo_describe_bench --out out/perf/shortlist_bench.json
 """
 
 import argparse

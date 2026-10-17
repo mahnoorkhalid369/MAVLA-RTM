@@ -39,13 +39,3 @@ class YoloDetector:
             return []
         masks = r.masks.data.cpu().numpy() > 0.5
         return [Detection(m, float(s)) for m, s in zip(masks, r.boxes.conf.cpu().numpy())]
-
-
-class FakeDetector:
-    """For tests: returns the given masks."""
-
-    def __init__(self, masks: list[np.ndarray]) -> None:
-        self.masks = masks
-
-    def detect(self, rgb: np.ndarray) -> list[Detection]:
-        return [Detection(m, 0.9) for m in self.masks]
