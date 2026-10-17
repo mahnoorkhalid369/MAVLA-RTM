@@ -3,7 +3,7 @@
 The supervisor delegates every subtask as a WorkerRequest and gets a WorkerResult back; workers never start
 other workers or change the goal (their `suggestion` is advisory). Workers are logical roles in this process
 (one shared Gemma / YOLO / ROS bridge), each owning a set of operations implemented over the existing,
-validated code (agent/capabilities.py executors, PickPlaceWorkflow, the viewpoint planner, Tools checks).
+validated code (agent/capabilities/ executors, PickPlaceWorkflow, the viewpoint planner, Tools checks).
 
     reg = WorkerRegistry(log)
     req = reg.request(state, capability="pick", args={...}, objective="hold the dark brown block", ...)
