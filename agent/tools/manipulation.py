@@ -45,13 +45,12 @@ class ManipulationTools:
                 return f"obj_{o.id}"
         return None
 
-    def plan_pick_place(self, object_id: int, relation: str, reference_id: int | None, frame: str,
-                        q_start: np.ndarray, yaw_offset_deg: float = 0.0) -> PickPlan:
-        o = self.world.objects[object_id]
-        g = o.geometry
-        for oid in (object_id, reference_id if relation == "on" else None):
-            if oid is not None and self.world.objects[oid].geometry["tilt_deg"] is None:
-                raise PlanningError(f"object {oid}: its top face is not visible, so its pose is not measured well enough")
+    def _plan_grasp(self, object_id: int, q_start: np.ndarray, yaw_offset_deg: float):
+        """The grasp part shared by plan_pick and plan_pick_place: hover, descend + close, lift, on the measured
+        geometry (its top face must be visible). Returns (planner, geometry, hover, approach, lift, q, held, grasp)."""
+        g = self.world.objects[object_id].geometry
+        if g["tilt_deg"] is None:
+            raise PlanningError(f"object {object_id}: its top face is not visible, so its pose is not measured well enough")
         planner = SkillPlanner(self.kin, collision=CollisionChecker(self.obstacles()))
         width = g["grasp_width"]
         # extent along the fingers' faces = the footprint side that is not the grasp width
@@ -59,12 +58,19 @@ class ManipulationTools:
         length = fp[0] if abs(fp[1] - width) <= abs(fp[0] - width) else fp[1]
         planner.check_width(width)
         top = np.array([g["centre"][0], g["centre"][1], g["top_z"]])
-        name = f"obj_{object_id}"
         hover, q, yaw = planner.hover(q_start, top, g["grasp_yaw_deg"] + yaw_offset_deg, g["symmetry_deg"])
-        approach, lift, q, held = planner.grasp(q, top, yaw, name, width, length, self._support_name(g), g["height"])
+        approach, lift, q, held = planner.grasp(q, top, yaw, f"obj_{object_id}", width, length, self._support_name(g), g["height"])
+        grasp = {"yaw_deg": round(yaw, 1), "width_mm": round(width * 1000, 1), "height_mm": round(g["height"] * 1000, 1)}
+        return planner, g, hover, approach, lift, q, held, grasp
+
+    def plan_pick_place(self, object_id: int, relation: str, reference_id: int | None, frame: str,
+                        q_start: np.ndarray, yaw_offset_deg: float = 0.0) -> PickPlan:
+        for oid in (object_id, reference_id if relation == "on" else None):
+            if oid is not None and self.world.objects[oid].geometry["tilt_deg"] is None:
+                raise PlanningError(f"object {oid}: its top face is not visible, so its pose is not measured well enough")
+        planner, g, hover, approach, lift, q, held, grasp = self._plan_grasp(object_id, q_start, yaw_offset_deg)
         place, target_centre, target_top = self._plan_place(planner, q, held, g, relation, reference_id, frame)
-        return PickPlan(object_id, hover, approach, lift, place, held,
-                        {"yaw_deg": round(yaw, 1), "width_mm": round(width * 1000, 1), "height_mm": round(g["height"] * 1000, 1)},
+        return PickPlan(object_id, hover, approach, lift, place, held, grasp,
                         list(map(float, target_centre)), float(target_top), relation, reference_id)
 
     DETERMINISTIC = ("out of reach", "too narrow", "fits at most", "no free, reachable", "top face is not visible",
@@ -76,20 +82,8 @@ class ManipulationTools:
 
     def plan_pick(self, object_id: int, q_start: np.ndarray, yaw_offset_deg: float = 0.0) -> PickPlan:
         """Grasp-only plan (hover, descend + close, lift) with the same checks as plan_pick_place."""
-        o = self.world.objects[object_id]
-        g = o.geometry
-        if g["tilt_deg"] is None:
-            raise PlanningError(f"object {object_id}: its top face is not visible, so its pose is not measured well enough")
-        planner = SkillPlanner(self.kin, collision=CollisionChecker(self.obstacles()))
-        width = g["grasp_width"]
-        fp = g["footprint"]
-        length = fp[0] if abs(fp[1] - width) <= abs(fp[0] - width) else fp[1]
-        planner.check_width(width)
-        top = np.array([g["centre"][0], g["centre"][1], g["top_z"]])
-        hover, q, yaw = planner.hover(q_start, top, g["grasp_yaw_deg"] + yaw_offset_deg, g["symmetry_deg"])
-        approach, lift, q, held = planner.grasp(q, top, yaw, f"obj_{object_id}", width, length, self._support_name(g), g["height"])
-        return PickPlan(object_id, hover, approach, lift, [], held,
-                        {"yaw_deg": round(yaw, 1), "width_mm": round(width * 1000, 1), "height_mm": round(g["height"] * 1000, 1)},
+        _, g, hover, approach, lift, _, held, grasp = self._plan_grasp(object_id, q_start, yaw_offset_deg)
+        return PickPlan(object_id, hover, approach, lift, [], held, grasp,
                         [float(g["centre"][0]), float(g["centre"][1]), float(g["centre"][2])], float(g["top_z"]), "hold", None)
 
     def plan_place_held(self, relation: str, reference_id: int | None, frame: str, q_start: np.ndarray) -> PickPlan:
@@ -174,12 +168,18 @@ class ManipulationTools:
         cam = table_camera_pose()[:3, 3]
         c, r, idx, names = CollisionChecker().spheres(q)
         pts = self.workspace_points()
+        return self._rays_blocked(cam, c, r, pts), len(pts)
+
+    @staticmethod
+    def _rays_blocked(cam, centres, radii, points) -> int:
+        """How many floor points (x, y) have their table-camera ray pass within 2 cm of the robot's collision
+        spheres (centres, radii)."""
         blocked = 0
-        for x, y in pts:
+        for x, y in points:
             seg = np.array([x, y, 0.03]) - cam
-            t = np.clip(((c - cam) @ seg) / (seg @ seg), 0, 1)
-            blocked += int(np.any(np.linalg.norm(cam + t[:, None] * seg - c, axis=1) < r + 0.02))
-        return blocked, len(pts)
+            t = np.clip(((centres - cam) @ seg) / (seg @ seg), 0, 1)
+            blocked += int(np.any(np.linalg.norm(cam + t[:, None] * seg - centres, axis=1) < radii + 0.02))
+        return blocked
 
     def park_for_view(self, target_xy=None) -> dict:
         """Move the arm to a collision-free pose (ARM_HOME turned about J1) from which the table camera
@@ -196,11 +196,7 @@ class ManipulationTools:
             q = np.asarray(ARM_HOME, float).copy()
             q[0] = np.radians(j1)
             c, r, idx, names = checker.spheres(q)
-            blocked = 0
-            for x, y in targets:
-                seg = np.array([x, y, 0.03]) - cam
-                t = np.clip(((c - cam) @ seg) / (seg @ seg), 0, 1)
-                blocked += int(np.any(np.linalg.norm(cam + t[:, None] * seg - c, axis=1) < r + 0.02))
+            blocked = self._rays_blocked(cam, c, r, targets)
             traj = joint_move(self.kin, q0, q, ARM_SPEED)
             if self.held is not None:  # carrying: the held object moves with the gripper (closed opening)
                 free = checker.check_path(traj.positions, self.held.width or 0.01, self.held.collision_body(),
