@@ -13,7 +13,7 @@ from agent import capabilities as caps  # noqa: E402
 from agent.authority import classify, from_classification  # noqa: E402
 from agent.goals import GoalEvaluator  # noqa: E402
 from agent.vlm_roles import RecordedVLM, Roles, SceneAnswer, SubPlan, VLMFailure  # noqa: E402
-from agent.world_state import TaskState  # noqa: E402
+from agent.task_state import TaskState  # noqa: E402
 from tests.support.fakes import GoalTools, geom  # noqa: E402
 from tests.support.runners import plan, run_supervisor as run  # noqa: E402
 

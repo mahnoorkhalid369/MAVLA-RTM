@@ -19,7 +19,7 @@ from typing import Callable
 
 STATUSES = ("pending", "running", "completed", "failed", "blocked", "cancelled", "insufficient_info")
 
-# step outcome (agent/world_state.OUTCOMES) -> worker status
+# step outcome (agent/task_state.OUTCOMES) -> worker status
 STATUS_OF = {"completed": "completed", "insufficient_info": "insufficient_info", "ambiguous": "blocked",
              "unsupported": "blocked", "infeasible": "failed", "unsafe": "failed", "failed": "failed",
              "cancelled": "cancelled", "unauthorized": "blocked"}
@@ -47,7 +47,7 @@ class WorkerResult:
     task_id: str
     worker: str
     status: str  # STATUSES
-    outcome: str  # agent/world_state.OUTCOMES (finer classification)
+    outcome: str  # agent/task_state.OUTCOMES (finer classification)
     summary: str
     data: dict = field(default_factory=dict)
     evidence: list = field(default_factory=list)  # references: {"kind": "frame"|"verification"|"vlm", ...}

@@ -48,7 +48,7 @@ def main() -> int:
         t0 = time.monotonic()
         try:
             p = roles.plan_goal(text, planner_menu())
-            from agent.supervisor import complete_plan
+            from agent.planning import complete_plan
             raw = [s.capability for s in p.steps]
             complete_plan(p, text)
             got = [s.capability for s in p.steps]

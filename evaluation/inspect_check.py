@@ -30,7 +30,7 @@ def main() -> int:
     from agent.ros_bridge import RosBridge
     from agent.tools import Tools
     from agent.vlm_roles import GemmaVLM, Roles
-    from agent.world_state import TaskState
+    from agent.task_state import TaskState
     from evaluation.dual_camera_check import Truth
     from execution.ros_executor import RosExecutor
     from sim.scene_objects import OBJECTS

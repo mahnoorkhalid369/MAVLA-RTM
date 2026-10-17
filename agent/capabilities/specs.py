@@ -27,7 +27,7 @@ class CapabilitySpec:
 
 @dataclass
 class StepResult:
-    outcome: str  # agent.world_state.OUTCOMES
+    outcome: str  # agent.task_state.OUTCOMES
     summary: str
     data: dict = field(default_factory=dict)
 
@@ -100,6 +100,7 @@ class Context:
     run_dir: object
     responder: object
     budgets: object
-    state: object  # agent.world_state.TaskState
+    state: object  # agent.task_state.TaskState
     obs: object = None  # latest agent.tools.Observation (table camera)
     extra_obs: list = field(default_factory=list)  # wrist observations taken during this instruction
+    vlm_calls: Callable = lambda: 0  # Gemma calls so far (set by the supervisor; WorkerRegistry metrics)

@@ -71,7 +71,7 @@ def derive_conditions(steps) -> list[dict]:
 
 class GoalEvaluator:
     def __init__(self, tools, state) -> None:
-        self.t, self.s = tools, state  # agent.tools.Tools, agent.world_state.TaskState
+        self.t, self.s = tools, state  # agent.tools.Tools, agent.task_state.TaskState
 
     def _geom(self, oid):
         o = self.t.world.objects.get(oid)

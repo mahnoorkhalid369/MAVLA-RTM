@@ -1,4 +1,4 @@
-"""Session lifecycle (agent/run.Session): consecutive instructions of one agent process share the world model,
+"""Session lifecycle (agent/session.Session): consecutive instructions of one agent process share the world model,
 referents and a VERIFIED held-object state; each instruction keeps its own ledger, conditions and thread.
 Mocked robot / perception (no sim, no GPU): these tests show state handling, not physical grasp reliability."""
 
@@ -12,7 +12,7 @@ pytest.importorskip("pydantic")
 pytest.importorskip("langgraph")
 
 from agent.ask import ScriptedResponder  # noqa: E402
-from agent.run import Session  # noqa: E402
+from agent.session import Session  # noqa: E402
 from agent.vlm_roles import RecordedVLM  # noqa: E402
 from tests.support.fakes import GoalTools  # noqa: E402
 

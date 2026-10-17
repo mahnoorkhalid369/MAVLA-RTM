@@ -35,6 +35,7 @@ class Observation:
     taken_at: float = 0.0  # time.monotonic() when the frame was taken
     motion_count: int = -1  # Tools.motion_count when the frame was taken (robot not moved since if equal)
     cleared_view: bool = False  # taken after park_for_view (arm out of the camera's view)
+    assoc: dict = field(default_factory=dict)  # wrist frames: mark -> {"status", "world_id"} (capabilities._wrist_observation)
 
 
 class PerceptionTools:
