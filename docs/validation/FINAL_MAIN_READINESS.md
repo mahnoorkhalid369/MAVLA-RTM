@@ -289,7 +289,7 @@ GPU: 12 GB (RTX 4000 Ada Laptop). Load Gemma before the simulator, and run one I
 - Branch `experiment/lab-exp1`.
 - Working tree clean after the final commit.
 - No remote is configured.
-- `main` (`c140d64`) is a direct ancestor: 0 commits ahead, **43 behind** including this report.
+- `main` (`c140d64`) is a direct ancestor: 0 commits ahead; this branch is ahead by `git rev-list --count main..HEAD` commits (45 at the time of writing).
 - The only branch with commits outside this one, `feature/orchestration` (`9e10f59`), is patch-equivalent to
   `c636c6e` here (`git cherry` → `-`).
 
