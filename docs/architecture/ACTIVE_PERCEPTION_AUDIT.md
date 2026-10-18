@@ -1,5 +1,9 @@
 # Active perception — camera and architecture audit (Checkpoint 1, 2026-10-14)
 
+> **Historical record.** This document describes the project before the 2026-10-17 restructuring; its file paths
+> may refer to the old layout (e.g. `agent/tools.py`, `agent/world.py`, `sim/scenario_lib/`). Current layout:
+> `docs/architecture/MODULE_GUIDE.md` (§4 maps old paths to new). Content is kept unchanged as evidence.
+
 Branch `feature/active-perception` from `refactor/goal-supervisor` (tag `before-active-perception` = 5b09016).
 
 | Question | Finding (from code) | Status |

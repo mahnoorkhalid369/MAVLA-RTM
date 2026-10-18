@@ -72,7 +72,12 @@ As a result, a change to one test file could break five others, and the fakes we
 
 **Undo:** `git revert` of the increment commit.
 
-## Restructuring (2026-10-17): **NOT TESTED**
+## Restructuring (2026-10-17)
+
+**Update 2026-10-18:** automated verification passed with no regression, including side-by-side equivalence with
+`aa9a6a4`, Isaac Sim and live model inference (`docs/validation/FINAL_MAIN_READINESS.md`). The text below is the
+record as written on 2026-10-17, when nothing had been run yet; the risks listed there were checked on
+2026-10-18 (readiness report, sections 4–6).
 
 **Instruction.** Code refactoring and restructuring only: no tests, simulations, experiments or validation were
 run. The user tests every subsystem before approving new development.

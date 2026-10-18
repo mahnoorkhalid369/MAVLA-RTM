@@ -1,9 +1,7 @@
 # Functionality map (what exists, where, and whether it works)
 
-> **The restructuring of 2026-10-17 (commits `761ec65` … `46f0802`) is NOT TESTED.**
-> The status column below records the behaviour observed before the restructuring. The code moved, but its
-> logic did not change (see `REFACTOR_CHANGELOG.md`). Until the suites and a live run have been repeated, read
-> "live-verified" as "live-verified before the restructuring".
+> **Restructured 2026-10-17;** automated verification passed on 2026-10-18 (unit, integration, saved-data, model inference, Isaac Sim + ROS with motion blocked); manual acceptance pending: `docs/validation/FINAL_MAIN_READINESS.md`. The status column was recorded before the restructuring; the
+> restructured code reproduced it wherever it could be re-run (see the readiness report, section 4).
 
 **Basis.** Mapped from the code at `experiment/lab-exp1` after the restructuring.
 
@@ -19,7 +17,7 @@
 | **live-verified** | on the live path (`python -m agent.run` → supervisor) and observed working in a recorded live run (run named) |
 | **offline-tested** | on the live path, covered by mocked tests, never (successfully) exercised live |
 | **failing** | on the live path, currently fails because of a known baseline defect (BD-n, `TECHNICAL_DEBT.md` §2) |
-| **new** | added by the restructuring; not tested |
+| **new** | added by the restructuring (none left untested after 2026-10-18) |
 | **experimental** | evaluation-only code, or code with no production caller |
 | **inactive** | present in production code but not reachable on the live path |
 | **legacy** | previous agent stack (`launch/run.sh`); still launchable, not maintained |
@@ -42,7 +40,7 @@
 | Session (state across instructions) | `agent/session.py` `Session.run()` | `agent/run.py` | instruction → report; one `Tools` per process | owns the session `Tools` (world model, held object, memory, referents) | live-verified | `tests/test_session.py` (mocked `Tools`) |
 | GPU bring-up order (Gemma → YOLO → simulator → ROS ready) | `agent/run.py` `main()` (inline), `start_sim()` | — | flags → loaded models, optional sim process | process | live-verified | manual: DEVELOPER_GUIDE §6 |
 | Goal supervisor (LangGraph) | `agent/supervisor.py` `GoalSupervisor.run()`; nodes `_interpreting`, `_dispatching`, `_delegating`, `_reviewing`, `_replanning`, `_verifying_goal` (via `_wrap` / `getattr`) | `Session.run` | instruction → report dict (status, outcome, message, plan, conditions, goal_check, authority, refused, timeline) | per instruction: `TaskState`, `Context`, `authority`, `specs`; reads `Tools` | live-verified | `tests/test_supervisor_goal.py`, `tests/test_orchestration.py` |
-| Execution controls (real / dry-run / blocked motion, disabled capabilities, replanning limit) | `agent/controls.py` `ExecutionControls`; read by `Tools.execute`, `GoalSupervisor` (`specs`, `_refuse_disabled`, `max_replans`); `agent/ask.py` `LineReader.on_directive` | `evaluation/lab_exp1_agent.py`; default everywhere else | settings → refused / logged motions, `unsupported` steps | one object per process (motion may change at runtime) | **new** (replaces the Experiment 1 monkeypatches) | not yet: see DEVELOPER_GUIDE §2 |
+| Execution controls (real / dry-run / blocked motion, disabled capabilities, replanning limit) | `agent/controls.py` `ExecutionControls`; read by `Tools.execute`, `GoalSupervisor` (`specs`, `_refuse_disabled`, `max_replans`); `agent/ask.py` `LineReader.on_directive` | `evaluation/lab_exp1_agent.py`; default everywhere else | settings → refused / logged motions, `unsupported` steps | one object per process (motion may change at runtime) | offline-tested; live-verified with blocked and dry-run motion (2026-10-18, laboratory) | `tests/test_controls.py` |
 | Request authority (question / description / action → allowed effects) | `agent/authority.py` `classify()`, `from_classification()`; `agent/vlm_roles/roles.py` `Roles.classify_request()` (`REQUEST_SYSTEM` in `prompts.py`) | `GoalSupervisor._interpreting` | instruction → `RequestAuthority(kind, grants, evidence)` | none | live-probed; **failing for negated commands (BD-3)** | `tests/test_authority.py` (decision tests) |
 | Goal planning (instruction → capability steps) | `agent/vlm_roles/roles.py` `Roles.plan_goal()` (Gemma, `PLAN_SYSTEM`, validation incl. `location_anchors`) | `_interpreting`, `_replanning` | instruction + capability menu + context → `GoalPlan(goal, steps, reason)` | none | **failing: 3/8 valid plans offline (BD-1); located targets rejected (BD-2)** | `tests/test_supervisor_goal.py::test_planner_*`, `tests/test_authority.py::test_planner_must_keep_*` (recorded answers); live: `out/lab_exp1/milestone3/trackA/scripts/planner_ab.py` |
 | Plan completion rules (question → answer, explore → locate, observe → describe) | `agent/planning.py` `complete_plan()` | `_interpreting`; `evaluation/planner_check.py` | plan → plan + applied rules (logged `plan_completed`) | none | offline-tested | `test_plan_completion_rules_are_generic_and_logged` |
@@ -131,7 +129,7 @@ The capabilities live in `agent/capabilities/`, and every name is importable fro
 | Functionality | Implementation | Called by | Status | Test |
 |---|---|---|---|---|
 | Execute planned steps over ROS (trajectory streaming, reach check) | `execution/ros_executor.py` `RosExecutor.execute()` | `Tools.execute` | **frozen**, live-verified | live only; mocked in agent tests |
-| Agent-side execute (motion gate, motion counter, logging) | `agent/tools/execution.py` `Tools.execute()`, `_not_executed()` (dry_run / blocked) | all motion | real mode live-verified; dry_run / blocked **new** | via fakes |
+| Agent-side execute (motion gate, motion counter, logging) | `agent/tools/execution.py` `Tools.execute()`, `_not_executed()` (dry_run / blocked) | all motion | real mode live-verified; dry_run / blocked offline-tested and live-verified (2026-10-18; nothing sent) | `tests/test_controls.py` |
 | Joint limits + speed monitor (inside the simulator) | `safety/joint_limits.py` `JointLimits`; enforced by `sim/ros_control.py` `JointCommandInterface` | sim process | **frozen**, live-verified | `tests/test_safety.py` |
 | Authorization before execution | `agent/workers.py` `WorkerRegistry.dispatch` + `agent/authority.py` + supervisor refusals | supervisor | offline-tested; live: no violation in 4 requests (milestone 3) | `tests/test_authority.py` |
 

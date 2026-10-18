@@ -1,5 +1,9 @@
 # Demo: typed instruction → perception → planning → verified pick-and-place
 
+> **Historical record.** This document describes the project before the 2026-10-17 restructuring; its file paths
+> may refer to the old layout (e.g. `agent/tools.py`, `agent/world.py`, `sim/scenario_lib/`). Current layout:
+> `docs/architecture/MODULE_GUIDE.md` (§4 maps old paths to new). Content is kept unchanged as evidence.
+
 First thin slice of `docs/perception_redesign/ARCHITECTURE.md` (rev 3). Results and readiness:
 `docs/perception_redesign/DEMO_REPORT.md` (read its first lines first).
 

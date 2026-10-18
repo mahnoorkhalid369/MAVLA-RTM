@@ -1,8 +1,7 @@
 # Execution flow: what happens when you type an instruction
 
-> **The restructuring of 2026-10-17 is NOT TESTED.** This page describes the code after it. The flow, the
-> function names and the behaviour are unchanged; only the files moved (`REFACTOR_CHANGELOG.md`). Evidence
-> cited below was recorded before the restructuring.
+> **Restructured 2026-10-17;** automated verification passed on 2026-10-18 (unit, integration, saved-data, model inference, Isaac Sim + ROS with motion blocked); manual acceptance pending: `docs/validation/FINAL_MAIN_READINESS.md`. The flow, the function names and the behaviour are unchanged; only
+> the files moved (`REFACTOR_CHANGELOG.md`).
 
 Where the functions named below live:
 

@@ -1,5 +1,9 @@
 # Global-to-local active perception (implemented 2026-10-14, branch `feature/active-perception`)
 
+> **Historical record.** This document describes the project before the 2026-10-17 restructuring; its file paths
+> may refer to the old layout (e.g. `agent/tools.py`, `agent/world.py`, `sim/scenario_lib/`). Current layout:
+> `docs/architecture/MODULE_GUIDE.md` (§4 maps old paths to new). Content is kept unchanged as evidence.
+
 Rollback point: tag `before-active-perception`. Audit: `ACTIVE_PERCEPTION_AUDIT.md`. Supervisor architecture:
 `ARCHITECTURE.md`. Everything marked *measured* comes from live headless runs in `out/active/` (ground truth
 read only by the evaluation scripts, after or beside the agent, never by agent code).

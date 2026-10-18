@@ -1,5 +1,9 @@
 # VT6L multi-agent manipulation system — architecture (design, 2026-10-14)
 
+> **Historical record.** This document describes the project before the 2026-10-17 restructuring; its file paths
+> may refer to the old layout (e.g. `agent/tools.py`, `agent/world.py`, `sim/scenario_lib/`). Current layout:
+> `docs/architecture/MODULE_GUIDE.md` (§4 maps old paths to new). Content is kept unchanged as evidence.
+
 Status: **design for review, nothing implemented.** Evidence labels: **measured** (we ran it),
 **from files** (read in the code / docs), **unverified** (not checked; estimates are marked).
 Supersedes the agent design implied by `ros_nodes/vlm_agent_node.py`; the frozen manipulation

@@ -1,8 +1,6 @@
 # Module guide and repository navigation
 
-> **The restructuring described here (2026-10-17, commits `761ec65` … `46f0802`) is NOT TESTED.**
-> It was checked statically only: every local import resolves, pyflakes is clean, and moved code has identical
-> ASTs. The suites and a live run still have to be repeated (`REFACTOR_CHANGELOG.md`, risks).
+> **Restructured 2026-10-17;** automated verification passed on 2026-10-18 (unit, integration, saved-data, model inference, Isaac Sim + ROS with motion blocked); manual acceptance pending: `docs/validation/FINAL_MAIN_READINESS.md`.
 
 This guide lists what each folder and module is for and where to look for a given behaviour.
 

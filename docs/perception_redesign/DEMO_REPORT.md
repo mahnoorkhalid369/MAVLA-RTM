@@ -1,5 +1,9 @@
 # Demo report — autonomous run 2026-10-14 (08:19–~13:00 UTC)
 
+> **Historical record.** This document describes the project before the 2026-10-17 restructuring; its file paths
+> may refer to the old layout (e.g. `agent/tools.py`, `agent/world.py`, `sim/scenario_lib/`). Current layout:
+> `docs/architecture/MODULE_GUIDE.md` (§4 maps old paths to new). Content is kept unchanged as evidence.
+
 **Demo NOT READY as specified.** In the final rehearsal (cycle 4, no code changes during it), instructions 1 and 3 succeeded 3/3 each, verified both by the agent's own camera check and by simulator ground truth, with no false "done". But instruction 2 ("yellow cube … tan box") never ran: in 3/3 runs the agent asked which of two yellow-looking cubes was meant, and the scripted answer was "cancel". Instruction 4 was therefore not attempted (the brief gates it on 1–3 each ≥ 2/3).
 
 What exists is **a working, honest demo for instructions of the type of 1 and 3** in today's scene. It is not yet a reliable general demo:

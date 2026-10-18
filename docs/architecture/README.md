@@ -10,8 +10,8 @@
 | [ENGINEERING_STANDARDS.md](ENGINEERING_STANDARDS.md) | packaging, naming, types, config, logging, tests, docs, artifacts, environments, CI tiers |
 
 **Start here (2026-10-17, revised objective: simple modular Python, no packaging).** The code was restructured
-on 2026-10-17 (commits `761ec65` … `46f0802`), and that restructuring is **NOT TESTED**: see
-REFACTOR_CHANGELOG.md for the changes, the risks and the order in which to verify them.
+on 2026-10-17 (commits `761ec65` … `46f0802`); automated verification passed on 2026-10-18 and manual
+acceptance is pending (`../validation/FINAL_MAIN_READINESS.md`). REFACTOR_CHANGELOG.md lists the changes.
 
 | Document | Contents |
 |---|---|

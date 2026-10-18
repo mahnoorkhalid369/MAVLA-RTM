@@ -8,9 +8,7 @@ Read first:
 
 All commands run from the repository root.
 
-> **The restructuring of 2026-10-17 is NOT TESTED.** The commands below were updated for the new layout, but
-> none of them has been run since. The expected counts ("expect: …") were measured before the restructuring.
-> `docs/architecture/REFACTOR_CHANGELOG.md` lists the risks to check and a suggested order.
+> **Restructured 2026-10-17;** automated verification passed on 2026-10-18 (unit, integration, saved-data, model inference, Isaac Sim + ROS with motion blocked); manual acceptance pending: `docs/validation/FINAL_MAIN_READINESS.md`. Expected results below are from that validation.
 
 ## 0. Which Python for what
 
@@ -35,12 +33,15 @@ while the simulator runs.
 
 ```bash
 # Robot, safety, perception helpers, scenarios, scorers (agent tests are skipped here):
-/usr/bin/python3 -m pytest                                  # expect (before the restructuring): 172 passed, 6 skipped
+/usr/bin/python3 -m pytest                                  # expect: 199 passed, 29 skipped (agent tests need the agent env)
 
 # The agent: supervisor, workflows, authorization, session, ask (mocked tools, scripted Gemma):
 env -u PYTHONPATH -u AMENT_PREFIX_PATH .venv-seg/bin/python -m pytest \
     tests/test_agent.py tests/test_agent_ask.py tests/test_supervisor_goal.py \
-    tests/test_orchestration.py tests/test_session.py tests/test_authority.py   # expect (before): 142 passed
+    tests/test_orchestration.py tests/test_session.py tests/test_authority.py   # expect: 142 passed
+
+# Everything (all 383 tests, incl. controls, structure, saved frames + YOLO) in the agent environment:
+env -u PYTHONPATH -u AMENT_PREFIX_PATH .venv-seg/bin/python -m pytest       # expect: 383 passed
 
 # Frozen manipulation baseline unchanged:
 grep -v '^#' docs/baselines/manipulation_A_2026-10-14/MANIFEST.sha256 | sha256sum -c --quiet && echo FROZEN-OK

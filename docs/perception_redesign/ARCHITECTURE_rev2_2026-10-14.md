@@ -1,5 +1,9 @@
 # VT6L multi-agent manipulation system — architecture (design, revision 2, 2026-10-14)
 
+> **Historical record.** This document describes the project before the 2026-10-17 restructuring; its file paths
+> may refer to the old layout (e.g. `agent/tools.py`, `agent/world.py`, `sim/scenario_lib/`). Current layout:
+> `docs/architecture/MODULE_GUIDE.md` (§4 maps old paths to new). Content is kept unchanged as evidence.
+
 Status: **design for review, nothing implemented.** Revision 1 (approved with changes) is kept as
 `ARCHITECTURE_rev1_2026-10-14.md`.
 

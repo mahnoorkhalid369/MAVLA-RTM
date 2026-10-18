@@ -1,5 +1,9 @@
 # Dependency analysis, 2026-10-17 (`f094d2f`)
 
+> **Historical record.** This document describes the project before the 2026-10-17 restructuring; its file paths
+> may refer to the old layout (e.g. `agent/tools.py`, `agent/world.py`, `sim/scenario_lib/`). Current layout:
+> `docs/architecture/MODULE_GUIDE.md` (§4 maps old paths to new). Content is kept unchanged as evidence.
+
 **Method.** An `ast` walk over 128 project modules in `agent control execution safety perception vlm seg sim
 ros_nodes datagen experiments scripts evaluation tests`:
 

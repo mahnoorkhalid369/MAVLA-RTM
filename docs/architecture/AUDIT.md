@@ -1,5 +1,9 @@
 # Architecture audit before the goal-driven supervisor refactor (2026-10-14)
 
+> **Historical record.** This document describes the project before the 2026-10-17 restructuring; its file paths
+> may refer to the old layout (e.g. `agent/tools.py`, `agent/world.py`, `sim/scenario_lib/`). Current layout:
+> `docs/architecture/MODULE_GUIDE.md` (§4 maps old paths to new). Content is kept unchanged as evidence.
+
 Baseline: commit `c140d64` (tag `baseline-before-goal-supervisor`), branch `refactor/goal-supervisor`.
 Working tree clean. Tests: `/usr/bin/python3 -m pytest` 135 passed / 2 skipped; `.venv-seg/bin/python -m
 pytest tests/test_agent.py tests/test_agent_ask.py` 73 passed. Frozen baseline: `docs/baselines/

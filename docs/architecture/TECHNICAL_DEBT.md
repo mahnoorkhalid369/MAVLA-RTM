@@ -1,5 +1,11 @@
 # Technical debt register, 2026-10-17 (`f094d2f`)
 
+> **Historical record.** This document describes the project before the 2026-10-17 restructuring; its file paths
+> may refer to the old layout (e.g. `agent/tools.py`, `agent/world.py`, `sim/scenario_lib/`). Current layout:
+> `docs/architecture/MODULE_GUIDE.md` (§4 maps old paths to new). Content is kept unchanged as evidence.
+> **Still current:** the known baseline defects BD-1 … BD-8 (§2). Debt items resolved by the restructuring are
+> listed in `docs/validation/FINAL_MAIN_READINESS.md`.
+
 **Priority:**
 
 | Level | Meaning |

@@ -1,5 +1,9 @@
 # Engineering standards (proposal for review), 2026-10-17
 
+> **Historical record.** This document describes the project before the 2026-10-17 restructuring; its file paths
+> may refer to the old layout (e.g. `agent/tools.py`, `agent/world.py`, `sim/scenario_lib/`). Current layout:
+> `docs/architecture/MODULE_GUIDE.md` (§4 maps old paths to new). Content is kept unchanged as evidence.
+
 These apply to **new and refactored code**. The frozen baseline files (see the manifest) and the protected legacy
 files (`launch/run.sh`, `ros_nodes/vlm_agent_node.py`) are excluded from formatters, linters and edits.
 

@@ -1,5 +1,9 @@
 # Hardcoded object knowledge in the current code (inventory, 2026-10-14)
 
+> **Historical record.** This document describes the project before the 2026-10-17 restructuring; its file paths
+> may refer to the old layout (e.g. `agent/tools.py`, `agent/world.py`, `sim/scenario_lib/`). Current layout:
+> `docs/architecture/MODULE_GUIDE.md` (§4 maps old paths to new). Content is kept unchanged as evidence.
+
 Found by searching the code (from files). "Frozen" = covered by the baseline manifest
 (docs/baselines/manipulation_A_2026-10-14/MANIFEST.sha256): it stays unchanged; the new pipeline
 lives in new files and does not use it.
