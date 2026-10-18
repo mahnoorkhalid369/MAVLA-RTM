@@ -236,3 +236,27 @@ def test_experiment1_harness_sets_the_same_guards_as_before(tmp_path, monkeypatc
     assert recs[0]["unavailable"] == ["pick", "place", "decompose", "pick_place", "explore"]  # registry order
     assert [r["event"] for r in recs[1:]] == ["gate", "motion_allowed", "gate"]
     assert recs[1]["motion"] is True and recs[2]["instruction"] == 2 and recs[3]["motion"] is False
+
+
+# ---------------------------------------------------------------------------------- agent.run entry point
+def test_agent_run_blocks_motion_unless_real_is_requested():
+    from agent.run import controls_for, parser
+    assert controls_for(parser().parse_args([])).motion == "blocked"
+    assert controls_for(parser().parse_args(["--motion", "dry_run"])).motion == "dry_run"
+    assert controls_for(parser().parse_args(["--motion", "real"])).motion == "real"
+    with pytest.raises(SystemExit):
+        parser().parse_args(["--motion", "fast"])
+
+
+def test_harness_controls_take_precedence_over_the_command_line():
+    from agent.run import controls_for, parser
+    harness = ExecutionControls(motion="blocked", max_replans=0)
+    assert controls_for(parser().parse_args(["--motion", "real"]), harness) is harness
+
+
+def test_simulator_command_for_default_scene_and_laboratory():
+    from agent.run import sim_command
+    assert sim_command(True)[-2:] == ["-m", "sim.run_live"]
+    cmd = sim_command(False, "laboratory", "medium", 42)
+    assert cmd[cmd.index("-m") + 1:] == ["sim.run_scenario", "--scenario", "laboratory", "--difficulty", "medium",
+                                         "--seed", "42", "--headless"]

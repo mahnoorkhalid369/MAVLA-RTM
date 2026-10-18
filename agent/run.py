@@ -5,8 +5,10 @@ this process starts Isaac Sim itself after the models are loaded; otherwise star
 "models loaded" is printed (or when --sim-flag appears, for the rehearsal harness).
 
     source /opt/ros/jazzy/setup.bash && export ROS_DOMAIN_ID=42
-    .venv-seg/bin/python -m agent.run --start-sim --gui                     # interactive prompt
+    .venv-seg/bin/python -m agent.run --start-sim --gui                     # interactive prompt, motion BLOCKED
+    .venv-seg/bin/python -m agent.run --start-sim --scenario laboratory --difficulty easy --seed 42 --motion real
     .venv-seg/bin/python -m agent.run --instruction "put A on B" --out out/demo/x
+(launch/agent.sh wraps this with the viewer.) Motion is blocked unless --motion real is given.
 
 Outputs per instruction in --out: events.jsonl, checkpoints.sqlite, images/, result.json.
 Instructions typed in one interactive process form one session (agent/session.py): follow-ups like "put it ..." refer
@@ -29,10 +31,16 @@ from config.models import DETECTOR_CONF, DETECTOR_IMGSZ, YOLO_WEIGHTS
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def start_sim(gui: bool, log: Path, scenario: str | None = None) -> subprocess.Popen:
+def sim_command(gui: bool, scenario: str | None = None, difficulty: str = "easy", seed: int = 0) -> list[str]:
+    """The simulator process: the default scene (frozen sim.run_live) or a test scene (sim.run_scenario; difficulty
+    and seed apply to scenario-library scenes such as laboratory)."""
+    mod = ["sim.run_scenario", "--scenario", scenario, "--difficulty", difficulty, "--seed", str(seed)] if scenario else ["sim.run_live"]
+    return [str(ROOT / ".venv/bin/python"), "-u", "-m", *mod] + ([] if gui else ["--headless"])
+
+
+def start_sim(gui: bool, log: Path, scenario: str | None = None, difficulty: str = "easy", seed: int = 0) -> subprocess.Popen:
     env = {**os.environ, "OMNI_KIT_ACCEPT_EULA": "YES"}
-    mod = ["sim.run_scenario", "--scenario", scenario] if scenario else ["sim.run_live"]
-    cmd = [str(ROOT / ".venv/bin/python"), "-u", "-m", *mod] + ([] if gui else ["--headless"])
+    cmd = sim_command(gui, scenario, difficulty, seed)
     return subprocess.Popen(cmd, cwd=ROOT, stdout=open(log, "w"), stderr=subprocess.STDOUT, env=env, start_new_session=True)
 
 
@@ -46,10 +54,7 @@ def stop_sim(p: subprocess.Popen | None) -> None:
         os.killpg(p.pid, signal.SIGKILL)
 
 
-def main(controls=None, on_directive=None) -> int:
-    """controls: agent.controls.ExecutionControls for this process (default: normal operation).
-    on_directive: called with every input line that starts with "@" (harness directives); such lines are not
-    instructions or answers (agent.ask.LineReader.on_directive)."""
+def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser()
     ap.add_argument("--instruction", help="one instruction (otherwise: interactive prompt)")
     ap.add_argument("--out", default=str(ROOT / "out/demo" / time.strftime("%Y-%m-%d") / time.strftime("live_%H%M%S")))
@@ -58,7 +63,13 @@ def main(controls=None, on_directive=None) -> int:
     ap.add_argument("--conf", type=float, default=DETECTOR_CONF)
     ap.add_argument("--start-sim", action="store_true", help="start Isaac Sim after loading the models")
     ap.add_argument("--gui", action="store_true", help="with --start-sim: show the Isaac Sim window")
-    ap.add_argument("--scenario", help="with --start-sim: an active-perception test scene (scenarios/scenes/<name>.json)")
+    ap.add_argument("--scenario", help="with --start-sim: a scenario-library scene (laboratory) or a JSON test scene "
+                                       "(scenarios/scenes/<name>.json); default: the frozen default scene")
+    ap.add_argument("--difficulty", default="easy", choices=["easy", "medium", "hard"], help="with --scenario laboratory")
+    ap.add_argument("--seed", type=int, default=0, help="with --scenario laboratory: layout seed")
+    ap.add_argument("--motion", default="blocked", choices=["blocked", "dry_run", "real"],
+                    help="robot motion (agent/controls.py): blocked (default: nothing is sent), dry_run (planned and "
+                         "logged, not sent) or real. Authorization and the simulator's safety layer apply in every mode")
     ap.add_argument("--sim-flag", help="write this file when the models are loaded (rehearsal harness)")
     ap.add_argument("--ask", choices=["terminal", "scripted"], default="terminal",
                     help="who answers clarification questions: the person at this terminal (default) or, for "
@@ -68,7 +79,25 @@ def main(controls=None, on_directive=None) -> int:
                     help="where the optional demo viewer reads the latest perception and the active run ('' = off)")
     ap.add_argument("--ask-timeout", type=float, default=None,
                     help="seconds to wait for an answer before cancelling (default Budgets.question_timeout_s; 0 = no limit)")
-    a = ap.parse_args()
+    return ap
+
+
+def controls_for(args, controls=None):
+    """The execution controls of this process: the harness's own, or the --motion mode (default blocked)."""
+    from agent.controls import ExecutionControls
+    return controls if controls is not None else ExecutionControls(motion=args.motion)
+
+
+def main(controls=None, on_directive=None, argv=None) -> int:
+    """controls: agent.controls.ExecutionControls for this process; when given (experiment harnesses) it is used
+    as is and --motion is ignored; otherwise built from --motion (default blocked).
+    on_directive: called with every input line that starts with "@" (harness directives); such lines are not
+    instructions or answers (agent.ask.LineReader.on_directive)."""
+    a = parser().parse_args(argv)
+    controls = controls_for(a, controls)
+    print(f"[agent] motion: {controls.motion.upper()}" + {"blocked": " (no robot command is sent; --motion real to move)",
+                                                         "dry_run": " (motions are planned and logged, not sent)",
+                                                         "real": " (motions are executed)"}[controls.motion], flush=True)
     out = Path(a.out)
     from agent.ask import LineReader, ScriptedResponder, TerminalResponder
     if on_directive is not None:
@@ -91,7 +120,7 @@ def main(controls=None, on_directive=None) -> int:
     print("[agent] models loaded", flush=True)
     if a.sim_flag:
         Path(a.sim_flag).write_text("models loaded\n")
-    sim = start_sim(a.gui, out / "sim.log", a.scenario) if a.start_sim else None
+    sim = start_sim(a.gui, out / "sim.log", a.scenario, a.difficulty, a.seed) if a.start_sim else None
     try:
         from agent.ros_bridge import RosBridge
         from execution.ros_executor import RosExecutor
