@@ -3,7 +3,7 @@
 > **Historical record.** This document describes the project before the 2026-10-17 restructuring; its file paths
 > may refer to the old layout (e.g. `agent/tools.py`, `agent/world.py`, `sim/scenario_lib/`). Current layout:
 > `docs/architecture/MODULE_GUIDE.md` (§4 maps old paths to new). Content is kept unchanged as evidence.
-> **Still current:** the known baseline defects BD-1 … BD-8 (§2). Debt items resolved by the restructuring are
+> **Still current:** the known baseline defects BD-1 … BD-9 (§2). Debt items resolved by the restructuring are
 > listed in `docs/validation/FINAL_MAIN_READINESS.md`.
 
 **Priority:**
@@ -207,6 +207,7 @@ they are listed separately in §2 and are not to be fixed during the restructuri
 | BD-6 | Label reading unsupported, but the planner claims it ("inspect … to read the label") | `trackA/results.json` request 2 | open |
 | BD-7 | `reported()` accepts any scene report; describe coverage not verified | `agent/goals.py` `_reported` | open |
 | BD-8 | YOLO detections vary between runs on the same scene (14 vs 16 kept of 18) | Experiment 1 vs current-system test | open, unexplained |
+| BD-9 | With the arm parked for a clear view (J1 +160 deg), part of the robot is measured as an object (a 0.90 m tall, 15 x 8 cm mask 3 cm from the base axis); as a planning obstacle it makes the collision-checked HOME path fail, so the arm stays parked (observed after a cancelled pick) | live run 2026-10-18, `out/eval/live_motion/` (frame table_002, return_home refused: base_link / j1_link / j2_link with obj_14) | open; perception (robot self-exclusion), not changed |
 
 **Rule for the refactor.**
 

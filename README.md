@@ -166,7 +166,7 @@ The launchers choose the right one.
 | `docs/architecture/MODULE_GUIDE.md` | where to find X, the full tree |
 | `docs/architecture/EXECUTION_FLOW.md` | the flow in detail, traced examples |
 | `docs/architecture/FUNCTIONALITY_MAP.md` | every function: file, callers, status, test |
-| `docs/architecture/TECHNICAL_DEBT.md` | known defects BD-1 … BD-8 (still open) |
+| `docs/architecture/TECHNICAL_DEBT.md` | known defects BD-1 … BD-9 (still open) |
 | `docs/validation/FINAL_MAIN_READINESS.md` | the verification record and the manual acceptance checklist |
 | `docs/scenarios/` | the laboratory scene |
 | `docs/history/` | earlier designs, audits, demo reports and the old README (`LEGACY_SETUP.md`); historical, not current |

@@ -382,3 +382,30 @@ The core architecture is unchanged: no module moved between `agent/`, `perceptio
 | `python -m evaluation.demo_rehearsal` (and the other 9 historical scripts) | `python -m evaluation.historical.demo_rehearsal` |
 | `./launch/start_live.sh`, `start_vlm_agent.sh`, `tasks.sh` | `./launch/legacy/…` |
 | `tests/test_X.py` | `tests/unit/test_X.py` or `tests/integration/test_X.py` |
+
+## 14. Addendum: one settings file and one command (2026-10-18)
+
+**What changed** (commits `4130113`, `f1ebb86`, `dd133df`):
+
+| Change | Detail |
+|---|---|
+| `agent/settings.py` | The run configuration: scene, target (Isaac Sim only), simulator start, motion, ROS domain, Gemma / YOLO models, windows, clarification answers, tracing, output paths. Validated at startup, printed as a summary |
+| `./launch/agent.sh` | No flags needed. Without `--settings`, `python -m agent.run` keeps the safe harness defaults |
+| Agent-to-agent trace | Printed when `TRACE = True`: authority, delegation input, worker output with outcome / timing / Gemma calls / failure reason, refusals, bindings, plan adjustments, location checks, decomposition, goal check. Full record per instruction in `events.jsonl` |
+| Simulator guard | The agent stops before "ready" unless the simulator's command interface (node `vt6l_sim`, publishing `/safety/events`) is on the ROS 2 graph |
+| Launcher fix | The one-simulator guard no longer matches unrelated shells |
+
+**Live verification** (Isaac Sim, ROS_DOMAIN_ID 42, shipped settings: laboratory easy seed 42, motion REAL; headless and camera windows off for unattended runs):
+
+| Run | Result |
+|---|---|
+| Startup | settings summary; Gemma and YOLO loaded; Isaac started; "connected to Isaac Sim"; "ready" |
+| "Take a look at your surroundings." | COMPLETED, 15 objects; the full handoff trace printed; trace files saved |
+| "Move closer and inspect the blue-capped tube." | FAILED at planning: Gemma JSON invalid twice (**BD-1**) |
+| "Go back to your home position." | COMPLETED, verified at HOME (0.016 deg); no motion needed |
+| "Inspect the blue-capped tube." | FAILED (insufficient_info): the resolved object failed the crop confirmation; no motion |
+| "Pick up the vial." | **real motion**: "park J1 +160" executed through the frozen executor (ok, 21.2 s); then CANCELLED (several vials; scripted "cancel") |
+| "Put it in the buffer tray." | CANCELLED: nothing held, "it" unbound (correct) |
+| "Go back to your home position." | FAILED unsafe: the collision checker refused the HOME path (obstacle `obj_14` = part of the parked arm measured as an object, **BD-9**, new). The arm stayed parked in the simulator; safety held |
+
+**Automated:** frozen OK; `.venv-seg` 413 passed; system Python 226 passed, 29 skipped (24 new settings tests).
