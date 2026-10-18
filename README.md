@@ -1,6 +1,6 @@
 # Epson VT6L — Isaac Sim 6.1 simulation
 
-## Current layout (2026-10-17; restructured, NOT TESTED since)
+## Current layout (restructured 2026-10-17; automated verification passed 2026-10-18, manual acceptance pending)
 
 | Folder | What is there |
 |---|---|
