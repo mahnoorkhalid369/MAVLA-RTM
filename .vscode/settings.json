@@ -1,0 +1,36 @@
+{
+    // Explorer: hide everything git ignores (.venv*, models/, data/, out/, epson-robot-ros2/, caches, *.log).
+    // The files stay on disk and in the terminal.
+    "explorer.excludeGitIgnore": true,
+    "files.exclude": {
+        "**/__pycache__": true,
+        "**/.pytest_cache": true
+    },
+
+    // Search: do not use .gitignore, so experiment outputs and reports in out/ stay searchable;
+    // exclude only the large, uninteresting trees.
+    "search.useIgnoreFiles": false,
+    "search.exclude": {
+        ".venv": true,
+        ".venv-seg": true,
+        ".venv-vlm": true,
+        "models": true,
+        "data": true,
+        "epson-robot-ros2": true,
+        "**/*.log": true
+    },
+
+    // File watcher: skip the multi-GB trees.
+    "files.watcherExclude": {
+        "**/.venv*/**": true,
+        "**/models/**": true,
+        "**/data/**": true,
+        "**/epson-robot-ros2/**": true,
+        "**/out/**": true
+    },
+
+    // Tests: the agent environment runs the full suite.
+    "python.testing.pytestEnabled": true,
+    "python.testing.pytestArgs": ["tests"],
+    "python.defaultInterpreterPath": "${workspaceFolder}/.venv-seg/bin/python"
+}
