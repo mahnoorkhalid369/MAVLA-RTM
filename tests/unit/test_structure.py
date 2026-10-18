@@ -116,13 +116,16 @@ def test_capability_registry_planner_schema_and_supervisor_agree(tmp_path):
     pytest.importorskip("langgraph")
     from typing import get_args
 
-    from agent.capabilities import EFFECT, SPECS
+    from agent.capabilities import EFFECT, INTERNAL, SPECS
     from agent.supervisor import GoalSupervisor
     from agent.vlm_roles import PlanStep
     from tests.support.fakes import GoalTools
     assert set(get_args(PlanStep.model_fields["do"].annotation)) == set(SPECS)  # the planner can name exactly these
     sup = GoalSupervisor(GoalTools([]), lambda *a, **k: None, tmp_path, None)
-    assert {c for w in sup.reg.workers.values() for c in w.operations} == set(SPECS)  # every one has an executor
+    # every capability has an executor; internal operations (verify) are delegated but never plannable
+    assert {c for w in sup.reg.workers.values() for c in w.operations} == set(SPECS) | set(INTERNAL)
+    assert not set(INTERNAL) & set(get_args(PlanStep.model_fields["do"].annotation))
+    assert sup.reg.worker_of("verify") == "verification" and INTERNAL["verify"].effect == "none"
     assert {n for n, s in SPECS.items() if s.effect == "object_change"} == {"pick", "place", "pick_place"}
     assert {n for n, s in SPECS.items() if s.safety == "motion"} == {"pick", "place", "pick_place", "return_home",
                                                                      "inspect", "explore"}

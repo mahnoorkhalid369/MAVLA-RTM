@@ -91,7 +91,8 @@ def test_pick_only_ends_holding_without_placement_or_home(tmp_path):
     assert "placement" not in [v["check"] for v in r["verifications"]]
     assert r["goal_check"] == [{"condition": {"pred": "holding", "args": ["a"], "source": "derived"}, "satisfied": True,
                                 "confidence": "measured", "evidence": r["goal_check"][0]["evidence"], "bound": {"a": 1}}]
-    assert [e["worker"] for e in ev if e["kind"] == "delegate"] == ["manipulation"]
+    # the manipulation worker does the pick; the verification worker checks the sub-goal and then the goal
+    assert [e["worker"] for e in ev if e["kind"] == "delegate"] == ["manipulation", "verification", "verification"]
 
 
 def test_follow_up_pronoun_binds_to_the_held_object_and_places_it(tmp_path):
@@ -111,7 +112,8 @@ def test_placing_far_from_the_reference_is_not_success(tmp_path):
     run_in(tmp_path, "1", t, instruction="Pick up a.")
     r, _ = run_in(tmp_path, "2", t, instruction="Put it beside c.")
     assert r["status"] == "FAILED" and "goal is not met" in r["message"] and "did not report success" in r["message"]
-    nt = next(g for g in r["goal_check"] if g["condition"]["pred"] == "next_to")
+    # caught by the verification worker right after the place step (the sub-goal check), before the final check
+    nt = next(g for c in r["subgoal_checks"] for g in c["results"] if g["condition"]["pred"] == "next_to")
     assert nt["satisfied"] is False and nt["confidence"] == "measured" and "680 mm apart" in nt["evidence"]
 
 
@@ -218,8 +220,11 @@ def test_decomposition_whose_final_state_is_not_reached_is_not_success(tmp_path)
 # ------------------------------------------------------------------------------- uncertainty-driven inspection
 def test_uncertain_answer_triggers_a_closer_look_then_answers_again(tmp_path, monkeypatch):
     inspected = []
-    monkeypatch.setattr(caps, "run_inspect", lambda ctx, args: (inspected.append(args["target"]),
-                                                                caps.StepResult("completed", "close look"))[1])
+    def inspect(ctx, args):  # a stand-in inspection: records the wrist observation a real one adds to the world model
+        inspected.append(args["target"])
+        ctx.tools.world.objects[int(args["target"][1:])].observations.append({"camera": "wrist", "frame_id": "w", "mark": 1})
+        return caps.StepResult("completed", "close look")
+    monkeypatch.setattr(caps, "run_inspect", inspect)
     answers = [SceneAnswer(answer="object 1?", object_ids=[1], certain=False, check_closer=[1, 3]),
                SceneAnswer(answer="object 3", object_ids=[3])]
     t = session([plan(("observe", {}), ("answer", {"question": "which small one is round?"}))])

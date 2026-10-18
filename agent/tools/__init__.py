@@ -39,6 +39,9 @@ __all__ = ["Tools", "Observation", "PickPlan", "DescriptionMemory", "mean_rgb", 
 
 
 class Tools(HeldObjectState, PerceptionTools, ResolutionTools, ManipulationTools, ExecutionTools, VerificationTools):
+    # what the tools can sense (perceive(camera) takes "table" or "wrist"); recorded in the task ledger
+    SENSORS = ("table camera (RGB-D, fixed)", "wrist camera (RGB-D, on the arm)", "joint states", "gripper finger position")
+
     def __init__(self, bridge, detector, roles, executor, log, run_dir, live=None, memory=None, controls=None) -> None:
         self.bridge, self.detector, self.roles, self.ex, self.log, self.run_dir = bridge, detector, roles, executor, log, run_dir
         self.live = live  # agent.live.LiveChannel or None (viewer is optional)

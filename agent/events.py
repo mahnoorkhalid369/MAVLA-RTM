@@ -243,17 +243,42 @@ def format_trace(e: dict) -> Line | None:  # noqa: C901 (a flat dispatch on the 
     if k == "goal_conditions":
         conds = "; ".join(f"{c.get('pred')}({', '.join(map(str, c.get('args', [])))})" for c in e.get("conditions") or [])
         return Line(w, "SUPERVISOR", f"goal conditions{' (' + e['origin'] + ')' if e.get('origin') else ''}: {conds or '(none)'}")
+    if k == "decision":
+        return Line(w, "SUPERVISOR", f"decide: step {e.get('index')} {e.get('capability')} -> {str(e.get('worker', '')).upper()} "
+                                     f"({e.get('reason')})")
     if k == "delegate":
-        return Line(w, "SUPERVISOR", f"-> {str(e.get('worker', '')).upper()} [{e.get('task_id')}] {e.get('capability')} "
-                                     f"({e.get('safety')}): input {_short(e.get('args'))}; objective {e.get('objective')!r}")
+        c = e.get("constraints") or {}
+        cons = ", ".join(f"{k2}={v}" for k2, v in c.items() if v not in (None, [], ""))
+        exp = "; ".join(f"{x.get('pred')}({', '.join(map(str, x.get('args', [])))})" for x in e.get("expected") or [])
+        ctx = e.get("context") or {}
+        held = ctx.get("held_object")
+        return Line(w, "SUPERVISOR", f"-> {str(e.get('worker', '')).upper()} [{e.get('task_id')}] {e.get('capability')}: "
+                                     f"sub-goal {e.get('objective')!r}; input {_short(e.get('args'), 120)}"
+                                     + (f"; expect {exp}" if exp else "") + (f"; constraints {cons}" if cons else "")
+                                     + (f"; holding #{held}" if held is not None else ""))
     if k == "worker_result":
         ok = e.get("status") == "completed"
         m = e.get("metrics") or {}
+        tools = ", ".join(e.get("tools") or [])
         tail = "" if ok else f"; failure: {_short(e.get('failure_reason'), 200)}"
+        unc = f"; uncertain: {'; '.join(e.get('uncertainty'))}" if e.get("uncertainty") else ""
+        need = f"; needs: {e.get('needs')}" if e.get("needs") else ""
         return Line(w, str(e.get("worker", "")).upper(), f"<- [{e.get('task_id')}] {e.get('status')} / {e.get('outcome')} "
                                                          f"({m.get('seconds')} s, {m.get('gemma_calls')} Gemma calls, "
-                                                         f"confidence {e.get('confidence')}): {_short(e.get('summary'), 200)}{tail}",
+                                                         f"confidence {e.get('confidence')}"
+                                                         + (f", tools: {tools}" if tools else "") + f"): "
+                                                         f"{_short(e.get('summary'), 200)}{tail}{unc}{need}",
                     "success" if ok else ("warn" if e.get("status") in ("blocked", "insufficient_info", "cancelled") else "error"))
+    if k == "review":
+        at = f"step {e.get('index')} " if e.get("index") is not None else ""
+        return Line(w, "SUPERVISOR", f"review {at}{e.get('capability')} ({e.get('outcome')}): {e.get('decision')} - {e.get('reason')}",
+                    "info" if e.get("decision") in ("continue",) else "warn")
+    if k == "plan_update":
+        plan = "; ".join(f"{p.get('index')}. {p.get('capability')} [{p.get('status')}]" for p in e.get("plan") or [])
+        return Line(w, "SUPERVISOR", f"plan updated ({e.get('reason')}): {plan}")
+    if k == "consult":
+        return Line(w, "SUPERVISOR", f"-> GEMMA: decide again ({e.get('reason')}); re-planning {e.get('replans')}/{e.get('budget')}",
+                    "warn")
     if k == "authorization":
         if e.get("allowed", True):
             return None

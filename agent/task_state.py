@@ -1,11 +1,18 @@
 """Shared task state of the goal supervisor: one inspectable object per instruction, written to
 <run_dir>/task_state.json after every step.
 
-It keeps four kinds of information apart:
-  facts       what sensors measured (object geometry from depth, detector scores, robot joint state)
-  hypotheses  what Gemma said (object descriptions, interpretations, answers) — never physical ground truth
-  plan        the planned capability steps and their status
-  verified    outcomes confirmed by independent checks (contact, camera placement check, HOME joints)
+It keeps the kinds of information apart:
+  facts        what sensors measured (object geometry from depth, detector scores)
+  hypotheses   what Gemma said (object descriptions, interpretations, answers): never physical ground truth
+  assumptions  what the supervisor assumed without measuring it (e.g. which object "it" means)
+  plan         the planned capability steps, their status and each worker's structured result
+  verified     outcomes confirmed by independent physical checks (contact, camera placement check, HOME joints)
+  subgoal_checks / goal_check   the verification worker's evidence per sub-goal / for the final goal
+Simulator ground truth never enters this ledger.
+
+Ownership: the supervisor owns this ledger (one per instruction). The world model, the held object and the
+session memory are owned by the session's Tools (agent/tools/); `robot` here is a snapshot of them, refreshed after
+every supervisor state, for the record and for Gemma's re-planning context.
 """
 
 from __future__ import annotations
@@ -55,6 +62,13 @@ class TaskState:
     authority: dict = field(default_factory=dict)  # RequestAuthority of this instruction (from the user's words only)
     refused: list = field(default_factory=list)  # steps refused for lack of authority (never executed)
     workers: dict = field(default_factory=dict)  # registry snapshot at the end
+    robot: dict = field(default_factory=dict)  # snapshot: held object, last referent, motion count, motion mode
+    sensors: list = field(default_factory=list)  # available sensors (from the tools)
+    capabilities: list = field(default_factory=list)  # capabilities available to the planner for this instruction
+    uncertainties: list = field(default_factory=list)  # [{task_id, capability, items}] from worker results
+    assumptions: list = field(default_factory=list)  # supervisor assumptions (not measured), e.g. pronoun bindings
+    subgoal_checks: list = field(default_factory=list)  # verification worker results per completed sub-goal
+    consults: list = field(default_factory=list)  # Gemma re-planning decisions: [{reason, accepted, why}]
     status: str = "running"  # running | completed | failed | cancelled | unsupported
     outcome: str | None = None
     message: str = ""
@@ -80,9 +94,39 @@ class TaskState:
         for k, d in obs.descriptions.items():
             self.hypotheses["descriptions"][str(obs.object_ids.get(k, f"mark{k}"))] = {**d, "source": "gemma", "frame_id": obs.frame_id}
 
+    def progress_text(self, limit: int = 900) -> str:
+        """Where the task stands, for Gemma's next decision: done / failed / remaining steps with their results,
+        the held object and the last goal check. Built from this ledger only."""
+        lines = []
+        for s in self.plan:
+            if s.status in ("done", "failed", "replaced", "refused"):
+                said = s.summary.split(" | verification: ")  # the measured evidence matters more than the worker's words
+                text = f"verification: {said[1]}" if len(said) > 1 else said[0]
+                lines.append(f"{s.index}. {s.capability} {_args_text(s.args)} -> {s.outcome or s.status}: {text[:160]}")
+            elif s.status == "pending":
+                lines.append(f"{s.index}. {s.capability} {_args_text(s.args)} -> not started")
+        held = self.robot.get("held_object")
+        lines.append(f"Robot: {'holding #' + str(held) if held is not None else 'gripper empty'}.")
+        if self.goal_check:
+            lines.append("Goal check: " + "; ".join(
+                f"{c['condition'].get('pred')}({', '.join(map(str, c['condition'].get('args', [])))})="
+                f"{ {True: 'met', False: 'NOT met', None: 'unknown'}[c['satisfied']] }" for c in self.goal_check))
+        text = "Progress so far:\n" + "\n".join(lines)
+        return text if len(text) <= limit else text[:limit - 3] + "..."
+
     def to_dict(self) -> dict:
         return asdict(self)
 
     def save(self, run_dir) -> None:
         p = Path(run_dir) / "task_state.json"
         p.write_text(json.dumps(self.to_dict(), indent=1, default=str))
+
+
+def _args_text(args: dict) -> str:
+    parts = []
+    for k, v in (args or {}).items():
+        if isinstance(v, dict):
+            v = v.get("text")
+        if v not in (None, "", []):
+            parts.append(f"{k}={v}")
+    return "(" + ", ".join(parts) + ")" if parts else ""

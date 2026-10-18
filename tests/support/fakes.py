@@ -154,11 +154,16 @@ class GoalTools(StubTools):
         from config.agent import Relations
         self.rel, self.misplace = Relations(), misplace
         self.plans, self.plan_calls, self.perceived, self.parks = list(plans), [], 0, 0
+        self.plan_contexts: list = []  # the context Gemma was given with each planning call
         self.motion_count, self.view_cleared_at = 0, -1
         tools = self
 
         def plan_goal(text, menu, context=""):
             tools.plan_calls.append(text)
+            tools.plan_contexts.append(context)
+            if not tools.plans:  # the scripted planner has nothing more to say: like Gemma failing twice
+                from agent.vlm_roles import VLMFailure
+                raise VLMFailure("plan: no scripted plan left")
             p = tools.plans.pop(0)
             if isinstance(p, Exception):
                 raise p

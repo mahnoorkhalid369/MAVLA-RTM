@@ -86,6 +86,15 @@ SPECS: dict[str, CapabilitySpec] = {s.name: replace(s, effect=EFFECT.get(s.name,
 MOTION = {n for n, s in SPECS.items() if s.safety == "motion"}
 
 
+# Operations the supervisor delegates but Gemma cannot plan (not in the planner's menu or schema)
+INTERNAL: dict[str, CapabilitySpec] = {
+    "verify": CapabilitySpec("verify", "compare measured state with a goal or sub-goal's conditions", '{"conditions": [...]}',
+                             "read_only", "conditions bound to world objects", "evidence: satisfied / not / undecidable",
+                             "no evidence for a condition", "goal predicates over measured state (agent/goals.py)",
+                             effect="none"),
+}
+
+
 def planner_menu(specs: dict[str, CapabilitySpec] | None = None) -> str:
     """The capability list as the planner sees it (default: SPECS)."""
     return "\n".join(f"- {s.name}: {s.summary}. args {s.args}" + ("" if s.implemented else " (not available yet)")
