@@ -111,8 +111,10 @@ flowchart TD
   T --> M["control/ (frozen): collision-checked plans"]
   M --> X["Tools.execute: motion gate (blocked / dry_run / real)"]
   X --> R["execution/ros_executor.py (frozen) → Isaac Sim + joint-limit safety layer"]
-  C --> D
-  D -->|all steps done| V["agent/goals.py: verify the goal over measured state"]
+  C --> VW["verification worker: sub-goal met? (measured)"]
+  VW --> D
+  D -->|all steps done| V["verification worker: goal met? (agent/goals.py)"]
+  V -->|not shown, budget left| P
   V --> O["result.json, events.jsonl → terminal and demo viewer"]
 ```
 
@@ -163,6 +165,7 @@ The launchers choose the right one.
 | Read | For |
 |---|---|
 | `docs/DEVELOPER_GUIDE.md` | commands to run and test each subsystem |
+| `docs/architecture/AGENT_ARCHITECTURE.md` | the multi-agent architecture: supervisor, workers, contracts, feedback loop, state |
 | `docs/architecture/MODULE_GUIDE.md` | where to find X, the full tree |
 | `docs/architecture/EXECUTION_FLOW.md` | the flow in detail, traced examples |
 | `docs/architecture/FUNCTIONALITY_MAP.md` | every function: file, callers, status, test |

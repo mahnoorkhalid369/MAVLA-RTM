@@ -1,5 +1,10 @@
 # Execution flow: what happens when you type an instruction
 
+> The architecture (roles, contracts, the supervisor-worker feedback loop, state ownership) is explained in
+> `AGENT_ARCHITECTURE.md`. Since 2026-10-18 every completed physical / locating step is checked by the verification
+> worker before the supervisor continues, the final goal check is delegated to it too, and an unmet goal returns to
+> Gemma while budget remains.
+
 > **Restructured 2026-10-17;** automated verification passed on 2026-10-18 (unit, integration, saved-data, model inference, Isaac Sim + ROS with motion blocked); manual acceptance pending: `docs/validation/FINAL_MAIN_READINESS.md`. The flow, the function names and the behaviour are unchanged; only
 > the files moved (`REFACTOR_CHANGELOG.md`).
 
@@ -96,7 +101,8 @@ stateDiagram-v2
   REPLANNING --> DISPATCHING: new plan accepted
   REPLANNING --> FAILED: drops the objective / repeats an attempt
   VERIFYING_GOAL --> COMPLETED: every condition satisfied (or model-only)
-  VERIFYING_GOAL --> FAILED: a condition false / unverifiable
+  VERIFYING_GOAL --> REPLANNING: goal not shown, re-planning budget left (Gemma decides the remaining steps)
+  VERIFYING_GOAL --> FAILED: a condition false / unverifiable, budget used
 ```
 
 | State | Function | What it does |

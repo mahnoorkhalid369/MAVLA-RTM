@@ -4,6 +4,7 @@ The top-level `README.md` is the entry point. These documents go deeper:
 
 | Document | Contents |
 |---|---|
+| [AGENT_ARCHITECTURE.md](AGENT_ARCHITECTURE.md) | **the multi-agent architecture**: supervisor, workers, contracts, feedback loop, state ownership, safety boundary, tracing |
 | [MODULE_GUIDE.md](MODULE_GUIDE.md) | where to find X; the directory structure; before → after module mapping |
 | [EXECUTION_FLOW.md](EXECUTION_FLOW.md) | diagrams of the instruction path, and three traced examples with current failures marked |
 | [FUNCTIONALITY_MAP.md](FUNCTIONALITY_MAP.md) | every implemented function: file, callers, inputs / outputs, state, status, how to test |

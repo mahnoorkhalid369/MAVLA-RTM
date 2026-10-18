@@ -33,7 +33,8 @@ This guide lists what each folder and module is for and where to look for a give
 | see grasp and motion planning | `agent/tools/manipulation.py` `Tools.plan_pick_place` / `plan_pick` / `plan_place_held` → frozen `control/skills.py`, `control/collision.py` |
 | see where motion is sent to the robot | `agent/tools/execution.py` `Tools.execute` → frozen `execution/ros_executor.py` |
 | see the joint-limit safety layer | frozen `safety/joint_limits.py`, applied in frozen `sim/ros_control.py` |
-| see how success is checked | `agent/goals.py` `GoalEvaluator`; `agent/tools/verification.py` |
+| see how success is checked | verification worker `agent/capabilities/verification.py` → `agent/goals.py` `GoalEvaluator`; physical checks `agent/tools/verification.py` |
+| understand the supervisor-worker loop | `docs/architecture/AGENT_ARCHITECTURE.md` |
 | ask the user a question during a task | `agent/ask.py` |
 | change thresholds, tolerances, budgets, model paths | `config/` (`perception.py`, `agent.py`, `models.py`); robot and camera constants: frozen `control/robot.py`; Gemma: `vlm/config.py` |
 | build or change a test scene | `scenarios/` (`laboratory.py`, `parts.py`, `core.py`); small JSON scenes in `scenarios/scenes/` |
@@ -63,7 +64,7 @@ agent/                       orchestration: one instruction -> verified result
   session.py                 Session: what lives across instructions
   supervisor.py              GoalSupervisor: LangGraph state machine + review policy
   planning.py                plan completion rules, achieves()
-  workers.py                 typed requests / results, registry, dispatch + authorization
+  workers.py                 WorkerRequest / WorkerResult contracts, registry, dispatch + authorization, assess()
   authority.py               what the user's request permits (none / sensing / object_change)
   goals.py                   goal conditions, GoalEvaluator over measured state
   task_state.py              TaskState ledger (task_state.json)
@@ -73,9 +74,10 @@ agent/                       orchestration: one instruction -> verified result
   capabilities/              what the planner may ask for
     specs.py                 SPECS, available(), planner_menu(), StepResult, Context
     perception.py            observe, describe_scene, answer, locate
-    inspection.py            inspect, explore (wrist camera)
+    inspection.py            inspect, explore (inspection worker, wrist camera)
     manipulation.py          pick, place, pick_place, return_home, failure mapping
     planning.py              decompose
+    verification.py          verify (verification worker; internal, not plannable)
   tools/                     Tools: the agent's only way to touch the world
     __init__.py              class Tools (composed from the parts below)
     held.py                  held-object / session state
