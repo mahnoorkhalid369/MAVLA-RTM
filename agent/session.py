@@ -24,11 +24,13 @@ class Session:
     a place). Nothing is written to disk for the next session: a new process starts with an empty world and
     nothing held."""
 
-    def __init__(self, bridge, detector, vlm, executor, responder, live=None, memory=None, controls=None) -> None:
+    def __init__(self, bridge, detector, vlm, executor, responder, live=None, memory=None, controls=None,
+                 trace: bool = False) -> None:
         self.id = time.strftime("session_%Y%m%d_%H%M%S")
         self.bridge, self.detector, self.vlm, self.executor = bridge, detector, vlm, executor
         self.responder, self.live, self.memory = responder, live, memory
         self.controls = controls  # agent.controls.ExecutionControls or None (normal operation)
+        self.trace = trace  # print every agent handoff (agent/events.py format_trace)
         self.tools = None
         self.count = 0
 
@@ -39,7 +41,7 @@ class Session:
         from agent.vlm_roles import Roles
 
         (out / "images").mkdir(parents=True, exist_ok=True)
-        log = EventLog(out / "events.jsonl", echo=True)
+        log = EventLog(out / "events.jsonl", echo=True, trace=self.trace)
         self.count += 1
         if self.live:
             self.live.start_run(out, instruction)
@@ -62,4 +64,7 @@ class Session:
             log.close()
         report["session"] = {"id": self.id, "instruction_index": self.count}
         (out / "result.json").write_text(json.dumps(report, indent=1, default=str))
+        if self.trace:
+            print(f"[trace] full trace: {out / 'events.jsonl'} | ledger: {out / 'task_state.json'} | result: {out / 'result.json'}",
+                  flush=True)
         return report

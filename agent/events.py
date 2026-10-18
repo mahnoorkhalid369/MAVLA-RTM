@@ -9,6 +9,7 @@ that carry no information for an operator (e.g. each valid describe call) return
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 
 LEVELS = ("info", "warn", "error", "success", "question")
@@ -217,4 +218,62 @@ def format_event(e: dict) -> Line | None:  # noqa: C901 (a flat dispatch on the 
         return Line(w, "SUPERVISOR", f"{e.get('status')}: {e.get('message')}", lvl)
     if k == "error":
         return Line(w, "SUPERVISOR", f"internal error: {e.get('error')}", "error")
+    return None
+
+
+def _short(v, n: int = 160) -> str:
+    s = v if isinstance(v, str) else json.dumps(v, default=str)
+    return s if len(s) <= n else s[:n - 3] + "..."
+
+
+def format_trace(e: dict) -> Line | None:  # noqa: C901 (a flat dispatch on the event kind)
+    """The agent-to-agent handoffs that format_event leaves out (printed with --trace / settings.TRACE): what the
+    supervisor delegates to which worker with which input, what the worker returns, authorization decisions,
+    reference bindings, plan adjustments and the goal check. Every line comes from a logged event."""
+    k, w = e.get("kind"), e.get("wall", "--:--:--")
+    if k == "session":
+        return Line(w, "SESSION", f"instruction {e.get('instruction_index')} of session {e.get('session_id')} "
+                                  f"({'world model kept from earlier instructions' if e.get('reused_state') else 'new world model'})")
+    if k == "session_state":
+        return Line(w, "SESSION", f"held object: {e.get('held')} (#{e.get('held_object')}, finger {e.get('finger_deg')} deg)"
+                    + (f"; {e.get('note')}" if e.get("note") else ""))
+    if k == "authority":
+        return Line(w, "AUTHORITY", f"request is a {e.get('request_kind')} -> may: {', '.join(e.get('grants') or [])} "
+                                    f"(evidence {_short(e.get('evidence'), 80)!s}; {e.get('source')})")
+    if k == "goal_conditions":
+        conds = "; ".join(f"{c.get('pred')}({', '.join(map(str, c.get('args', [])))})" for c in e.get("conditions") or [])
+        return Line(w, "SUPERVISOR", f"goal conditions{' (' + e['origin'] + ')' if e.get('origin') else ''}: {conds or '(none)'}")
+    if k == "delegate":
+        return Line(w, "SUPERVISOR", f"-> {str(e.get('worker', '')).upper()} [{e.get('task_id')}] {e.get('capability')} "
+                                     f"({e.get('safety')}): input {_short(e.get('args'))}; objective {e.get('objective')!r}")
+    if k == "worker_result":
+        ok = e.get("status") == "completed"
+        m = e.get("metrics") or {}
+        tail = "" if ok else f"; failure: {_short(e.get('failure_reason'), 200)}"
+        return Line(w, str(e.get("worker", "")).upper(), f"<- [{e.get('task_id')}] {e.get('status')} / {e.get('outcome')} "
+                                                         f"({m.get('seconds')} s, {m.get('gemma_calls')} Gemma calls, "
+                                                         f"confidence {e.get('confidence')}): {_short(e.get('summary'), 200)}{tail}",
+                    "success" if ok else ("warn" if e.get("status") in ("blocked", "insufficient_info", "cancelled") else "error"))
+    if k == "authorization":
+        if e.get("allowed", True):
+            return None
+        what = e.get("capability") or ", ".join(e.get("refused") or [])
+        return Line(w, "AUTHORITY", f"refused {what}: {e.get('reason')}", "warn")
+    if k == "binding":
+        return Line(w, "SUPERVISOR", f"{e.get('text')!r} -> #{e.get('world_id')} ({e.get('reason')})")
+    if k == "plan_adjusted":
+        return Line(w, "SUPERVISOR", f"step {e.get('index')}: {e.get('change')} ({e.get('reason')})", "warn")
+    if k == "location_check":
+        return Line(w, "GROUNDING", f"{e.get('text')!r} (object {e.get('mark')}) {e.get('relation')} {e.get('anchor')!r} "
+                                    f"(object {e.get('anchor_mark')}): {'holds' if e.get('holds') else 'does NOT hold'}",
+                    "info" if e.get("holds") else "warn")
+    if k == "decomposed":
+        steps = "; ".join(f"{s.get('capability')} {_short(s.get('args'), 60)}" for s in e.get("steps") or [])
+        return Line(w, "PLANNER", f"decomposed {e.get('goal')!r}: {steps or '(no steps)'}")
+    if k == "goal_check":
+        parts = [f"{r['condition'].get('pred')}({', '.join(map(str, r['condition'].get('args', [])))})="
+                 f"{ {True: 'yes', False: 'NO', None: 'unknown'}[r.get('satisfied')] } [{r.get('confidence')}]"
+                 for r in e.get("results") or []]
+        bad = any(r.get("satisfied") is False for r in e.get("results") or [])
+        return Line(w, "VERIFY", "goal check: " + ("; ".join(parts) or "(no conditions)"), "error" if bad else "success")
     return None

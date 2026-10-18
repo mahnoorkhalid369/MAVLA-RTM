@@ -34,6 +34,8 @@ ROOT = Path(__file__).resolve().parents[1]
 def sim_command(gui: bool, scenario: str | None = None, difficulty: str = "easy", seed: int = 0) -> list[str]:
     """The simulator process: the default scene (frozen sim.run_live) or a test scene (sim.run_scenario; difficulty
     and seed apply to scenario-library scenes such as laboratory)."""
+    if scenario == "default":
+        scenario = None
     mod = ["sim.run_scenario", "--scenario", scenario, "--difficulty", difficulty, "--seed", str(seed)] if scenario else ["sim.run_live"]
     return [str(ROOT / ".venv/bin/python"), "-u", "-m", *mod] + ([] if gui else ["--headless"])
 
@@ -54,8 +56,25 @@ def stop_sim(p: subprocess.Popen | None) -> None:
         os.killpg(p.pid, signal.SIGKILL)
 
 
+SIMULATOR_TOPIC = "/safety/events"  # published by the simulator's command interface (frozen sim/ros_control.py)
+SIMULATOR_NODE = "vt6l_sim"         # ... whose ROS 2 node has this name
+
+
+def simulator_on_graph(publisher_nodes) -> bool:
+    """True if the Isaac Sim command interface publishes on the connected ROS 2 graph (a publisher node named
+    vt6l_sim on /safety/events). A physical robot driver is not that node, so a session that targets Isaac Sim never
+    commands hardware by mistake. (The executor subscribes to that topic itself, so the topic alone proves nothing.)"""
+    return SIMULATOR_NODE in set(publisher_nodes)
+
+
+def simulator_publishers(node) -> list[str]:
+    return [i.node_name for i in node.get_publishers_info_by_topic(SIMULATOR_TOPIC)]
+
+
 def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser()
+    ap.add_argument("--settings", action="store_true",
+                    help="take every default from agent/settings.py (validated first); launch/agent.sh uses this")
     ap.add_argument("--instruction", help="one instruction (otherwise: interactive prompt)")
     ap.add_argument("--out", default=str(ROOT / "out/demo" / time.strftime("%Y-%m-%d") / time.strftime("live_%H%M%S")))
     ap.add_argument("--weights", default=str(YOLO_WEIGHTS))
@@ -63,6 +82,7 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--conf", type=float, default=DETECTOR_CONF)
     ap.add_argument("--start-sim", action="store_true", help="start Isaac Sim after loading the models")
     ap.add_argument("--gui", action="store_true", help="with --start-sim: show the Isaac Sim window")
+    ap.add_argument("--headless", dest="gui", action="store_false", help="with --start-sim: no Isaac Sim window")
     ap.add_argument("--scenario", help="with --start-sim: a scenario-library scene (laboratory) or a JSON test scene "
                                        "(scenarios/scenes/<name>.json); default: the frozen default scene")
     ap.add_argument("--difficulty", default="easy", choices=["easy", "medium", "hard"], help="with --scenario laboratory")
@@ -77,6 +97,11 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--no-reuse", action="store_true", help="describe every object again for each instruction")
     ap.add_argument("--live-dir", default=str(ROOT / "out/demo/live"),
                     help="where the optional demo viewer reads the latest perception and the active run ('' = off)")
+    ap.add_argument("--gemma", default=None, help="local Gemma model folder (default: vlm/config.py)")
+    ap.add_argument("--trace", action="store_true", help="print every agent handoff (delegation input, worker output, "
+                                                         "authorization, bindings, goal checks) in the terminal")
+    ap.add_argument("--target", default="isaac_sim", choices=["isaac_sim"],
+                    help="execution target; only Isaac Sim is supported (physical-robot execution is not part of this entry point)")
     ap.add_argument("--ask-timeout", type=float, default=None,
                     help="seconds to wait for an answer before cancelling (default Budgets.question_timeout_s; 0 = no limit)")
     return ap
@@ -93,7 +118,17 @@ def main(controls=None, on_directive=None, argv=None) -> int:
     as is and --motion is ignored; otherwise built from --motion (default blocked).
     on_directive: called with every input line that starts with "@" (harness directives); such lines are not
     instructions or answers (agent.ask.LineReader.on_directive)."""
-    a = parser().parse_args(argv)
+    argv = sys.argv[1:] if argv is None else list(argv)
+    ap = parser()
+    if "--settings" in argv:
+        from agent import settings
+        problems = settings.validate()
+        if problems:
+            print("[agent] agent/settings.py has problems:\n  - " + "\n  - ".join(problems), flush=True)
+            return 2
+        print(settings.summary(), flush=True)
+        ap.set_defaults(**settings.run_defaults())
+    a = ap.parse_args(argv)
     controls = controls_for(a, controls)
     print(f"[agent] motion: {controls.motion.upper()}" + {"blocked": " (no robot command is sent; --motion real to move)",
                                                          "dry_run": " (motions are planned and logged, not sent)",
@@ -113,7 +148,7 @@ def main(controls=None, on_directive=None, argv=None) -> int:
 
     from agent.vlm_roles import GemmaVLM
     print("[agent] loading Gemma ...", flush=True)
-    vlm = GemmaVLM()
+    vlm = GemmaVLM(a.gemma)
     from perception.detector import YoloDetector
     print("[agent] loading the detector ...", flush=True)
     detector = YoloDetector(a.weights, a.imgsz, a.conf)
@@ -135,8 +170,17 @@ def main(controls=None, on_directive=None, argv=None) -> int:
         while executor.traj_pub.get_subscription_count() == 0 and time.monotonic() < end:
             executor.spin(0.2)
         executor.wait_sim(3.0)
+        end = time.monotonic() + 30  # target isaac_sim: the graph must be the simulator before anything can move
+        while not simulator_on_graph(simulator_publishers(bridge.node)) and time.monotonic() < end:
+            time.sleep(0.5)
+        if not simulator_on_graph(simulator_publishers(bridge.node)):
+            print(f"[agent] the connected ROS 2 graph is not the Isaac Sim simulator (no {SIMULATOR_NODE} publishing "
+                  f"{SIMULATOR_TOPIC}); stopping "
+                  "(this entry point never commands physical hardware)", flush=True)
+            return 2
+        print(f"[agent] connected to Isaac Sim (ROS_DOMAIN_ID {os.environ.get('ROS_DOMAIN_ID', '0')})", flush=True)
         print("[agent] ready", flush=True)
-        session = Session(bridge, detector, vlm, executor, responder, live, memory, controls=controls)
+        session = Session(bridge, detector, vlm, executor, responder, live, memory, controls=controls, trace=a.trace)
         if a.instruction:
             r = session.run(a.instruction, out)
             print(f"[agent] {r['status']}: {r['message']}", flush=True)
