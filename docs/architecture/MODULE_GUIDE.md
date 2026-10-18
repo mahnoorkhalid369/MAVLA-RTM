@@ -16,7 +16,7 @@ This guide lists what each folder and module is for and where to look for a give
 | start the agent on typed instructions | `launch/agent.sh` → `agent/run.py --settings` (`main`) |
 | follow the agent-to-agent handoffs | `TRACE = True` in `agent/settings.py`; lines from `agent/events.py` `format_trace`; full record in `events.jsonl` |
 | see what lives across instructions | `agent/session.py` (`Session`) |
-| see how an instruction becomes steps | `agent/supervisor.py` `_interpreting` → `agent/vlm_roles/roles.py` `Roles.plan_goal` (prompt `PLAN_SYSTEM` in `agent/vlm_roles/prompts.py`) → `agent/planning.py` `complete_plan` |
+| see how an instruction becomes steps | `agent/supervisor.py` `_interpreting` → `agent/vlm_roles/roles.py` `Roles.plan_goal` (prompt `PLAN_SYSTEM` in `agent/vlm_roles/prompts.py`) (Gemma's plan is used as written; `Roles.decide` / `DECIDE_SYSTEM` decides after each result that needs it) |
 | see what the robot is allowed to do for a request | `agent/authority.py`; enforced in `agent/workers.py` `WorkerRegistry.dispatch` |
 | block motion, dry-run, disable capabilities, limit replanning | `agent/controls.py` `ExecutionControls` (pass to `agent.run.main`, `Session`, `Tools`, `GoalSupervisor`) |
 | find the list of capabilities | `agent/capabilities/specs.py` `SPECS` |
@@ -63,7 +63,7 @@ agent/                       orchestration: one instruction -> verified result
   run.py                     entry point: python -m agent.run (models -> simulator -> Session)
   session.py                 Session: what lives across instructions
   supervisor.py              GoalSupervisor: LangGraph state machine + review policy
-  planning.py                plan completion rules, achieves()
+  planning.py                plan helper (_ref_texts)
   workers.py                 WorkerRequest / WorkerResult contracts, registry, dispatch + authorization, assess()
   authority.py               what the user's request permits (none / sensing / object_change)
   goals.py                   goal conditions, GoalEvaluator over measured state
@@ -162,7 +162,7 @@ config/ <- perception/, agent/          scenarios/ -> perception/viewpoints, fro
 | `agent/config.py` | `config/perception.py`, `config/agent.py` (+ `unit()` → `agent/tools/resolution.py`) |
 | `agent/run.py` `DEFAULT_WEIGHTS`, 1024, 0.25 | `config/models.py` |
 | `agent/run.py` `Session` | `agent/session.py` |
-| `agent/supervisor.py` `complete_plan`, `achieves`, `ALTERNATIVES`, `CONSUMERS`, `_ref_texts` | `agent/planning.py` |
+| `agent/supervisor.py` `_ref_texts` (`complete_plan`, `achieves`, `ALTERNATIVES`, `CONSUMERS` removed 2026-10-18) | `agent/planning.py` |
 | `agent/supervisor.py` `MAX_REPLANS` | `agent/controls.py` `ExecutionControls.max_replans` |
 | `agent/world_state.py` | `agent/task_state.py` |
 | `agent/tools.py` | `agent/tools/` (see §2) |

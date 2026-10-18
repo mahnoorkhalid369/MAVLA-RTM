@@ -17,7 +17,7 @@ RGB-D cameras measure. The cameras are a table camera on a stand and a wrist cam
 | Concern | How |
 |---|---|
 | Perception | YOLO masks plus depth geometry measure every object; Gemma 4 E2B names them and reads the user's words |
-| Planning and execution | a LangGraph supervisor plans with a fixed set of capabilities; every motion is collision-checked, executed by the frozen, validated manipulation core and checked by the simulator's safety layer |
+| Planning and execution | Gemma plans with a fixed set of capabilities and decides after every result that needs a decision (continue / replan / ask you / finish / stop); a LangGraph supervisor delegates one step at a time to the perception, inspection, manipulation and verification workers; every motion is collision-checked, executed by the frozen, validated manipulation core and checked by the simulator's safety layer |
 | Verification | success is measured (finger contact, camera placement check, HOME joints), never assumed |
 | Object knowledge | none is hard-coded: no colour lists, no object names, no simulator ground truth in the agent |
 
@@ -31,6 +31,7 @@ RGB-D cameras measure. The cameras are a table camera on a stand and a wrist cam
 | execution | `TARGET`, `MOTION` |
 | models | `GEMMA_MODEL`, `YOLO_WEIGHTS` |
 | windows | `ISAAC_WINDOW`, `DEMO_VIEWER`, `CAMERA_WINDOWS` |
+| Gemma decisions per instruction | `MAX_GEMMA_DECISIONS` |
 | tracing | `TRACE` |
 | outputs | `OUTPUT_DIR` … |
 
@@ -101,7 +102,7 @@ blocked unless `--motion real`. Commands, environments and the expected test res
 flowchart TD
   U["You type: Inspect the blue-capped tube."] --> S["agent/session.py Session.run"]
   S --> A["agent/authority.py: what may this request change?\n(Gemma classifies; none / sensing / object_change)"]
-  A --> P["agent/vlm_roles: Gemma plans capability steps\n+ agent/planning.py completion rules"]
+  A --> P["agent/vlm_roles: Gemma plans capability steps"]
   P --> D{"agent/supervisor.py: next step"}
   D --> W["agent/workers.py: authorized? (else refused)"]
   W --> C["agent/capabilities: run_observe / run_locate / run_inspect / run_pick_place ..."]
@@ -112,9 +113,11 @@ flowchart TD
   M --> X["Tools.execute: motion gate (blocked / dry_run / real)"]
   X --> R["execution/ros_executor.py (frozen) → Isaac Sim + joint-limit safety layer"]
   C --> VW["verification worker: sub-goal met? (measured)"]
-  VW --> D
+  VW -->|routine success| D
+  VW -->|failure / doubt| GD["Gemma decides: continue · replan · ask you · finish · stop"]
+  GD --> D
   D -->|all steps done| V["verification worker: goal met? (agent/goals.py)"]
-  V -->|not shown, budget left| P
+  V -->|not shown, budget left| GD
   V --> O["result.json, events.jsonl → terminal and demo viewer"]
 ```
 

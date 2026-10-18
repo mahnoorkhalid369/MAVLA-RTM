@@ -14,7 +14,7 @@ Where the functions named below live:
 |---|---|
 | `Session` | `agent/session.py` |
 | `GoalSupervisor` | `agent/supervisor.py` |
-| `complete_plan`, `achieves` | `agent/planning.py` |
+| `_ref_texts` (plan helper) | `agent/planning.py` |
 | `ExecutionControls` | `agent/controls.py` |
 | `run_observe`, `run_describe_scene`, `run_answer`, `run_locate`, `_location_check`, `_target_mark` | `agent/capabilities/perception.py` |
 | `run_inspect`, `run_explore`, `_wrist_observation` | `agent/capabilities/inspection.py` |
@@ -93,26 +93,28 @@ stateDiagram-v2
   DISPATCHING --> CANCELLED: "it" cannot be bound
   DISPATCHING --> FAILED: > MAX_STEPS_EXECUTED (14)
   DELEGATING --> REVIEWING
-  REVIEWING --> DISPATCHING: completed / subtask inserted / step refused
-  REVIEWING --> REPLANNING: recoverable failure, replans < controls.max_replans (1)
-  REVIEWING --> CANCELLED: cancelled / ambiguous
-  REVIEWING --> UNSUPPORTED: unsupported
-  REVIEWING --> FAILED: unsafe / infeasible / budget used
-  REPLANNING --> DISPATCHING: new plan accepted
-  REPLANNING --> FAILED: drops the objective / repeats an attempt
+  REVIEWING --> DISPATCHING: routine success / decomposition inserted / step refused (no Gemma call)
+  REVIEWING --> DECIDING: failure, uncertain result, unverified sub-goal, worker advice
+  REVIEWING --> CANCELLED: cancelled by the user
+  REVIEWING --> FAILED: unsafe (no new motion is planned)
+  DECIDING --> DISPATCHING: continue / replan accepted
+  DECIDING --> DECIDING: user answered Gemma's question / replan repeats a failed step unchanged (rejected)
+  DECIDING --> VERIFYING_GOAL: finish
+  DECIDING --> FAILED: stop / invalid decision / budget used (UNSUPPORTED or CANCELLED by the last outcome)
+  DECIDING --> CANCELLED: no answer to Gemma's question
   VERIFYING_GOAL --> COMPLETED: every condition satisfied (or model-only)
-  VERIFYING_GOAL --> REPLANNING: goal not shown, re-planning budget left (Gemma decides the remaining steps)
+  VERIFYING_GOAL --> DECIDING: goal not shown, decision budget left
   VERIFYING_GOAL --> FAILED: a condition false / unverifiable, budget used
 ```
 
 | State | Function | What it does |
 |---|---|---|
-| INTERPRETING | `_interpreting` | `authority.classify` → `Roles.plan_goal` (Gemma, `PLAN_SYSTEM`) → `complete_plan` (`agent/planning.py`) → `_add_steps`. Questions get the condition `answered(<instruction>)`; other conditions are derived from the steps (`goals.derive_conditions`). |
+| INTERPRETING | `_interpreting` | `authority.classify` → `Roles.plan_goal` (Gemma, `PLAN_SYSTEM`) → `_add_steps` (Gemma's plan as written). Questions get the condition `answered(<instruction>)`; other conditions are derived from the steps (`goals.derive_conditions`). |
 | DISPATCHING | `_dispatching` | picks `TaskState.current()`, `_bind_refs` ("it" → `#id`), `_adapt_to_robot_state` (pick_place of the held object → place), auto-observe (`capabilities.run_observe`) if the step needs a fresh view (`NEEDS_OBSERVATION`, `Tools.is_fresh`) |
 | DELEGATING | `_delegating` | `WorkerRegistry.request` → `dispatch(req, ctx, authority)`; records the result in the ledger |
-| REVIEWING | `_reviewing` | the policy: decomposition insert (refusing out-of-authority steps), uncertain answer → inspect (≤ 2) + answer again, locate not visible → explore + locate, `unauthorized` → refuse and continue, otherwise stop or replan |
-| REPLANNING | `_replanning` | Gemma again with the attempts listed; rejects plans that drop the failed objective (`achieves`) or repeat an attempt unchanged |
-| VERIFYING_GOAL | `_verifying_goal` | all steps done? replaced steps achieved later? then `GoalEvaluator.evaluate` per condition |
+| REVIEWING | `_reviewing` | deterministic only: measured sub-goal check (verification worker), `unauthorized` → refuse and continue, `unsafe` → stop, `cancelled` → stop, decomposition insert (refusing out-of-authority steps), routine success → continue; anything else → DECIDING with the event text (step, outcome, summary, uncertainty, worker advice) |
+| DECIDING | `_deciding` | `Roles.decide` (Gemma, `DECIDE_SYSTEM`; goal + `TaskState.progress_text()` + event) → schema-validated `Decision`: continue / replan (steps validated like a plan; a first step that already failed with no motion since is sent back) / ask_user (`responder.ask`) / finish / stop. Budget `controls.max_replans` (settings `MAX_GEMMA_DECISIONS`, 3) |
+| VERIFYING_GOAL | `_verifying_goal` | `GoalEvaluator.evaluate` per condition (verification worker); not shown + budget → DECIDING |
 
 ## 3. How a tool (capability) is selected and executed
 
@@ -225,9 +227,9 @@ flowchart TD
   subgraph L3["Level 3: supervisor review (agent/supervisor.py)"]
     MAP --> RV{_reviewing}
     RV -->|unauthorized| REF[refuse step, continue]
-    RV -->|insufficient_info on locate| EXP[explore + locate once]
-    RV -->|failed / insufficient_info, replans left| RP[REPLANNING]
-    RV -->|unsafe / infeasible / cancelled / ambiguous / unsupported| STOP[terminal state, message lists what was done]
+    RV -->|unsafe / cancelled| STOP[terminal state, message lists what was done]
+    RV -->|any other failure or doubt| DEC[DECIDING: Gemma chooses, budget-bounded]
+    DEC -->|stop / budget used| STOP
   end
 ```
 
@@ -246,7 +248,7 @@ flowchart TD
 | 1 | `Session.run` → `Tools.begin_instruction` | new run directory, held state re-checked (nothing held) | — |
 | 2 | `authority.classify` → `Roles.classify_request` | kind **question**, evidence = the whole sentence; grants none + sensing (no object_change) | live, `out/lab_exp1/milestone3/trackA/results.json` request 1 |
 | 3 | `Roles.plan_goal` | **currently FAILS**: Gemma's JSON is invalid on both attempts → FAILED "I could not turn the instruction into steps" (BD-1) | same file, request 1; offline A/B: `trackA/planner_ab/results.json` |
-| 3′ | (when planning succeeds) | e.g. observe + decompose. `complete_plan` adds an `answer` step (a report is not an answer); condition `answered(question)` | tests: `tests/integration/test_authority.py::test_question_decomposed_into_pick_and_place_moves_nothing` |
+| 3′ | (when planning succeeds) | e.g. observe + decompose; condition `answered(question)` from the request kind. If the plan never answers, the goal check fails and Gemma adds the answer step (DECIDING) | tests: `tests/integration/test_authority.py::test_question_decomposed_into_pick_and_place_moves_nothing` |
 | 4′ | `run_observe` → perception (§4) | measured objects + Gemma descriptions | live (other instructions) |
 | 5′ | `run_decompose` → `Roles.decompose` | in the live current-system test, Gemma proposed pick #17 + place on #8. Now the supervisor refuses both before execution (`authorization` event, `refused` in the report) | `out/lab_exp1/current_system_test/step4/04/events.jsonl`; test above |
 | 6′ | `run_answer` → `Roles.answer` | answer from the measured object list (no image) | — |
