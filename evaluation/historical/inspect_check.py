@@ -1,7 +1,7 @@
 """Checkpoint 3 (evaluation): live wrist-camera inspection of one object through the inspect capability (no
 supervisor), scored against simulator ground truth (EVALUATION ONLY: read here, never by the agent code).
 
-    (sim running, ROS sourced)  .venv-seg/bin/python -m evaluation.inspect_check --target "red cube" --truth red_cube --out out/active/cp3.json
+    (sim running, ROS sourced)  .venv-seg/bin/python -m evaluation.historical.inspect_check --target "red cube" --truth red_cube --out out/active/cp3.json
 """
 
 import argparse
@@ -12,7 +12,7 @@ from pathlib import Path
 
 import numpy as np
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 
@@ -32,7 +32,7 @@ def main() -> int:
     from agent.tools import Tools
     from agent.vlm_roles import GemmaVLM, Roles
     from agent.task_state import TaskState
-    from evaluation.dual_camera_check import Truth
+    from evaluation.historical.dual_camera_check import Truth
     from execution.ros_executor import RosExecutor
     from sim.scene_objects import OBJECTS
 

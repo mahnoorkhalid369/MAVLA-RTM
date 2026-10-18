@@ -252,7 +252,7 @@ in `out/validation/` (not in git).
 | L5 | The legacy stack remains | Imported by protected / frozen files |
 | L6 | `sim` ↔ `scenarios` mutual package dependency through the Isaac builder; legacy `classical_detector` → `sim.scene_objects` | No module cycle; the builder's job is to bridge them |
 | L7 | No dependency manifest or lock files; four interpreters | By your decision against packaging; versions in section 9 |
-| L8 | `agent/run.py` keeps harness options (`--sim-flag`, `--ask scripted`) | Used by `evaluation/demo_rehearsal.py`; explicit and documented |
+| L8 | `agent/run.py` keeps harness options (`--sim-flag`, `--ask scripted`) | Used by `evaluation/historical/demo_rehearsal.py`; explicit and documented |
 
 ## 8. Protected-file integrity
 

@@ -40,7 +40,7 @@ This guide lists what each folder and module is for and where to look for a give
 | see the ROS topics the simulator publishes | `sim/ros_bridge.py` |
 | read the agent's ROS input (cameras, joints) | `agent/ros_bridge.py` `RosBridge` |
 | watch or replay a run | `agent/viewer.py` (live window); `agent/events.py` (event → readable line) |
-| score an experiment | `evaluation/lab_exp1_score.py`, `evaluation/demo_summary.py`, `evaluation/active_summary.py` |
+| score an experiment | `evaluation/lab_exp1_score.py`, `evaluation/historical/demo_summary.py`, `evaluation/historical/active_summary.py` |
 | evaluate segmentation offline | `evaluation/seg_diagnosis.py`, `evaluation/seg_generalization.py` |
 | write a test with fake tools | `tests/support/fakes.py` (`StubTools`, `GoalTools`, `geom`), `tests/support/runners.py` |
 

@@ -22,11 +22,19 @@
 | `planner_check.py` | real-Gemma planner check on fixed instructions (no simulator) | `.venv-seg` (GPU) |
 | `demo_live_driver.py` | drives `launch/agent.sh --motion real` as an operator for an end-to-end demo test | `.venv-seg` + ROS |
 
-## Historical (earlier phases; still runnable, not maintained; they reproduce reported results)
+## Historical: `evaluation/historical/` (earlier phases; still runnable, not maintained; they reproduce reported results)
+
+Run from the repository root: `python -m evaluation.historical.<name>` or `python evaluation/historical/<name>.py`.
 
 | Script | Phase / report |
 |---|---|
-| `demo_rehearsal.py`, `demo_summary.py`, `demo_latency.py` | demo rehearsal, default scene (`docs/perception_redesign/DEMO_REPORT.md`) |
+| `demo_rehearsal.py`, `demo_summary.py`, `demo_latency.py` | demo rehearsal, default scene (`docs/history/perception_redesign/DEMO_REPORT.md`) |
 | `demo_describe_bench.py`, `demo_vlm_check.py`, `demo_plan_dryrun.py`, `demo_home_check.py` | demo-phase benchmarks and checks |
-| `dual_camera_check.py`, `inspect_check.py`, `active_summary.py` | active-perception checkpoints (`docs/architecture/ACTIVE_PERCEPTION.md`) |
-| `grasp_feasibility_map.py` | grasp-feasibility map (frozen baseline `docs/baselines/manipulation_A_2026-10-14/`) |
+| `dual_camera_check.py`, `inspect_check.py`, `active_summary.py` | active-perception checkpoints (`docs/history/architecture/ACTIVE_PERCEPTION.md`) |
+
+`grasp_feasibility_map.py` stays in `evaluation/`: the frozen manipulation baseline (`docs/baselines/`) and frozen
+code cite it by that path. `truth_snapshot.py` is superseded by `lab_probe.py snapshot`, and kept because the
+Experiment 1 records cite it.
+
+Older commands `python -m evaluation.demo_rehearsal` and similar became `python -m evaluation.historical.demo_rehearsal`;
+the active experiment commands above are unchanged.

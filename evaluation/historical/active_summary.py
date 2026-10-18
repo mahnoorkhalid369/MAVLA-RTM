@@ -2,7 +2,7 @@
 total time, Gemma calls / time, table and wrist observations, viewpoint moves, exploration planning time,
 wrist-move time, safety events, outcome.
 
-    python3 evaluation/active_summary.py <run_dir> [<run_dir> ...] > out.json
+    python3 evaluation/historical/active_summary.py <run_dir> [<run_dir> ...] > out.json
 """
 
 import json

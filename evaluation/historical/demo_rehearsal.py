@@ -6,7 +6,7 @@ Per run: start the agent (loads Gemma, then YOLO) -> it flags "models loaded" ->
 the true poses again -> score -> stop the simulator.
 
     source /opt/ros/jazzy/setup.bash && export ROS_DOMAIN_ID=42
-    .venv-seg/bin/python -m evaluation.demo_rehearsal --runs 3 --instructions 1 2 3
+    .venv-seg/bin/python -m evaluation.historical.demo_rehearsal --runs 3 --instructions 1 2 3
 
 Scoring (same tolerances as Baseline A and the agent: xy 10 mm, z 5 mm, tilt 5 deg):
   correct object   = the object that moved most is the instruction's object
@@ -30,7 +30,7 @@ from pathlib import Path
 
 import numpy as np
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 # instruction -> (object, relation, reference) in SIMULATOR names: scoring key only

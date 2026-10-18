@@ -6,7 +6,7 @@ frame), the associated table-camera measurement, and the true centre; plus a pix
 (true centres reprojected into each camera image must fall inside the matching mask).
 
     (sim running, ROS sourced, ROS_DOMAIN_ID=42)
-    .venv-seg/bin/python -m evaluation.dual_camera_check --out out/active/cp2_dual_camera.json
+    .venv-seg/bin/python -m evaluation.historical.dual_camera_check --out out/active/cp2_dual_camera.json
 """
 
 import argparse
@@ -17,7 +17,7 @@ from pathlib import Path
 
 import numpy as np
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 

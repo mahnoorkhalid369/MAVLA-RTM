@@ -3,7 +3,7 @@ via a one-image shortlist ("shortlist", rejected 2026-10-14) on
 today's capture, with the round-1 detector and the real Gemma. Ground truth (mask -> scene name) only
 scores the answers. Same Tools.resolve path (lexical cross-check, comparison) as the live agent.
 
-    .venv-seg/bin/python -m evaluation.demo_describe_bench --out out/perf/shortlist_bench.json
+    .venv-seg/bin/python -m evaluation.historical.demo_describe_bench --out out/perf/shortlist_bench.json
 """
 
 import argparse
@@ -15,7 +15,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 PAIRS = [("red cube", "green cube"), ("yellow cube", "tan box"), ("orange cube", "purple cylinder"),

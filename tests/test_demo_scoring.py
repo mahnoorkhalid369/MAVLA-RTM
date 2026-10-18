@@ -1,6 +1,6 @@
-"""Rehearsal scoring against ground truth (evaluation/demo_rehearsal.py): false done / false failed."""
+"""Rehearsal scoring against ground truth (evaluation/historical/demo_rehearsal.py): false done / false failed."""
 
-from evaluation.demo_rehearsal import INSTRUCTIONS, score
+from evaluation.historical.demo_rehearsal import INSTRUCTIONS, score
 
 
 def truth(**pos):

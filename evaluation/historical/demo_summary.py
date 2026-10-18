@@ -1,8 +1,8 @@
-"""Summarise rehearsal cycles (evaluation/demo_rehearsal.py summary.json files) into the tables used in
+"""Summarise rehearsal cycles (evaluation/historical/demo_rehearsal.py summary.json files) into the tables used in
 DEMO_REPORT.md: per instruction success vs ground truth with Wilson intervals, false done / false
 failed, asked, placement error, time per stage, failures by class and by agent.
 
-    python3 evaluation/demo_summary.py out/demo/2026-10-14/rehearsal/cycle2 [more cycles ...]
+    python3 evaluation/historical/demo_summary.py out/demo/2026-10-14/rehearsal/cycle2 [more cycles ...]
 """
 
 from __future__ import annotations

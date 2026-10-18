@@ -1,6 +1,6 @@
 """Latency breakdown of agent runs from their events.jsonl / result.json (measured timestamps only).
 
-    python3 evaluation/demo_latency.py out/demo/2026-10-14/live_144109/01 [more run dirs ...] [--json out.json]
+    python3 evaluation/historical/demo_latency.py out/demo/2026-10-14/live_144109/01 [more run dirs ...] [--json out.json]
 
 Per run: total, time per LangGraph state, VLM calls (count / seconds per role), describe time, perception
 (observation) count and time, human-wait time (question -> answer), planning, execution per motion

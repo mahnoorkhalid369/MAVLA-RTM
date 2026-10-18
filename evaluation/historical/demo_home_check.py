@@ -3,7 +3,7 @@ park away from HOME -> HOME refused with the gripper closed -> open -> return HO
 joint states. Uses agent.tools.Tools exactly as the supervisor does.
 
     source /opt/ros/jazzy/setup.bash && export ROS_DOMAIN_ID=42   (simulator already running)
-    .venv-seg/bin/python -m evaluation.demo_home_check --out out/demo/<date>/home_check
+    .venv-seg/bin/python -m evaluation.historical.demo_home_check --out out/demo/<date>/home_check
 """
 
 import argparse
@@ -14,7 +14,7 @@ from pathlib import Path
 
 import numpy as np
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 

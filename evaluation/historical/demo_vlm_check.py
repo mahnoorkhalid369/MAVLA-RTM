@@ -10,7 +10,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 from perception.detector import YoloDetector  # noqa: E402
 from config.models import YOLO_WEIGHTS  # noqa: E402
