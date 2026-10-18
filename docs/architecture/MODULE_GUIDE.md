@@ -12,7 +12,7 @@ This guide lists what each folder and module is for and where to look for a give
 
 | I want to… | Look at |
 |---|---|
-| start the agent on typed instructions | `agent/run.py` (`main`); launcher `launch/start_demo.sh` |
+| start the agent on typed instructions | `launch/agent.sh` → `agent/run.py` (`main`) |
 | see what lives across instructions | `agent/session.py` (`Session`) |
 | see how an instruction becomes steps | `agent/supervisor.py` `_interpreting` → `agent/vlm_roles/roles.py` `Roles.plan_goal` (prompt `PLAN_SYSTEM` in `agent/vlm_roles/prompts.py`) → `agent/planning.py` `complete_plan` |
 | see what the robot is allowed to do for a request | `agent/authority.py`; enforced in `agent/workers.py` `WorkerRegistry.dispatch` |
@@ -116,7 +116,7 @@ evaluation/                  experiment runners, probes, scorers, scenario valid
 experiments/                 manipulation baseline experiments (known_pose_* F, payload_study F)
 scripts/                     validation scripts (validate_robot_m1.py F)
 ros_nodes/                   camera viewers; legacy nodes (vlm_agent_node.py P)
-launch/                      start_demo.sh (current), start_live.sh, run.sh P, legacy launchers
+launch/                      agent.sh, sim.sh, tests.sh, evaluate.sh; run.sh P; legacy/
 tests/                       offline tests; tests/support/ shared fakes and runners
 datagen/, seg/               synthetic data generation; segmentation training (offline tooling)
 docs/                        architecture/, scenarios/, baselines/ (frozen manifest), DEVELOPER_GUIDE.md

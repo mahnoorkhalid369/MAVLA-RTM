@@ -1,4 +1,5 @@
-"""Acts as the operator for a full demo test: runs ./launch/start_demo.sh, types one instruction, answers a
+"""Acts as the operator for a full demo test: runs ./launch/agent.sh (motion real by default here: it is a
+manipulation demo test in the simulator), types one instruction, answers a
 clarification question if one appears, then quits. The driver chooses the candidate whose printed
 position is nearest to --pick-near (mm, the operator's knowledge of which object is meant: test only).
 
@@ -21,9 +22,11 @@ def main() -> int:
     ap.add_argument("--instruction", required=True, action="append", help="repeat for several instructions in one session")
     ap.add_argument("--pick-near", type=float, nargs=2, required=True)
     ap.add_argument("--console", required=True)
-    ap.add_argument("--launcher-args", default="", help='e.g. "--headless --scenario ap_occlusion" (one quoted string)')
+    ap.add_argument("--launcher-args", default="--motion real",
+                    help='one quoted string, e.g. "--motion real --headless --scenario ap_occlusion" (without --motion real '
+                         'the agent runs with motion blocked)')
     ap.add_argument("--timeout", type=float, default=3000)
-    ap.add_argument("--launcher", default="launch/start_demo.sh")
+    ap.add_argument("--launcher", default="launch/agent.sh")
     ap.add_argument("--gpu-log", help="log nvidia-smi memory / utilisation every 2 s to this file")
     ap.add_argument("--truth-out", help="save one simulator ground-truth message here once the agent is ready (evaluation only)")
     a = ap.parse_args()

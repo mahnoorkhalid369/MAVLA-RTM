@@ -309,11 +309,11 @@ GPU: 12 GB (RTX 4000 Ada Laptop). Load Gemma before the simulator, and run one I
 Commands are in `docs/DEVELOPER_GUIDE.md`. Tick each item:
 
 - [ ] Both suites pass on your machine (section 4 commands).
-- [ ] `./launch/start_demo.sh --scenario laboratory`: Isaac window, demo viewer and prompt appear.
+- [ ] `./launch/agent.sh --scenario laboratory`: Isaac window, demo viewer and prompt appear (motion BLOCKED).
 - [ ] "Take a look at your surroundings." → COMPLETED with a scene list; the viewer shows masks and ids.
 - [ ] A question → an answer, or a known BD-1 / BD-2 planning failure (no crash, no motion).
-- [ ] "Inspect …" on a visible object → the wrist camera moves, inspects and returns HOME. *(first motion)*
-- [ ] Default scene (`./launch/start_demo.sh`): "Put the red cube on the green cube." → COMPLETED with
+- [ ] With `--motion real`: "Inspect …" on a visible object → the wrist camera moves, inspects and returns HOME. *(first motion)*
+- [ ] Default scene (`./launch/agent.sh --motion real`): "Put the red cube on the green cube." → COMPLETED with
       placement verification. *(manipulation)*
 - [ ] `evaluation/lab_exp1.py` dry protocol, if you want the Experiment 1 harness end to end.
 - [ ] Any of your own scripts outside the repo updated for the renamed imports (`MODULE_GUIDE.md` §4).

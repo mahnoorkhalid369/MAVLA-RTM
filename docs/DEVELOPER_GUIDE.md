@@ -197,8 +197,9 @@ motion through the frozen executor, so don't run it during refactoring work.
 
 ```bash
 source /opt/ros/jazzy/setup.bash && export ROS_DOMAIN_ID=42
-./launch/start_demo.sh                      # Gemma → YOLO → Isaac (window) + viewer; type instructions
-./launch/start_demo.sh --headless --scenario laboratory
+./launch/agent.sh                           # Gemma → YOLO → Isaac (window) + viewer; motion BLOCKED
+./launch/agent.sh --headless --scenario laboratory --difficulty easy --seed 42
+./launch/agent.sh --motion real                 # the robot moves (simulator)
 .venv-seg/bin/python -m agent.run --start-sim --gui         # the same without the viewer
 ```
 

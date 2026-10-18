@@ -20,7 +20,7 @@
 | `validate_scenarios.py` | scenario-library validation in Isaac (spawn, settling, reload, cameras, design checks via `python -m scenarios.checks`) | `.venv` (Isaac) |
 | `scenario_design.py` | design check of the JSON test scenes (`scenarios/scenes/`) | system Python |
 | `planner_check.py` | real-Gemma planner check on fixed instructions (no simulator) | `.venv-seg` (GPU) |
-| `demo_live_driver.py` | drives `launch/start_demo.sh` as an operator for an end-to-end demo test | `.venv-seg` + ROS |
+| `demo_live_driver.py` | drives `launch/agent.sh --motion real` as an operator for an end-to-end demo test | `.venv-seg` + ROS |
 
 ## Historical (earlier phases; still runnable, not maintained; they reproduce reported results)
 

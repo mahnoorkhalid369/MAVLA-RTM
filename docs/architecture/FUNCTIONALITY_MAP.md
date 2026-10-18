@@ -36,7 +36,7 @@
 
 | Functionality | Implementation | Called by | Inputs → outputs | State | Status | Test independently |
 |---|---|---|---|---|---|---|
-| CLI / interactive loop | `agent/run.py` `main(controls=None, on_directive=None)` | `launch/start_demo.sh`, `evaluation/lab_exp1_agent.py`, user | instructions (stdin or `--instruction`) → `out/demo/<date>/live_*/NN/{events.jsonl, task_state.json, result.json, images/}` | process | live-verified (Experiment 1, current-system test) | manual: DEVELOPER_GUIDE §6 |
+| CLI / interactive loop | `agent/run.py` `main(controls=None, on_directive=None)` | `launch/agent.sh`, `evaluation/lab_exp1_agent.py`, user | instructions (stdin or `--instruction`) → `out/demo/<date>/live_*/NN/{events.jsonl, task_state.json, result.json, images/}` | process | live-verified (Experiment 1, current-system test) | manual: DEVELOPER_GUIDE §6 |
 | Session (state across instructions) | `agent/session.py` `Session.run()` | `agent/run.py` | instruction → report; one `Tools` per process | owns the session `Tools` (world model, held object, memory, referents) | live-verified | `tests/test_session.py` (mocked `Tools`) |
 | GPU bring-up order (Gemma → YOLO → simulator → ROS ready) | `agent/run.py` `main()` (inline), `start_sim()` | — | flags → loaded models, optional sim process | process | live-verified | manual: DEVELOPER_GUIDE §6 |
 | Goal supervisor (LangGraph) | `agent/supervisor.py` `GoalSupervisor.run()`; nodes `_interpreting`, `_dispatching`, `_delegating`, `_reviewing`, `_replanning`, `_verifying_goal` (via `_wrap` / `getattr`) | `Session.run` | instruction → report dict (status, outcome, message, plan, conditions, goal_check, authority, refused, timeline) | per instruction: `TaskState`, `Context`, `authority`, `specs`; reads `Tools` | live-verified | `tests/test_supervisor_goal.py`, `tests/test_orchestration.py` |
@@ -138,7 +138,7 @@ The capabilities live in `agent/capabilities/`, and every name is importable fro
 | Functionality | Implementation | Called by | Status | Test |
 |---|---|---|---|---|
 | Live simulator (scene, physics loop, ROS publishers, command interface, ground-truth topic) | `sim/run_live.py` `main()` (creates `SimulationApp` at import), `sim/scene.py` `setup_scene()`, `sim/ros_control.py`, `sim/ros_bridge.py` | `launch/*`, `agent/run.py start_sim`, `sim/run_scenario.py` | **frozen** (except `ros_bridge.py`), live-verified | `evaluation/validate_scenarios.py`, `scripts/validate_robot_m1.py` |
-| Scene selection (JSON scenes, scenario library) | `sim/run_scenario.py` (fills the frozen `OBJECTS`, wraps `setup_scene`) | `launch/start_demo.sh --scenario`, `agent/run.py --scenario`, experiment drivers | live-verified | sim smoke via the validator |
+| Scene selection (JSON scenes, scenario library) | `sim/run_scenario.py` (fills the frozen `OBJECTS`, wraps `setup_scene`) | `launch/agent.sh --scenario`, `launch/sim.sh`, `agent/run.py --scenario`, experiment drivers | live-verified | sim smoke via the validator |
 | Scenario library: data model, placement, metadata | `scenarios/core.py` (`Scenario`, `Placer`, `penetration`, `overlaps`, `metadata()`), `scenarios/parts.py` (rack, tray, plinth, capped container, …), `scenarios/laboratory.py` `build()` | `generate()` in `scenarios/__init__.py` | active, validated (seed 42, 3 levels) | `tests/test_scenario_library.py` |
 | Scenario build in Isaac | `scenarios/build.py` `install()`, `populate()`, `overview_camera()`, `label_texture()` | `run_scenario`, validator, frame capture | active, validated | `evaluation/validate_scenarios.py` (`.venv`) |
 | Scenario design checks (spawn, visibility, grasp / placement / viewpoint feasibility) | `scenarios/checks.py` `static_report()` (+ CLI `python -m scenarios.checks`) | tests, validator | active | `tests/test_scenario_library.py` |
@@ -170,7 +170,7 @@ The capabilities live in `agent/capabilities/`, and every name is importable fro
 | Box grounding (**shared**) | `perception/grounding.py`: `footprint_yaw`, `grasp_pose` used by `perception/geometry.py`; also used by the legacy node and (through the classical detector) the frozen known-pose experiments | mixed |
 | Memory, classical detector | `perception/world_memory.py` (legacy node), `perception/classical_detector.py` (frozen `experiments/known_pose_suite.py`, `scripts/validate_cameras_phaseA.py`, tests) | legacy / shared with frozen code |
 | Text command path | `ros_nodes/command_interpreter.py`, `text_command_node.py`, `microphone_node.py`, `launch/start_live.sh` | legacy (text only; voice off) |
-| Camera viewers | `ros_nodes/camera_viewer.py`, `cameras_view.py` | active tools (used by `start_demo.sh`, `run.sh`) |
+| Camera viewers | `ros_nodes/camera_viewer.py`, `cameras_view.py` | active tools (used by `agent.sh`, `run.sh`) |
 
 ## J. Code removed by the restructuring
 
