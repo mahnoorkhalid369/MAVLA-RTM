@@ -27,7 +27,7 @@ from perception.world_model import WorldModel  # noqa: E402
 from control.motion import PlanningError  # noqa: E402
 from control.robot import table_camera_pose  # noqa: E402
 
-AGENT = Path(__file__).resolve().parents[1] / "agent"
+AGENT = Path(__file__).resolve().parents[2] / "agent"
 
 # ------------------------------------------------------------------------------- synthetic depth
 W, H, F = 1280, 960, 1100.0

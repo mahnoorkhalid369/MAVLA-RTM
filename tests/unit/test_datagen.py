@@ -11,7 +11,7 @@ from datagen.coco import annotations_from_ids, coco_to_yolo, mask_polygons
 from datagen.layout import ObjectSpec, Material, SceneSampler, apply_rgb_effects, look_at, world_extent
 from datagen.textures import KINDS, make_texture
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 CFG = json.loads((ROOT / "datagen" / "config_v1.json").read_text())
 FAKE_ASSETS = {name: (0.08, 0.12, 0.06) for name in CFG["ycb"]["train"] + CFG["ycb"]["novel"]} | {"torus": (1.5, 1.5, 0.5)}
 

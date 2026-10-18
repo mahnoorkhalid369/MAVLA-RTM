@@ -37,7 +37,7 @@ code.
 
 ```bash
 .venv/bin/python evaluation/validate_scenarios.py --scenario laboratory --seed 42 --reload --drop-mm 10   # headless, no ROS
-/usr/bin/python3 -m pytest tests/test_scenario_library.py                                    # offline, no simulator
+/usr/bin/python3 -m pytest tests/unit/test_scenario_library.py                                    # offline, no simulator
 ```
 
 Results go to `out/scenarios/<scenario>/<difficulty>_s<seed>/`:

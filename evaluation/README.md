@@ -4,7 +4,7 @@
 
 - Simulator ground truth is allowed **here only**. The agent never reads it.
 - Nothing here changes agent behaviour by replacing functions at runtime. Experiment switches are
-  `agent/controls.py` `ExecutionControls`, and `tests/test_structure.py` enforces this.
+  `agent/controls.py` `ExecutionControls`, and `tests/unit/test_structure.py` enforces this.
 - Outputs go under `out/` (not in git).
 
 ## Active tools (current agent and laboratory)

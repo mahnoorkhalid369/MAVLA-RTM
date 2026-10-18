@@ -240,7 +240,7 @@ flowchart TD
 | 1 | `Session.run` → `Tools.begin_instruction` | new run directory, held state re-checked (nothing held) | — |
 | 2 | `authority.classify` → `Roles.classify_request` | kind **question**, evidence = the whole sentence; grants none + sensing (no object_change) | live, `out/lab_exp1/milestone3/trackA/results.json` request 1 |
 | 3 | `Roles.plan_goal` | **currently FAILS**: Gemma's JSON is invalid on both attempts → FAILED "I could not turn the instruction into steps" (BD-1) | same file, request 1; offline A/B: `trackA/planner_ab/results.json` |
-| 3′ | (when planning succeeds) | e.g. observe + decompose. `complete_plan` adds an `answer` step (a report is not an answer); condition `answered(question)` | tests: `tests/test_authority.py::test_question_decomposed_into_pick_and_place_moves_nothing` |
+| 3′ | (when planning succeeds) | e.g. observe + decompose. `complete_plan` adds an `answer` step (a report is not an answer); condition `answered(question)` | tests: `tests/integration/test_authority.py::test_question_decomposed_into_pick_and_place_moves_nothing` |
 | 4′ | `run_observe` → perception (§4) | measured objects + Gemma descriptions | live (other instructions) |
 | 5′ | `run_decompose` → `Roles.decompose` | in the live current-system test, Gemma proposed pick #17 + place on #8. Now the supervisor refuses both before execution (`authorization` event, `refused` in the report) | `out/lab_exp1/current_system_test/step4/04/events.jsonl`; test above |
 | 6′ | `run_answer` → `Roles.answer` | answer from the measured object list (no image) | — |

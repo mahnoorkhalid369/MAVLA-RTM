@@ -37,8 +37,8 @@ while the simulator runs.
 
 # The agent: supervisor, workflows, authorization, session, ask (mocked tools, scripted Gemma):
 env -u PYTHONPATH -u AMENT_PREFIX_PATH .venv-seg/bin/python -m pytest \
-    tests/test_agent.py tests/test_agent_ask.py tests/test_supervisor_goal.py \
-    tests/test_orchestration.py tests/test_session.py tests/test_authority.py   # expect: 142 passed
+    tests/integration/test_agent.py tests/integration/test_agent_ask.py tests/integration/test_supervisor_goal.py \
+    tests/integration/test_orchestration.py tests/integration/test_session.py tests/integration/test_authority.py   # expect: 142 passed
 
 # Everything (all 383 tests, incl. controls, structure, saved frames + YOLO) in the agent environment:
 env -u PYTHONPATH -u AMENT_PREFIX_PATH .venv-seg/bin/python -m pytest       # expect: 383 passed
@@ -51,14 +51,14 @@ grep -v '^#' docs/baselines/manipulation_A_2026-10-14/MANIFEST.sha256 | sha256su
 
 | Subsystem | Command (environment) |
 |---|---|
-| Kinematics, collision, grasp / place planning (frozen core) | `/usr/bin/python3 -m pytest tests/test_kinematics.py tests/test_collision.py tests/test_skills_and_plans.py` |
-| Joint-limit safety | `/usr/bin/python3 -m pytest tests/test_safety.py` |
-| Scenario library | `/usr/bin/python3 -m pytest tests/test_scenario_library.py tests/test_scene_reachability.py` |
-| Perception geometry / world model / association | agent env: `… -m pytest tests/test_agent.py -k "world or geometry or association or wrist"` |
-| Authorization | agent env: `… -m pytest tests/test_authority.py` |
-| Goal verification | agent env: `… -m pytest tests/test_supervisor_goal.py` |
-| Session memory across instructions | agent env: `… -m pytest tests/test_session.py` |
-| Scorers | `/usr/bin/python3 -m pytest tests/test_lab_exp1_score.py tests/test_demo_scoring.py` |
+| Kinematics, collision, grasp / place planning (frozen core) | `/usr/bin/python3 -m pytest tests/unit/test_kinematics.py tests/unit/test_collision.py tests/unit/test_skills_and_plans.py` |
+| Joint-limit safety | `/usr/bin/python3 -m pytest tests/unit/test_safety.py` |
+| Scenario library | `/usr/bin/python3 -m pytest tests/unit/test_scenario_library.py tests/unit/test_scene_reachability.py` |
+| Perception geometry / world model / association | agent env: `… -m pytest tests/integration/test_agent.py -k "world or geometry or association or wrist"` |
+| Authorization | agent env: `… -m pytest tests/integration/test_authority.py` |
+| Goal verification | agent env: `… -m pytest tests/integration/test_supervisor_goal.py` |
+| Session memory across instructions | agent env: `… -m pytest tests/integration/test_session.py` |
+| Scorers | `/usr/bin/python3 -m pytest tests/unit/test_lab_exp1_score.py tests/unit/test_demo_scoring.py` |
 
 (`…` = `env -u PYTHONPATH -u AMENT_PREFIX_PATH .venv-seg/bin/python`)
 

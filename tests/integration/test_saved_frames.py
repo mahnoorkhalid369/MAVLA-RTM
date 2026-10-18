@@ -18,7 +18,7 @@ import pytest
 
 cv2 = pytest.importorskip("cv2")
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 FRAMES = ROOT / "out" / "lab_seg_frames"
 SCENES = ["easy_s42", "medium_s42", "hard_s42"]  # the Experiment 1 seed at every difficulty
 pytestmark = pytest.mark.skipif(not (FRAMES / "easy_s42" / "table" / "rgb.png").exists(),

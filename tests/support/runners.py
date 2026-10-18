@@ -1,6 +1,6 @@
 """Runners for the agent tests: run the pick-and-place workflow or the goal supervisor on fake tools and
-return (report, events). Moved verbatim from tests/test_agent.py (TASK, run -> run_workflow) and
-tests/test_supervisor_goal.py (plan, run -> run_supervisor)."""
+return (report, events). Moved verbatim from tests/integration/test_agent.py (TASK, run -> run_workflow) and
+tests/integration/test_supervisor_goal.py (plan, run -> run_supervisor)."""
 
 import json
 

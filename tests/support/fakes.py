@@ -5,7 +5,7 @@
     GoalTools    StubTools + what the goal supervisor needs (scripted plans, real relation geometry,
                  the real session hooks)
 
-Moved verbatim from tests/test_agent.py (geom, StubTools) and tests/test_supervisor_goal.py (GoalTools).
+Moved verbatim from tests/integration/test_agent.py (geom, StubTools) and tests/integration/test_supervisor_goal.py (GoalTools).
 """
 
 from types import SimpleNamespace

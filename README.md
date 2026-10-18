@@ -266,7 +266,7 @@ Details and results: `docs/AUDIT_AND_PLAN.md`, section 6.
 ## Robot model
 `assets/vt6l/vt6l.urdf` is the **Epson VT6L built from Epson's VT manipulator manual**
 (kinematics from the dimension drawings, joint ranges and max. speeds from the specification
-table; sources in the URDF header). `tests/test_vt6l_model.py` checks it against the manual's
+table; sources in the URDF header). `tests/unit/test_vt6l_model.py` checks it against the manual's
 reach (920 / 1000 mm) and motion-range radii. Still approximate: link shapes (boxes/cylinders),
 inertia (total 40 kg), effort limits (simulation-only), J1/J4/J6 positive directions.
 Convert it for Isaac Sim with `python -m sim.import_vt6l` (writes `assets/vt6l/usd/vt6l/`).

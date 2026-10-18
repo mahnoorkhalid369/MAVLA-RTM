@@ -11,7 +11,7 @@ import pytest
 from agent.events import format_event
 from agent.viewer import IMG_H, IMG_W, TARGET_C, RunState, Viewer
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 REAL = ROOT / "out/demo/2026-10-14/rehearsal/cycle4/i1_run1/events.jsonl"
 
 

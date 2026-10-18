@@ -132,7 +132,7 @@ Run from the repository root on 2026-10-18, at commit `f5c2557` plus documentati
 |---|---|---|
 | **Unit + integration (full suite, agent env)** | `env -u PYTHONPATH -u AMENT_PREFIX_PATH .venv-seg/bin/python -m pytest` | **383 passed**, 0 failed, 0 skipped |
 | Unit + integration (system Python) | `/usr/bin/python3 -m pytest` | **199 passed**, 29 skipped (agent tests need pydantic / langgraph; they run in the row above) |
-| Import smoke | the 30 `CURRENT_MODULES` in `tests/test_structure.py` | all import without Isaac or ROS |
+| Import smoke | the 30 `CURRENT_MODULES` in `tests/unit/test_structure.py` | all import without Isaac or ROS |
 | Static | `importcheck` (every local import resolves), `/usr/bin/python3 -m pyflakes agent perception config scenarios` | clean (one deliberate Isaac-side unused import in `evaluation/validate_scenarios.py`) |
 | Frozen manifest | `grep -v '^#' docs/baselines/manipulation_A_2026-10-14/MANIFEST.sha256 \| sha256sum -c` | **OK** |
 
@@ -140,10 +140,10 @@ Run from the repository root on 2026-10-18, at commit `f5c2557` plus documentati
 
 | File | Tests | What it covers |
 |---|---|---|
-| `tests/test_controls.py` | 18 | real / dry_run / blocked modes with a recording and a *forbidden* executor; disabled capabilities; replanning limit; Session wiring; stdin directives; the Experiment 1 harness and its `harness_gates.jsonl` records |
-| `tests/test_structure.py` | 43 | copied constants vs frozen sources; paths and assets; registry = planner schema = executors; prompts pinned by hash; imports; no removed paths; no runtime patching (shown to flag all six patch sites of the old harness) |
-| `tests/test_saved_frames.py` | 5 | depth localization on the saved Experiment 1 scenes; `Tools.perceive` + world model on a replayed frame; real YOLO inference |
-| `tests/test_state_ownership.py` | 3 | the held-object invariant |
+| `tests/integration/test_controls.py` | 18 | real / dry_run / blocked modes with a recording and a *forbidden* executor; disabled capabilities; replanning limit; Session wiring; stdin directives; the Experiment 1 harness and its `harness_gates.jsonl` records |
+| `tests/unit/test_structure.py` | 43 | copied constants vs frozen sources; paths and assets; registry = planner schema = executors; prompts pinned by hash; imports; no removed paths; no runtime patching (shown to flag all six patch sites of the old harness) |
+| `tests/integration/test_saved_frames.py` | 5 | depth localization on the saved Experiment 1 scenes; `Tools.perceive` + world model on a replayed frame; real YOLO inference |
+| `tests/unit/test_state_ownership.py` | 3 | the held-object invariant |
 
 **Equivalence with the code before the restructuring (`aa9a6a4`, run side by side):**
 
@@ -245,7 +245,7 @@ in `out/validation/` (not in git).
 
 | # | Limitation | Why it remains |
 |---|---|---|
-| L1 | The held object is recorded twice (`Tools.held_object`, `WorldModel.holding`) | Merging changes reads in `goals._holding`, `return_home`, the inspection guards and test fixtures that set `world.holding` directly. `tests/test_state_ownership.py` now pins the invariant that the two never disagree. Merge only with that test plus updated fixtures |
+| L1 | The held object is recorded twice (`Tools.held_object`, `WorldModel.holding`) | Merging changes reads in `goals._holding`, `return_home`, the inspection guards and test fixtures that set `world.holding` directly. `tests/unit/test_state_ownership.py` now pins the invariant that the two never disagree. Merge only with that test plus updated fixtures |
 | L2 | The supervisor's review rules are not extracted into a pure function | No golden event-sequence tests pin `_reviewing` across all branches yet; extraction without them could change semantics |
 | L3 | A motion refused by the controls during "park for view" is reported as "no collision-free pose that leaves the table camera's view clear" | This is the pre-existing workflow message (the old harness behaved the same). The events show `execute_refused` / `execute_dry_run` correctly |
 | L4 | Old import paths were removed without compatibility modules | Scripts outside the repository that use them fail with `ModuleNotFoundError`; mapping in `MODULE_GUIDE.md` §4 |
@@ -270,10 +270,10 @@ in `out/validation/` (not in git).
 | Gemma 4 E2B-it | `models/gemma-4-E2B-it/` | 9.6 GB | agent (`vlm/config.py`) |
 | YOLO11s-seg round-1 weights | `out/seg/runs/yolo11s_seg_r1/weights/best.pt` | 20 MB | agent (`config/models.py`) |
 | YCB asset table and meshes | `data/assets/` | 209 MB | JSON scenes (`sim/run_scenario.py`) |
-| Saved laboratory frames | `out/lab_seg_frames/` | 22 MB | `tests/test_saved_frames.py` (skips without them), segmentation studies |
+| Saved laboratory frames | `out/lab_seg_frames/` | 22 MB | `tests/integration/test_saved_frames.py` (skips without them), segmentation studies |
 | Isaac Sim 6.1 | `.venv/` | — | simulator |
 
-`tests/test_structure.py::test_required_untracked_assets_are_present` lists any of these that are missing.
+`tests/unit/test_structure.py::test_required_untracked_assets_are_present` lists any of these that are missing.
 
 | Environment | Versions | Role |
 |---|---|---|
