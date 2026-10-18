@@ -26,7 +26,7 @@ while [ $# -gt 0 ]; do
     esac
     shift
 done
-if pgrep -f "sim.run_live|sim.run_scenario" > /dev/null; then
+if ps -eo args= | grep -Eq '^[^ ]*python[0-9.]* (-u )?-m sim\.run_(live|scenario)( |$)'; then
     echo "[sim.sh] a simulator is already running (one Isaac Sim at a time on this GPU); stop it first"; exit 1
 fi
 source /opt/ros/jazzy/setup.bash

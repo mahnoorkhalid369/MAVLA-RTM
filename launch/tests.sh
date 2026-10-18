@@ -21,7 +21,7 @@ frozen() {
     grep -v '^#' docs/baselines/manipulation_A_2026-10-14/MANIFEST.sha256 | sha256sum -c --quiet && echo "[tests] frozen baseline: OK"
 }
 sim_smoke() {
-    if pgrep -f "sim.run_live|sim.run_scenario" > /dev/null; then
+    if ps -eo args= | grep -Eq '^[^ ]*python[0-9.]* (-u )?-m sim\.run_(live|scenario)( |$)'; then
         echo "[tests] a simulator is already running; stop it first (one Isaac Sim at a time)"; return 1
     fi
     source /opt/ros/jazzy/setup.bash
