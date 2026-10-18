@@ -14,12 +14,13 @@ All commands run from the repository root.
 
 | Workflow | Command |
 |---|---|
-| Agent (Gemma → YOLO → Isaac → viewer → prompt) | `./launch/agent.sh [--scenario laboratory] [--difficulty easy] [--seed 42] [--motion blocked\|dry_run\|real]` |
+| Agent (Gemma → YOLO → Isaac → viewer → prompt) | edit `agent/settings.py`, then `./launch/agent.sh` |
 | Simulator only | `./launch/sim.sh [--scenario laboratory\|default\|NAME] [--difficulty …] [--seed …] [--headless]` |
 | Automated tests | `./launch/tests.sh [all\|agent\|system\|frozen\|sim]` |
 | Research experiments | `./launch/evaluate.sh list` |
 
-- **Motion is blocked unless `--motion real`.**
+- **`./launch/agent.sh` follows `agent/settings.py`.** The shipped default is the laboratory, motion REAL in Isaac Sim,
+  and tracing on. Direct `python -m agent.run` without `--settings` keeps motion blocked unless `--motion real`.
 - Each launcher picks its Python environment and uses ROS domain 42.
 - The sections below show what the launchers run, and how to run single parts by hand.
 
@@ -202,24 +203,24 @@ no agent running).
 **Live perception, no motion.** Start the agent and give an observation-only instruction:
 
 ```bash
-./launch/agent.sh --scenario laboratory --headless --instruction "Take a look at your surroundings." --out out/dev/observe
+./launch/agent.sh --motion blocked --headless --instruction "Take a look at your surroundings." --out out/dev/observe
 ```
 
-Motion is blocked by default, so nothing moves. If a step wants to park the arm out of the camera's view, the park
+With `--motion blocked` nothing moves. If a step wants to park the arm out of the camera's view, the park
 is refused and logged (`execute_refused`).
 
 ## 6. Run the whole agent
 
 ```bash
 source /opt/ros/jazzy/setup.bash && export ROS_DOMAIN_ID=42
-./launch/agent.sh                           # Gemma → YOLO → Isaac (window) + viewer; motion BLOCKED
-./launch/agent.sh --headless --scenario laboratory --difficulty easy --seed 42
-./launch/agent.sh --motion real                 # the robot moves (simulator)
-./launch/agent.sh --motion dry_run              # motions planned and logged, never sent
-./launch/agent.sh --no-viewer                    # terminal only
+./launch/agent.sh                               # everything from agent/settings.py
+python -m agent.settings                        # (.venv-seg) check the settings and print the summary only
+./launch/agent.sh --motion blocked              # one-run override: nothing is sent
+./launch/agent.sh --scenario default            # one-run override: the frozen default scene
+DEMO_VIEWER=0 CAMERA_WINDOWS=0 ./launch/agent.sh --headless   # terminal only
 ```
 
-**Motion.** Only with `--motion real` do instructions that ask for object changes ("Put … on …") move the robot
+**Motion.** Only with motion real (`MOTION = "real"` in the settings, or `--motion real`) do instructions that ask for object changes ("Put … on …") move the robot
 (in the simulator). Authorization and the joint-limit safety layer apply in every mode.
 
 ## 7. Inspect logs and outcomes

@@ -23,41 +23,64 @@ RGB-D cameras measure. The cameras are a table camera on a stand and a wrist cam
 
 ## Start here
 
+**1. Edit `agent/settings.py`.** It is plain Python values:
+
+| Setting | Values |
+|---|---|
+| scene | `SCENARIO`, `DIFFICULTY`, `SEED` |
+| execution | `TARGET`, `MOTION` |
+| models | `GEMMA_MODEL`, `YOLO_WEIGHTS` |
+| windows | `ISAAC_WINDOW`, `DEMO_VIEWER`, `CAMERA_WINDOWS` |
+| tracing | `TRACE` |
+| outputs | `OUTPUT_DIR` … |
+
+**2. Run:**
+
 ```bash
-./launch/agent.sh --scenario laboratory        # the agent on the laboratory scene; motion BLOCKED
-./launch/agent.sh --motion real                # the default cube scene, robot moves (simulator)
+./launch/agent.sh
+```
+
+**What happens:**
+
+1. The settings are validated and summarised.
+2. Gemma and YOLO load.
+3. Isaac Sim starts the configured scene; the shipped default is the laboratory, easy, seed 42.
+4. ROS 2 connects, the cameras and windows open, and you get the `instruction>` prompt.
+
+**While it runs:**
+
+- **Motion:** planned motions are executed in Isaac Sim when `MOTION = "real"`, which is the shipped default.
+- **Tracing:** every agent handoff is printed: the request's authority, each delegation and its input, each worker's
+  output, the supervisor's review, failure reasons and the goal check.
+- **Saved traces:** each instruction's full trace is in `out/demo/<date>/live_<time>/<nn>/events.jsonl`, with
+  `task_state.json` and `result.json`.
+- **Quitting:** an empty line quits and stops the simulator.
+
+**Safety and the simulator:**
+
+- Safety does not depend on the settings. Request authorization, collision checking, the simulator's joint-limit
+  safety layer, the executor's reach checks and goal verification apply in every mode.
+- `MOTION = "dry_run"` plans and logs motions without sending them; `"blocked"` sends nothing.
+- `TARGET` can only be `"isaac_sim"`. Before it is ready, the agent checks that the ROS 2 graph is the simulator
+  (its `vt6l_sim` command interface), so it never commands physical hardware.
+
+**Other entry points:**
+
+```bash
 ./launch/sim.sh                                # Isaac Sim only (laboratory), nothing commanded
 ./launch/tests.sh                              # all automated tests
 ./launch/evaluate.sh list                      # research experiments (Experiment 1, segmentation, planner, ...)
 ```
 
-**Using the agent:**
-
-- Type instructions at `instruction>`; an empty line quits.
-- The demo viewer shows the live camera, detections, the supervisor's state and the logs.
-- Outputs go to `out/demo/<date>/live_<time>/<nn>/`: `result.json`, `events.jsonl`, `task_state.json` and
-  `images/`.
-
-**Motion modes** (`--motion`):
-
-| Mode | Behaviour |
-|---|---|
-| `blocked` (default) | nothing is sent to the robot |
-| `dry_run` | motions are planned and logged, never sent |
-| `real` | motions are executed |
-
-Request authorization and the simulator's joint-limit safety layer apply in every mode.
-
-**Before you start:**
-
-- Run one Isaac Sim at a time (12 GB GPU).
-- Everything uses ROS domain 42 unless `ROS_DOMAIN_ID` is set.
-- Commands, environments and the expected test results are in `docs/DEVELOPER_GUIDE.md`.
+`python -m agent.run` used directly (the experiment harnesses do) keeps safe defaults: no simulator start, and motion
+blocked unless `--motion real`. Commands, environments and the expected test results are in
+`docs/DEVELOPER_GUIDE.md`.
 
 ## Where things are
 
 | Question | Answer |
 |---|---|
+| Where do I configure a run? | `agent/settings.py` (validated at startup; `python -m agent.settings` prints the summary) |
 | Where is the supervisor? | `agent/supervisor.py` (`GoalSupervisor`, a LangGraph state machine); plan rules in `agent/planning.py`; session state in `agent/session.py` |
 | Where are the tools? | `agent/tools/`: one `Tools` object, the agent's only access to sensors and motion (perception, resolution, manipulation, execution, verification, held-object state) |
 | Where are the capabilities the planner can choose? | `agent/capabilities/` (observe, describe, answer, locate; inspect, explore; pick, place, pick_place, return_home; decompose) |

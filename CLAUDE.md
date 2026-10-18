@@ -2,7 +2,9 @@
 
 Current state: restructured and simplified codebase awaiting manual acceptance — start with README.md, then
 docs/validation/FINAL_MAIN_READINESS.md, docs/architecture/MODULE_GUIDE.md and docs/DEVELOPER_GUIDE.md.
-Entry points: launch/agent.sh (motion blocked unless --motion real), launch/sim.sh, launch/tests.sh, launch/evaluate.sh.
+Run configuration: agent/settings.py (validated at startup); robot session: ./launch/agent.sh (no flags needed).
+Other entry points: launch/sim.sh, launch/tests.sh, launch/evaluate.sh. Direct `python -m agent.run` (harnesses) keeps
+safe defaults: no simulator start, motion blocked unless --motion real.
 
 - Overall audit, milestones and results: docs/history/AUDIT_AND_PLAN.md
 - Frozen manipulation baseline: docs/baselines/manipulation_A_2026-10-14/ — do NOT modify any file

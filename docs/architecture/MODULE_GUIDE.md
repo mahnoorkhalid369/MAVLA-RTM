@@ -12,7 +12,9 @@ This guide lists what each folder and module is for and where to look for a give
 
 | I want to… | Look at |
 |---|---|
-| start the agent on typed instructions | `launch/agent.sh` → `agent/run.py` (`main`) |
+| configure a robot session | `agent/settings.py` (scene, motion, models, windows, tracing, outputs; validated at startup) |
+| start the agent on typed instructions | `launch/agent.sh` → `agent/run.py --settings` (`main`) |
+| follow the agent-to-agent handoffs | `TRACE = True` in `agent/settings.py`; lines from `agent/events.py` `format_trace`; full record in `events.jsonl` |
 | see what lives across instructions | `agent/session.py` (`Session`) |
 | see how an instruction becomes steps | `agent/supervisor.py` `_interpreting` → `agent/vlm_roles/roles.py` `Roles.plan_goal` (prompt `PLAN_SYSTEM` in `agent/vlm_roles/prompts.py`) → `agent/planning.py` `complete_plan` |
 | see what the robot is allowed to do for a request | `agent/authority.py`; enforced in `agent/workers.py` `WorkerRegistry.dispatch` |
@@ -56,6 +58,7 @@ This guide lists what each folder and module is for and where to look for a give
 
 ```
 agent/                       orchestration: one instruction -> verified result
+  settings.py                THE run configuration (edit here; ./launch/agent.sh uses it)
   run.py                     entry point: python -m agent.run (models -> simulator -> Session)
   session.py                 Session: what lives across instructions
   supervisor.py              GoalSupervisor: LangGraph state machine + review policy
@@ -119,7 +122,7 @@ evaluation/                  experiments, probes, scorers, scenario validation, 
 experiments/                 manipulation baseline experiments (known_pose_* F, payload_study F)
 scripts/                     validation scripts (validate_robot_m1.py F)
 ros_nodes/                   camera viewers; legacy nodes (vlm_agent_node.py P)
-launch/                      agent.sh, sim.sh, tests.sh, evaluate.sh (motion blocked by default)
+launch/                      agent.sh (reads agent/settings.py), sim.sh, tests.sh, evaluate.sh
   run.sh P, legacy/          the legacy stack (start_live.sh, start_vlm_agent.sh, tasks.sh)
 tests/                       automated tests
   unit/, integration/        14 + 9 test files
