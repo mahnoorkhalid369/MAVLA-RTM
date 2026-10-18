@@ -111,3 +111,62 @@ def test_goal_plan_and_steps_are_tracked_and_formatted():
     assert [s["status"] for s in rs.steps] == ["completed", "pending"] and rs.status == "UNSUPPORTED"
     lines = [str(format_event(e)) for e in [ev("goal_plan", goal="g", steps=[], reason="cannot sing")]]
     assert "cannot sing" in lines[0] and "[PLANNER]" in lines[0]
+
+
+def stale_run(live_dir: Path) -> None:
+    """What an earlier agent process leaves behind: its task, its events and its detection overlay."""
+    lab = np.zeros((720, 1280), np.uint16)
+    lab[300:400, 500:600] = 1
+    cv2.imwrite(str(live_dir / "labels.png"), lab)
+    (live_dir / "perception.json").write_text(json.dumps({"frame_id": "table_001", "camera": "table", "time": 1.0,
+                                                          "marks": {"1": {"object_id": 4, "score": 0.9}}}))
+    run = live_dir / "old_run"
+    run.mkdir()
+    (run / "events.jsonl").write_text(json.dumps(ev("instruction", text="sort all the boxes")) + "\n"
+                                      + json.dumps(ev("state", state="FAILED", level="goal")) + "\n")
+    (live_dir / "current.json").write_text(json.dumps({"events": str(run / "events.jsonl"),
+                                                       "instruction": "sort all the boxes, group by colors", "started": 1.0}))
+
+
+def test_a_fresh_agent_launch_clears_the_previous_task_from_an_open_viewer(tmp_path):
+    """Regression (2026-10-18): a new agent process showed the previous process's task and detection overlay."""
+    from agent.live import LiveChannel
+    stale_run(tmp_path)
+    v = Viewer(tmp_path)
+    v.poll_files()
+    assert v.rs.instruction.startswith("sort all the boxes") and v.perc is not None and v.labels is not None
+    LiveChannel(tmp_path)  # agent.run starts: a new session
+    v.poll_files()
+    assert v.rs.instruction == "" and v.rs.status == "WAITING" and v.rs.lines == deque_of(v.rs.lines, [])
+    assert v.perc is None and v.labels is None and v.contours == {} and v.run_file is None
+    assert v.render().shape == (900, 1600, 3)
+
+
+def test_a_viewer_opened_after_a_fresh_launch_waits_for_an_instruction(tmp_path):
+    from agent.live import LiveChannel
+    stale_run(tmp_path)
+    LiveChannel(tmp_path)
+    assert not (tmp_path / "perception.json").exists() and not (tmp_path / "labels.png").exists()
+    v = Viewer(tmp_path)
+    v.poll_files()
+    assert v.rs.instruction == "" and v.perc is None and v.labels is None
+    assert json.loads((tmp_path / "current.json").read_text())["events"] is None
+
+
+def test_the_next_instruction_after_a_fresh_launch_is_shown(tmp_path):
+    from agent.live import LiveChannel
+    stale_run(tmp_path)
+    live = LiveChannel(tmp_path)
+    v = Viewer(tmp_path)
+    v.poll_files()
+    run = tmp_path / "new_run"
+    run.mkdir()
+    (run / "events.jsonl").write_text(json.dumps(ev("instruction", text="look")) + "\n")
+    live.start_run(run, "Take a look at your surroundings.")
+    v.poll_files()
+    assert v.rs.instruction == "Take a look at your surroundings." and v.run_file == str(run / "events.jsonl")
+
+
+def deque_of(d, items):
+    """The run-state log is a deque; compare its contents."""
+    return type(d)(items, maxlen=d.maxlen)

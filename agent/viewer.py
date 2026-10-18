@@ -138,7 +138,7 @@ class Viewer:
             c = json.loads(cur.read_text())
         except (OSError, ValueError):
             c = None
-        if c and c.get("events") != self.run_file:
+        if c is not None and c.get("events") != self.run_file:  # a new run, or a new agent process (events None)
             self.run_file, self.ev_pos = c.get("events"), 0
             self.rs.reset(c.get("instruction", ""))
             self.scroll = 0
@@ -160,6 +160,8 @@ class Viewer:
             except OSError:
                 pass
         p = self.live_dir / "perception.json"
+        if not p.exists():  # cleared by a new agent process: no detection overlay
+            self.perc, self.perc_mtime = None, 0
         try:
             mt = p.stat().st_mtime
             if mt != self.perc_mtime:
@@ -170,6 +172,8 @@ class Viewer:
         except (OSError, ValueError):
             pass
         lp = self.live_dir / "labels.png"
+        if not lp.exists():
+            self.labels, self.lab_mtime, self.contours = None, 0, {}
         try:
             mt = lp.stat().st_mtime
             if mt != self.lab_mtime:

@@ -1,6 +1,7 @@
 """Live channel from the agent to the (optional) demo viewer: a few small files, written atomically.
 
-    <live_dir>/current.json     which run is active: {"run_dir", "events", "instruction", "started"}
+    <live_dir>/current.json     which run is active: {"run_dir", "events", "instruction", "started"};
+                                events None = a new agent process, no task yet (LiveChannel.reset)
     <live_dir>/perception.json  the latest perception result: frame id, camera, time, and per mark the
                                 detector score, measured geometry, the VLM's description, world id
     <live_dir>/labels.png       uint16 image of that frame: pixel = mark number (0 = none)
@@ -31,6 +32,15 @@ class LiveChannel:
     def __init__(self, live_dir) -> None:
         self.dir = Path(live_dir)
         self.dir.mkdir(parents=True, exist_ok=True)
+        self.reset()
+
+    def reset(self) -> None:
+        """A new agent process: no task is active yet. The previous process's task and detection overlays are
+        removed, so the viewer shows "(waiting for an instruction)" instead of an old run."""
+        for name in ("perception.json", "labels.png"):
+            (self.dir / name).unlink(missing_ok=True)
+        rec = {"run_dir": None, "events": None, "instruction": "", "started": time.time()}
+        _atomic_write(self.dir / "current.json", json.dumps(rec).encode())
 
     def start_run(self, run_dir, instruction: str) -> None:
         rec = {"run_dir": str(run_dir), "events": str(Path(run_dir) / "events.jsonl"), "instruction": instruction,
