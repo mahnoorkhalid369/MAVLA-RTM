@@ -44,11 +44,18 @@ class ConditionResult:
 def derive_conditions(steps) -> list[dict]:
     """Default desired final state from a plan's steps (when the planner gives none). steps: [(capability, args)]."""
     out = []
+    last_pick = None  # the holding(x) condition of the most recent pick: a later place / pick_place releases it
     for cap, a in steps:
         obj = ((a.get("object") or {}).get("text") if isinstance(a.get("object"), dict) else a.get("target")) or None
         ref = (a.get("reference") or {}).get("text") if isinstance(a.get("reference"), dict) else None
+        if cap in ("place", "pick_place") and last_pick is not None and last_pick in out:
+            out.remove(last_pick)  # by step order: the object a place puts down is the one picked before it (often "#id")
+            last_pick = None
         if cap == "pick":
-            out.append({"pred": "holding", "args": [obj]})
+            if last_pick is not None and last_pick in out:  # one gripper: a later pick ends the earlier holding
+                out.remove(last_pick)
+            last_pick = {"pred": "holding", "args": [obj]}
+            out.append(last_pick)
         elif cap == "pick_place":
             out.append({"pred": a["relation"], "args": [obj, ref]})
         elif cap == "place":
