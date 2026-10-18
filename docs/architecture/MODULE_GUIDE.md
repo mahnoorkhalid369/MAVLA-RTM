@@ -37,7 +37,7 @@ This guide lists what each folder and module is for and where to look for a give
 | understand the supervisor-worker loop | `docs/architecture/AGENT_ARCHITECTURE.md` |
 | ask the user a question during a task | `agent/ask.py` |
 | change thresholds, tolerances, budgets, model paths | `config/` (`perception.py`, `agent.py`, `models.py`); robot and camera constants: frozen `control/robot.py`; Gemma: `vlm/config.py` |
-| build or change a test scene | `scenarios/` (`laboratory.py`, `parts.py`, `core.py`); small JSON scenes in `scenarios/scenes/` |
+| see / add a scenario (scene) | `scenarios/`: one file per scenario (`default.py` refers to the frozen cube scene, `laboratory.py`, `scenes/*.json`); `scenarios.available()` lists them; how to plug one in: `docs/scenarios/README.md` |
 | start the simulator | `launch/sim.sh` → `sim/run_scenario.py` (test scenes) or frozen `sim/run_live.py` (`--scenario default`) |
 | run the tests | `launch/tests.sh` (all / agent / system / frozen / sim) |
 | run an experiment | `launch/evaluate.sh` (planner / segmentation / validate-scenarios / lab-exp1 / score / ...) |

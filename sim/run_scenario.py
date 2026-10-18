@@ -3,10 +3,12 @@
 scene after the frozen setup_scene. Ground truth for every scenario object comes from run_live's own
 /sim/ground_truth/objects publisher (evaluation only).
 
-Two kinds of scenes:
-  JSON scenes (scenarios/scenes/<name>.json, active perception):  --scenario ap_occlusion
-  scenario library (scenarios/, procedural workstations): --scenario laboratory --difficulty medium --seed 42
+Every scene registered in scenarios/ (scenarios.available()):
+  default      the frozen cube scene (its objects stay as the frozen sim/scene_objects.py defines them)
+  procedural   scenarios/<name>.py build(difficulty, seed):  --scenario laboratory --difficulty medium --seed 42
+  json         scenarios/scenes/<name>.json:                --scenario ap_occlusion
 
+    python -m sim.run_scenario --scenario default [--headless]
     python -m sim.run_scenario --scenario ap_occlusion [--headless]
     python -m sim.run_scenario --scenario laboratory --difficulty hard --seed 7 [--headless]
 
@@ -31,17 +33,21 @@ ap.add_argument("--difficulty", default="easy", help="library scenes: easy | med
 ap.add_argument("--seed", type=int, default=0, help="library scenes: random seed (deterministic layout)")
 args, rest = ap.parse_known_args()
 sys.path.insert(0, str(ROOT))
-from scenarios import SCENARIOS  # noqa: E402  (pure data)
+from scenarios import available, kind, scene_file  # noqa: E402  (pure data)
 
-LIBRARY = args.scenario in SCENARIOS
-SPEC = {"objects": [], "name": args.scenario} if LIBRARY else json.loads((ROOT / "scenarios" / "scenes" / f"{args.scenario}.json").read_text())
-ASSETS = json.loads((ROOT / "data" / "assets" / "asset_dims.json").read_text()) if not LIBRARY else {}
+KIND = kind(args.scenario)
+if KIND is None:
+    sys.exit(f"[run_scenario] unknown scenario {args.scenario!r}; available: {sorted(available())}")
+LIBRARY = KIND == "procedural"
+SPEC = json.loads(scene_file(args.scenario).read_text()) if KIND == "json" else {"objects": [], "name": args.scenario}
+ASSETS = json.loads((ROOT / "data" / "assets" / "asset_dims.json").read_text()) if KIND == "json" else {}
 
 import sim.scene_objects as so  # noqa: E402  (pure data; no Isaac import)
 
 YCB = {}
 SC = None
-so.OBJECTS.clear()
+if KIND != "frozen":  # default: the frozen scene's own objects stay
+    so.OBJECTS.clear()
 if LIBRARY:
     from scenarios import generate
     from scenarios.build import install

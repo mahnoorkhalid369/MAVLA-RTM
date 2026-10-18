@@ -69,8 +69,10 @@ def test_only_isaac_sim_is_a_target():
         parser().parse_args(["--target", "physical"])
 
 
-def test_default_scene_starts_the_frozen_simulator():
-    assert sim_command(True, "default")[-2:] == ["-m", "sim.run_live"]
+def test_every_named_scenario_starts_through_run_scenario_and_none_starts_the_frozen_simulator():
+    cmd = sim_command(True, "default")
+    assert cmd[cmd.index("-m") + 1:cmd.index("-m") + 4] == ["sim.run_scenario", "--scenario", "default"]
+    assert sim_command(True)[-2:] == ["-m", "sim.run_live"]  # harnesses without a scenario: unchanged
 
 
 def test_motion_needs_the_simulator_on_the_ros_graph():

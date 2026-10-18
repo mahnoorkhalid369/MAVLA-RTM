@@ -66,7 +66,9 @@ def test_model_and_scenario_paths_are_inside_the_repository():
 def test_json_scenes_exist_where_run_scenario_reads_them(scene):
     spec = json.loads((ROOT / "scenarios" / "scenes" / f"{scene}.json").read_text())
     assert spec["objects"] and all("shape" in o and "xy" in o for o in spec["objects"])
-    assert '(ROOT / "scenarios" / "scenes" / f"{args.scenario}.json")' in (ROOT / "sim" / "run_scenario.py").read_text()
+    import scenarios
+    assert scenarios.scene_file(scene) == ROOT / "scenarios" / "scenes" / f"{scene}.json"
+    assert "scene_file(args.scenario)" in (ROOT / "sim" / "run_scenario.py").read_text()  # the simulator asks the registry
 
 
 def test_required_untracked_assets_are_present():

@@ -32,10 +32,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def sim_command(gui: bool, scenario: str | None = None, difficulty: str = "easy", seed: int = 0) -> list[str]:
-    """The simulator process: the default scene (frozen sim.run_live) or a test scene (sim.run_scenario; difficulty
-    and seed apply to scenario-library scenes such as laboratory)."""
-    if scenario == "default":
-        scenario = None
+    """The simulator process. A named scenario (any of scenarios.available(), "default" included) starts through
+    sim.run_scenario; no scenario starts the frozen sim.run_live directly (harnesses). Difficulty and seed apply to
+    procedural scenarios such as laboratory."""
     mod = ["sim.run_scenario", "--scenario", scenario, "--difficulty", difficulty, "--seed", str(seed)] if scenario else ["sim.run_live"]
     return [str(ROOT / ".venv/bin/python"), "-u", "-m", *mod] + ([] if gui else ["--headless"])
 
@@ -83,8 +82,8 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--start-sim", action="store_true", help="start Isaac Sim after loading the models")
     ap.add_argument("--gui", action="store_true", help="with --start-sim: show the Isaac Sim window")
     ap.add_argument("--headless", dest="gui", action="store_false", help="with --start-sim: no Isaac Sim window")
-    ap.add_argument("--scenario", help="with --start-sim: a scenario-library scene (laboratory) or a JSON test scene "
-                                       "(scenarios/scenes/<name>.json); default: the frozen default scene")
+    ap.add_argument("--scenario", help="with --start-sim: a scenario registered in scenarios/ (default, laboratory, "
+                                       "ap_occlusion, ...); none: the frozen sim.run_live directly")
     ap.add_argument("--difficulty", default="easy", choices=["easy", "medium", "hard"], help="with --scenario laboratory")
     ap.add_argument("--seed", type=int, default=0, help="with --scenario laboratory: layout seed")
     ap.add_argument("--motion", default="blocked", choices=["blocked", "dry_run", "real"],

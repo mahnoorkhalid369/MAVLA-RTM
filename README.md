@@ -87,7 +87,7 @@ blocked unless `--motion real`. Commands, environments and the expected test res
 | Where is YOLO? | `perception/detector.py` (weights path in `config/models.py`); depth geometry in `perception/geometry.py`; world model in `perception/world_model.py` |
 | Where is Gemma? | `agent/vlm_roles/`: `gemma.py` (model adapter), `prompts.py`, `schemas.py`, `roles.py`; model loader `vlm/model.py`; settings `vlm/config.py` |
 | What may a request do? | `agent/authority.py`, enforced in `agent/workers.py` before any capability runs |
-| Where are the scenarios? | `scenarios/` (laboratory definition `scenarios/laboratory.py`, parts, Isaac builder, design checks, `scenes/*.json`) |
+| Where are the scenarios? | `scenarios/`: every scene, one file each (`default.py`, `laboratory.py`, `scenes/*.json`); add a file to plug one in (`docs/scenarios/README.md`) |
 | Where is robot execution? | `agent/tools/execution.py` (`Tools.execute`, the motion gate) → frozen `execution/ros_executor.py` → simulator `sim/ros_control.py` with `safety/joint_limits.py` |
 | Where are kinematics and grasp planning? | frozen `control/` (`kinematics.py`, `skills.py`, `collision.py`), called from `agent/tools/manipulation.py` |
 | Where is the simulator? | `sim/` (`run_live.py` default scene, `run_scenario.py` test scenes, `scene.py`, ROS bridge) |
@@ -127,7 +127,7 @@ Every function in this path is listed in `docs/architecture/EXECUTION_FLOW.md`, 
 | `agent/` | orchestration: supervisor, planning, session, authority, goals, controls, workflow, `capabilities/`, `tools/`, `vlm_roles/` |
 | `perception/` | YOLO detector, RGB-D geometry, set-of-mark images, world model, wrist viewpoints (+ helpers shared with frozen / legacy code) |
 | `config/` | configuration values and model paths |
-| `scenarios/` | scenario library (laboratory) and JSON test scenes |
+| `scenarios/` | every scene the robot can run in (plug-in registry): default, laboratory, ap_occlusion, ap_categories |
 | `sim/` | Isaac Sim processes and the ROS 2 bridge |
 | `control/`, `execution/`, `safety/` | **frozen** robot core: kinematics, planning, collision, executor, joint limits |
 | `evaluation/` | research experiments and scoring (active); `evaluation/historical/` for earlier phases |

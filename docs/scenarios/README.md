@@ -13,6 +13,35 @@ supervisor, the workers, the VLM, the planners, the skills, the robot, the camer
 | 5 | `fragile`: fragile-object handling | planned |
 | 6 | `maintenance`: inspection and tool organization | planned |
 
+## All scenarios live in `scenarios/` (plug-in registry)
+
+`scenarios.available()` lists every selectable scene. Each one is chosen the same way:
+
+- **agent:** `SCENARIO = "<name>"` in `agent/settings.py`;
+- **simulator only:** `./launch/sim.sh --scenario <name>`.
+
+Every scene starts through `sim/run_scenario.py`.
+
+| Name | Kind | Defined in |
+|---|---|---|
+| `default` | frozen | `scenarios/default.py`, which refers to the frozen cube scene of the manipulation baseline (`sim/scene_objects.py`, built by frozen `sim/scene.py`); referenced, not copied, so the checksummed baseline stays the single definition |
+| `laboratory` | procedural | `scenarios/laboratory.py` (`build(difficulty, seed)`) |
+| `ap_occlusion`, `ap_categories` | json | `scenarios/scenes/<name>.json` |
+
+**To plug in a new scenario, add one file. Nothing else changes.**
+
+- **Procedural:** `scenarios/<name>.py` defining `build(difficulty, seed) -> scenarios.core.Scenario`. Pure data, no
+  Isaac imports; use `scenarios/parts.py` and see `laboratory.py`. The registry finds it automatically. The
+  infrastructure modules `core`, `parts`, `build` and `checks` are not scenarios.
+- **Fixed:** `scenarios/scenes/<name>.json` with `{"name", "description", "objects": [{"name", "shape", "xy", "size",
+  "color", ...}]}`, as in `ap_occlusion.json`.
+
+The agent never imports `scenarios/`: it sees only the cameras, the joint states and the objects it measures.
+
+**What every scenario shares.** Every scenario uses the same work cell: the robot, the table camera on its stand and
+the microphone prop. That cell is described by `config/perception.py` and frozen `control/robot.py`. A scenario with a
+different cell (another camera pose, robot position or support height) would also need those values changed.
+
 ## Loading a scene
 
 ```bash

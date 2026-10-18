@@ -4,8 +4,8 @@
 #
 #   ./launch/sim.sh                                          # laboratory, easy, seed 0, window
 #   ./launch/sim.sh --difficulty hard --seed 42 --headless
-#   ./launch/sim.sh --scenario default                       # the frozen default cube scene (sim/run_live.py)
-#   ./launch/sim.sh --scenario ap_occlusion                  # a JSON test scene (scenarios/scenes/)
+#   ./launch/sim.sh --scenario default                       # the frozen default cube scene
+#   ./launch/sim.sh --scenario ap_occlusion                  # any scenario plugged in under scenarios/
 # Options: --scenario NAME (default laboratory) | --difficulty easy|medium|hard | --seed N | --headless
 # Stop with Ctrl+C. Scene ground truth (evaluation only) is written to out/scenarios/live/.
 
@@ -33,7 +33,4 @@ source /opt/ros/jazzy/setup.bash
 export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-42}"
 export OMNI_KIT_ACCEPT_EULA=YES
 echo "[sim.sh] ROS_DOMAIN_ID=$ROS_DOMAIN_ID scenario=$SCENARIO difficulty=$DIFFICULTY seed=$SEED"
-if [ "$SCENARIO" = default ]; then
-    exec "$ROOT/.venv/bin/python" -u -m sim.run_live "${HEADLESS[@]}"
-fi
 exec "$ROOT/.venv/bin/python" -u -m sim.run_scenario --scenario "$SCENARIO" --difficulty "$DIFFICULTY" --seed "$SEED" "${HEADLESS[@]}"

@@ -22,8 +22,14 @@ from config import models as _models
 
 ROOT = Path(__file__).resolve().parents[1]
 
+SCENARIO = "default"
+TARGET = "isaac_sim"
+MOTION = "real"
+TRACE = True
+
 # ---------------------------------------------------------------------------------------------- scene
-SCENARIO = "laboratory"      # "laboratory" (scenario library), "default" (frozen sim/run_live.py scene), or a JSON scene in scenarios/scenes/
+SCENARIO = "laboratory"      # any scenario in scenarios/ (python -c "import scenarios; print(scenarios.available())"):
+                             # "default" (frozen cube scene), "laboratory", "ap_occlusion", "ap_categories", ...
 DIFFICULTY = "easy"          # laboratory: "easy" | "medium" | "hard"
 SEED = 42                    # laboratory layout seed (42 = the Experiment 1 scene)
 
@@ -62,7 +68,7 @@ TARGETS = ("isaac_sim",)
 
 def _scenario_ok(name: str) -> bool:
     import scenarios
-    return name == "default" or name in scenarios.SCENARIOS or (ROOT / "scenarios" / "scenes" / f"{name}.json").exists()
+    return name in scenarios.available()  # every scenario plugged in under scenarios/
 
 
 def validate(values: dict | None = None) -> list[str]:
@@ -76,7 +82,8 @@ def validate(values: dict | None = None) -> list[str]:
         errors.append(f"TARGET={v['TARGET']!r}: only 'isaac_sim' is supported. Physical-robot execution is not part of "
                       "this launcher and is never started from it.")
     if not _scenario_ok(v["SCENARIO"]):
-        errors.append(f"SCENARIO={v['SCENARIO']!r}: not 'laboratory', 'default' or a file in scenarios/scenes/")
+        import scenarios
+        errors.append(f"SCENARIO={v['SCENARIO']!r}: not a scenario in scenarios/ (available: {', '.join(scenarios.available())})")
     if v["DIFFICULTY"] not in DIFFICULTIES:
         errors.append(f"DIFFICULTY={v['DIFFICULTY']!r}: one of {DIFFICULTIES}")
     if not isinstance(v["SEED"], int) or isinstance(v["SEED"], bool) or v["SEED"] < 0:
@@ -105,8 +112,9 @@ def validate(values: dict | None = None) -> list[str]:
 
 
 def summary() -> str:
-    scene = "default scene (sim/run_live.py)" if SCENARIO == "default" else (
-        f"{SCENARIO} ({DIFFICULTY}, seed {SEED})" if SCENARIO == "laboratory" else f"{SCENARIO} (JSON scene)")
+    import scenarios
+    k = scenarios.kind(SCENARIO)
+    scene = f"{SCENARIO} ({DIFFICULTY}, seed {SEED})" if k == "procedural" else f"{SCENARIO} ({k} scene)"
     motion = {"real": "REAL - planned motions are executed in Isaac Sim (authorization, collision checks, joint limits apply)",
               "dry_run": "DRY RUN - planned and logged, never sent", "blocked": "BLOCKED - nothing is sent to the robot"}[MOTION]
     windows = ", ".join(n for n, on in (("Isaac Sim window", ISAAC_WINDOW), ("demo viewer", DEMO_VIEWER),
@@ -127,7 +135,7 @@ def summary() -> str:
 def run_defaults() -> dict:
     """agent.run argument defaults taken from these settings (agent.run --settings)."""
     import time
-    return {"scenario": None if SCENARIO == "default" else SCENARIO, "difficulty": DIFFICULTY, "seed": SEED, "motion": MOTION,
+    return {"scenario": SCENARIO, "difficulty": DIFFICULTY, "seed": SEED, "motion": MOTION,
             "start_sim": START_SIMULATOR, "gui": ISAAC_WINDOW, "weights": YOLO_WEIGHTS, "imgsz": YOLO_IMAGE_SIZE,
             "conf": YOLO_CONFIDENCE, "gemma": GEMMA_MODEL, "ask": ASK, "trace": TRACE, "live_dir": LIVE_DIR,
             "out": str(ROOT / OUTPUT_DIR / time.strftime("%Y-%m-%d") / time.strftime("live_%H%M%S")), "target": TARGET}
