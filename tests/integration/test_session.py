@@ -27,6 +27,9 @@ REQ_DANCE = '{"kind": "action", "evidence": "Do a dance"}'
 NAMES = {"a": 1, "sample A1": 1, "c": 3, "processing rack": 2}
 
 
+STOP = json.dumps({"action": "stop", "reason": "the object is gone; the user should decide"})  # Gemma's decision
+
+
 class SessionTools(GoalTools):
     """Constructed by Session exactly like agent.tools.Tools; resolves the lab-style names used below."""
     instances: list = []
@@ -130,7 +133,7 @@ def test_a_dropped_object_is_not_trusted_as_held(new_session):
     """Remembered 'held' but the fingers are open at the next instruction: the claim is dropped, the object's pose
     is unknown, and no place motion runs."""
     make, run = new_session
-    s = make([REQ_PICK, PICK % "a", REQ_PUT, PLACE % ("next_to", "c")])
+    s = make([REQ_PICK, PICK % "a", REQ_PUT, PLACE % ("next_to", "c"), STOP])
     run(s, "Pick up a.")
     t = SessionTools.instances[0]
     t.contact, n = [False], len(t.executed)
@@ -143,7 +146,7 @@ def test_a_dropped_object_is_not_trusted_as_held(new_session):
 
 def test_losing_the_object_during_the_instruction_blocks_the_place(new_session):
     make, run = new_session
-    s = make([REQ_PICK, PICK % "a", REQ_PUT, PLACE % ("next_to", "c")])
+    s = make([REQ_PICK, PICK % "a", REQ_PUT, PLACE % ("next_to", "c"), STOP])
     run(s, "Pick up a.")
     t = SessionTools.instances[0]
     t.contact, n = [True, False], len(t.executed)  # verified at the start, gone by the place step

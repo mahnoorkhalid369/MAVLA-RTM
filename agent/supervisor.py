@@ -1,19 +1,21 @@
-"""Supervisor: the central coordinator (LangGraph). It owns the user's goal and the task ledger, interprets the
-goal into a desired final state plus a first plan, delegates each subtask to a worker as a typed request,
-reviews each typed result (evidence, uncertainty, advisory suggestions), adapts the plan, and completes only
-when the desired final state is verified over measured state.
+"""Supervisor: the central coordinator (LangGraph). It owns the user's goal and the task ledger. Gemma is the
+decision-maker: it classifies the request, writes the first plan and, whenever a result needs a decision, chooses
+the next step (continue / replan / ask_user / finish / stop). The supervisor delegates one subtask at a time to a
+worker as a typed request, reviews each typed result, applies the deterministic checks (schema validation,
+authorization, measured verification, safety stops, budgets) and completes only when the goal is verified.
 
     INTERPRETING -> DISPATCHING -> DELEGATING -> REVIEWING -> DISPATCHING ... -> VERIFYING_GOAL
-                                                     |-> REPLANNING (bounded, objective-preserving) -> DISPATCHING
+                                                     |-> DECIDING (Gemma; bounded) -> DISPATCHING | VERIFYING_GOAL
+    VERIFYING_GOAL --goal not shown, budget left--> DECIDING
     terminal: COMPLETED | FAILED | CANCELLED | UNSUPPORTED
 
 Workers (agent/workers.py; logical roles in this process, one shared Gemma / YOLO / ROS bridge):
-  planning      goal -> plan (Roles.plan_goal), multi-object decomposition over measured objects (decompose)
   perception    observe, describe_scene, answer, locate
-  exploration   inspect, explore (wrist-camera viewpoints, perception/viewpoints.py)
+  inspection    inspect, explore (wrist-camera viewpoints, perception/viewpoints.py)
   manipulation  pick, place, pick_place, return_home (the validated PickPlaceWorkflow in three modes)
-  verification  goal conditions over measured state (agent/goals.py) + the skills' own physical checks
-Safety: the planner names only registry capabilities; every motion goes through SkillPlanner + CollisionChecker
+  planning      decompose (Gemma over the measured objects)
+  verification  goal / sub-goal conditions over measured state (agent/goals.py) + the skills' own physical checks
+Safety: Gemma names only registry capabilities; every motion goes through SkillPlanner + CollisionChecker
 + RosExecutor + the simulator's safety layer; workers never start other workers.
 """
 
@@ -35,19 +37,19 @@ from agent.controls import ExecutionControls
 from config.agent import Budgets
 from agent.eventlog import EventLog
 from agent.goals import derive_conditions
-from agent.planning import _ref_texts, achieves, complete_plan
+from agent.planning import _ref_texts
 from agent.vlm_roles import VLMFailure
 from agent.workers import WorkerRegistry
 from agent.task_state import Step, TaskState
 
-STATES = ["INTERPRETING", "DISPATCHING", "DELEGATING", "REVIEWING", "REPLANNING", "VERIFYING_GOAL"]
+STATES = ["INTERPRETING", "DISPATCHING", "DELEGATING", "REVIEWING", "DECIDING", "VERIFYING_GOAL"]
 TERMINAL = ["COMPLETED", "FAILED", "CANCELLED", "UNSUPPORTED"]
 NEEDS_OBSERVATION = {"describe_scene", "answer", "locate", "inspect", "explore", "decompose"}
 MOTION = {"pick", "place", "pick_place", "return_home", "inspect", "explore"}
 MANIPULATION = {"pick", "place", "pick_place"}
+OBJECTIVES = MANIPULATION | {"locate"}  # what the user asked to move or find: a re-plan cannot drop these conditions
 MAX_STEPS_EXECUTED = 14  # hard bound on worker delegations per instruction
-MAX_INSPECTIONS_FOR_ANSWER = 2
-RECOVERABLE = {"insufficient_info", "infeasible", "failed"}  # may be replanned once; unsafe / cancelled never
+STOP_STATUS = {"unsupported": "UNSUPPORTED", "cancelled": "CANCELLED", "ambiguous": "CANCELLED"}  # else FAILED
 PRONOUNS = {"it", "that", "this", "this one", "that one", "the object", "the held object", "#held"}
 
 
@@ -72,7 +74,8 @@ class GoalSupervisor:
         self.failed_motion = 0
         self.current: Step | None = None
         self.last_result = None
-        self.goal_gap: str | None = None  # set when the final goal check fails and Gemma is asked again
+        self.event, self.event_outcome = "", None  # the latest event that needs Gemma's decision
+        self.event_step: Step | None = None  # ... and the step that caused it (None: the final goal check)
         self.reg = WorkerRegistry(log, self._executors(), {**self.specs, **caps.INTERNAL})
         g = StateGraph(GoalState)
         for s in STATES:
@@ -175,6 +178,10 @@ class GoalSupervisor:
 
     def _finish(self, status: str, outcome: str, message: str) -> dict:
         self.ts.status, self.ts.outcome, self.ts.message = status.lower(), outcome, message
+        if status != "COMPLETED":
+            for s in self.ts.plan:
+                if s.status == "pending":
+                    s.status = "skipped"
         return {"next": status}
 
     def _context(self) -> str:
@@ -182,9 +189,10 @@ class GoalSupervisor:
         if t.held_object is not None:
             o = t.world.objects.get(t.held_object)
             d = (o.description or {}) if o is not None else {}
-            return f"The robot is HOLDING an object ({d.get('colour', '')} {d.get('name', '')})."
+            return f"The robot is HOLDING object #{t.held_object} ({d.get('colour', '')} {d.get('name', '')})."
         if t.last_referent is not None:
-            return "The robot's gripper is empty. The last instruction handled one object (\"it\" may mean it)."
+            return (f"The robot's gripper is empty. The last instruction handled object #{t.last_referent} "
+                    "(\"it\" may mean it).")
         return ""
 
     def _add_steps(self, steps, origin: str, after: Step | None = None) -> list[Step]:
@@ -206,8 +214,18 @@ class GoalSupervisor:
     def _refresh_conditions(self) -> None:
         request = [c for c in self.ts.conditions if c.get("source") == "request"]  # from the user's request: always kept
         explicit = [c for c in self.ts.conditions if c.get("source") == "explicit"]
-        live = [(s.capability, s.args) for s in self.ts.plan if s.status not in ("skipped", "replaced", "refused")
-                and s.capability not in ("observe", "decompose")]
+        # the goal = the conditions of the steps still in the plan + those of a dropped step whose kind of objective
+        # (moving / finding) no later step pursues any more: a re-plan may change how, not drop what (structural, by
+        # capability); refused steps were never authorized
+        plan = sorted(self.ts.plan, key=lambda x: x.index)
+        current = [s for s in plan if s.status not in ("skipped", "replaced", "refused")]
+
+        def pursued_later(st):
+            group = MANIPULATION if st.capability in MANIPULATION else {st.capability}
+            return any(o.capability in group and o.index > st.index for o in current)
+        live = [(s.capability, s.args) for s in plan
+                if s.status != "refused" and s.capability not in ("observe", "decompose")
+                and (s in current or (s.capability in OBJECTIVES and not pursued_later(s)))]
         derived = [{**c, "source": "derived"} for c in derive_conditions(live)]
         if any(c["pred"] == "answered" for c in request):  # the request's own question already stands for the answer
             derived = [c for c in derived if c["pred"] != "answered"]
@@ -250,9 +268,6 @@ class GoalSupervisor:
         except VLMFailure as exc:
             return self._finish("FAILED", "failed", f"I could not turn the instruction into steps I can do ({exc}). "
                                 + self._capabilities_line())
-        applied = complete_plan(plan, state["instruction"], self.authority.kind)
-        if applied:
-            self.log("plan_completed", rules=applied)
         self.ts.goal, self.ts.success_condition = plan.goal, plan.success
         if not plan.steps:
             return self._finish("UNSUPPORTED", "unsupported", f"I cannot do that with my current capabilities: "
@@ -331,11 +346,13 @@ class GoalSupervisor:
                  needs=getattr(res, "needs", ""), uncertainty=getattr(res, "uncertainty", []), decision=decision, reason=why)
 
     def _reviewing(self, state) -> dict:
-        """Critic of one result: verify the sub-goal, then adapt the plan from the evidence (the supervisor decides;
-        workers only advise through `needs` / `suggestion`)."""
+        """Deterministic part of the review: verify the sub-goal, apply authorization and safety stops, insert a
+        decomposition. A routine success continues without Gemma; anything else goes to Gemma (DECIDING)."""
         step = next(s for s in reversed(self.ts.plan) if s.status in ("done", "failed"))
         res = self.last_result
         data = res.data if res is not None else {}
+        unsettled = list(getattr(res, "uncertainty", []) or [])
+        doubtful = bool(getattr(res, "needs", "")) or data.get("certain") is False  # the worker itself is not sure
         if step.outcome == "completed" and (conds := self._measured_subgoal(step)):
             _, v = self._delegate("verify", {"conditions": conds, "scope": "subgoal"},
                                   f"verify step {step.index} ({step.capability})", expected=conds)
@@ -344,42 +361,11 @@ class GoalSupervisor:
             if v.outcome == "failed":  # the worker reported success, the measured state says otherwise
                 step.status, step.outcome = "failed", "failed"
                 step.summary = f"{step.summary} | verification: the sub-goal is {v.summary}"
-                self._review(step, "sub-goal not met", v.summary)
             elif v.outcome != "completed":
+                doubtful = True
+                unsettled += v.uncertainty or [v.summary]
                 self.ts.uncertainties.append({"task_id": v.task_id, "capability": "verify", "items": v.uncertainty})
-        if step.outcome == "completed":
-            if step.capability == "decompose":  # planning worker returned concrete steps + final conditions
-                steps = data.get("steps", [])
-                allowed = [(c, a) for c, a in steps if self.authority.allows(self.specs[c].effect)]
-                refused = [(c, a) for c, a in steps if (c, a) not in allowed]
-                if refused:  # a decomposition cannot add effects the user did not ask for
-                    self.log("authorization", origin="decomposition", allowed=False, refused=[c for c, _ in refused],
-                             reason=f"the request ({self.authority.kind}) does not authorize changing objects")
-                    self.ts.refused += [{"capability": c, "args": a, "origin": "decomposition"} for c, a in refused]
-                self._add_steps(allowed, "decomposition", after=step)
-                explicit = [{**c, "source": "explicit"} for c in data.get("conditions", [])] if not refused else []
-                if explicit:
-                    self.ts.conditions = explicit
-                else:
-                    self._refresh_conditions()
-                self.log("goal_conditions", goal=self.ts.goal, conditions=self.ts.conditions, origin="decomposition")
-                self._review(step, "insert the decomposed steps", f"{len(allowed)} step(s) added, {len(refused)} refused")
-                self._log_plan("decomposition")
-                return {"next": "DISPATCHING"}
-            if (step.capability == "answer" and data.get("certain") is False and data.get("check_closer_world")
-                    and not any(s.capability == "inspect" for s in self.ts.plan) and self.specs["inspect"].implemented):
-                ids = data["check_closer_world"][:MAX_INSPECTIONS_FOR_ANSWER]
-                step.status = "replaced"
-                self.log("subtask", reason=f"answer uncertain from the table view: closer look at "
-                                           f"{['#%d' % i for i in ids]}, then answer again")
-                self._add_steps([("inspect", {"target": f"#{i}"}) for i in ids] + [("answer", dict(step.args))],
-                                "subtask policy", after=step)
-                self._review(step, "closer look, then answer again", "the worker is not certain and names objects to check")
-                self._log_plan("subtask: closer look")
-                return {"next": "DISPATCHING"}
-            self._review(step, "continue", "sub-goal achieved" + (" (verified)" if self._measured_subgoal(step) else ""))
-            return {"next": "DISPATCHING"}
-        if step.outcome == "unauthorized":  # refused before execution: drop it (and later steps of the same kind), go on
+        if step.outcome == "unauthorized":  # authorization (deterministic): refused before execution; go on
             step.status = "refused"
             self.ts.refused.append({"capability": step.capability, "args": step.args, "origin": step.origin})
             for s in self.ts.remaining(step):
@@ -390,106 +376,118 @@ class GoalSupervisor:
             self._review(step, "refuse and continue", "the request does not authorize this effect")
             self._log_plan("refused steps")
             return {"next": "DISPATCHING"}
-        for s in self.ts.remaining(step):  # nothing after a failed step runs on stale assumptions (may be re-added)
-            s.status = "skipped"
-        # information-gathering subtask: a target not visible to the table camera -> explore once, then locate again
-        if (step.capability == "locate" and step.outcome == "insufficient_info" and self.specs["explore"].implemented
-                and not any(s.capability == "explore" for s in self.ts.plan) and self.executed < MAX_STEPS_EXECUTED - 2):
-            step.status = "replaced"
-            for s in self.ts.plan:
-                if s.status == "skipped" and s.index > step.index:
-                    s.status = "pending"
-            self.log("subtask", reason=f"{step.args.get('target')!r} not visible to the table camera: explore hidden "
-                                       "regions, then locate again")
-            self._add_steps([("explore", {"target": step.args.get("target"), "near": None}), ("locate", dict(step.args))],
-                            "subtask policy", after=step)
-            self._review(step, "explore, then locate again", "not visible from the current view")
-            self._log_plan("subtask: explore")
-            return {"next": "DISPATCHING"}
-        if step.outcome in ("cancelled", "ambiguous", "unsupported"):
-            self._review(step, f"stop ({step.outcome})", step.summary)
-        if step.outcome == "cancelled":
+        if step.outcome == "unsafe":  # safety (deterministic): no new motion is planned
+            self._review(step, "stop (unsafe)", step.summary)
+            return self._finish("FAILED", "unsafe", f"Step {step.index} ({step.capability}) unsafe: {step.summary}"
+                                + self._done_so_far() + " I did not report success.")
+        if step.outcome == "cancelled":  # the user decided
+            self._review(step, "stop (cancelled by the user)", step.summary)
             return self._finish("CANCELLED", "cancelled", step.summary + self._done_so_far())
-        if step.outcome == "ambiguous":
-            return self._finish("CANCELLED", "ambiguous", step.summary + self._done_so_far())
-        if step.outcome == "unsupported":
-            return self._finish("UNSUPPORTED", "unsupported", f"Step {step.index} ({step.capability}) is not possible: "
-                                f"{step.summary}" + self._done_so_far())
-        self.ts.attempted.append({"capability": step.capability, "args": step.args, "outcome": step.outcome})
-        deterministic = step.outcome == "infeasible"  # e.g. out of reach: re-planning the same move cannot help
-        if step.outcome in RECOVERABLE and not deterministic and self.ts.replans < self.controls.max_replans and self.executed < MAX_STEPS_EXECUTED:
+        if step.outcome == "completed" and step.capability == "decompose":  # the planning worker's (Gemma's) steps
+            steps = data.get("steps", [])
+            allowed = [(c, a) for c, a in steps if self.authority.allows(self.specs[c].effect)]
+            refused = [(c, a) for c, a in steps if (c, a) not in allowed]
+            if refused:  # a decomposition cannot add effects the user did not ask for
+                self.log("authorization", origin="decomposition", allowed=False, refused=[c for c, _ in refused],
+                         reason=f"the request ({self.authority.kind}) does not authorize changing objects")
+                self.ts.refused += [{"capability": c, "args": a, "origin": "decomposition"} for c, a in refused]
+            self._add_steps(allowed, "decomposition", after=step)
+            explicit = [{**c, "source": "explicit"} for c in data.get("conditions", [])] if not refused else []
+            if explicit:
+                self.ts.conditions = explicit
+            else:
+                self._refresh_conditions()
+            self.log("goal_conditions", goal=self.ts.goal, conditions=self.ts.conditions, origin="decomposition")
+            self._review(step, "insert the decomposed steps", f"{len(allowed)} step(s) added, {len(refused)} refused")
+            self._log_plan("decomposition")
+            return {"next": "DISPATCHING"}
+        if step.outcome == "completed" and not doubtful:
+            self._review(step, "continue", "sub-goal achieved" + (" (verified)" if self._measured_subgoal(step) else ""))
+            return {"next": "DISPATCHING"}
+        if step.outcome != "completed":
+            self.ts.attempted.append({"capability": step.capability, "args": step.args, "outcome": step.outcome})
             self.failed_motion = getattr(self.tools, "motion_count", 0)
-            self._review(step, "ask Gemma to re-plan", f"recoverable {step.outcome}; re-planning budget "
-                                                       f"{self.ts.replans}/{self.controls.max_replans} used")
-            return {"next": "REPLANNING"}
-        self._review(step, f"stop ({step.outcome})", "not recoverable" if step.outcome not in RECOVERABLE or deterministic
-                     else "re-planning budget used")
-        return self._finish("FAILED", step.outcome, f"Step {step.index} ({step.capability}) {step.outcome}: {step.summary}"
-                            + self._done_so_far() + " I did not report success.")
+        needs = getattr(res, "needs", "")
+        self.event = (f"step {step.index} ({step.capability} {_args_line(step.args)}) by the {step.worker} worker: "
+                      f"{step.outcome}: {step.summary[:300]}"
+                      + (f" | uncertain: {'; '.join(unsettled)}" if unsettled else "")
+                      + (f" | the worker suggests: {needs}" if needs else ""))
+        self.event_outcome, self.event_step = step.outcome, step
+        self._review(step, "ask Gemma", "the result needs a decision: " + (step.outcome if step.outcome != "completed"
+                                                                         else "uncertain result"))
+        return {"next": "DECIDING"}
 
-    def _replanning(self, state) -> dict:
-        """Gemma decides again, from the goal, the progress so far and the new evidence: after a recoverable failure,
-        or when every step ran but the goal check is not satisfied (self.goal_gap)."""
+    def _deciding(self, state) -> dict:
+        """Gemma decides the next step from the goal, the progress (task ledger) and the latest event; the supervisor
+        validates and executes the decision. Bounded by ExecutionControls.max_replans (Gemma decisions after the first
+        plan); a re-plan that repeats a failed step in an unchanged situation is sent back to Gemma."""
+        event, outcome = self.event, self.event_outcome
+        if self.ts.replans >= self.controls.max_replans:
+            return self._stop(outcome, f"{event}. No further decisions allowed (budget {self.controls.max_replans} used).")
         self.ts.replans += 1
-        gap, self.goal_gap = self.goal_gap, None
-        failed = None if gap else next(s for s in reversed(self.ts.plan) if s.status == "failed")
-        tried = "; ".join(f"{a['capability']} {a['args']} -> {a['outcome']}" for a in self.ts.attempted)[:400]
-        if gap:
-            note = (f"{state['instruction']}\n(The steps so far did not achieve the goal: {gap}. Plan only the remaining "
-                    "steps from the current situation.)")
-        else:
-            note = f"{state['instruction']}\n(Already tried, do not repeat: {tried}. Plan again from the current situation.)"
-        context = "\n".join(x for x in (self._context(), self.ts.progress_text()) if x)
-        self.log("consult", reason=f"goal not met: {gap}" if gap else f"step {failed.index} ({failed.capability}) {failed.outcome}",
-                 replans=self.ts.replans, budget=self.controls.max_replans)
+        pending = [s for s in self.ts.plan if s.status == "pending"]
+        self.log("consult", reason=event, replans=self.ts.replans, budget=self.controls.max_replans)
         try:
-            plan = self.tools.roles.plan_goal(note, caps.planner_menu(self.specs), context=context)
+            d = self.tools.roles.decide(self.ts.instruction, self.ts.progress_text(), event, caps.planner_menu(self.specs),
+                                        has_pending=bool(pending), context=self._context())
         except VLMFailure as exc:
-            self.ts.consults.append({"reason": "goal" if gap else "failure", "accepted": False, "why": str(exc)})
-            if gap:
-                return self._finish("FAILED", "failed", f"The steps ran, but the goal is not met: {gap}. (Re-planning failed: "
-                                    f"{exc}.)" + self._done_so_far() + " I did not report success.")
-            return self._finish("FAILED", failed.outcome, f"{failed.summary} (replanning failed: {exc})" + " I did not report success.")
+            self.ts.consults.append({"reason": event, "action": None, "accepted": False, "why": str(exc)})
+            return self._stop(outcome, f"{event}. (Gemma could not decide: {exc}.)")
+        self.log("gemma_decision", action=d.action, reason=d.reason, question=d.question,
+                 steps=[{"capability": st.capability, "args": st.args} for st in d.steps])
+        record = {"reason": event, "action": d.action, "accepted": True, "why": d.reason,
+                  "steps": [st.capability for st in d.steps]}
+        self.ts.consults.append(record)
+        if d.action == "continue":
+            return {"next": "DISPATCHING"}
+        if d.action == "finish":
+            for s in pending:
+                s.status = "skipped"
+            self._log_plan("Gemma: finish")
+            return {"next": "VERIFYING_GOAL"}
+        if d.action == "stop":
+            return self._stop(outcome, f"{event}. Gemma stopped: {d.reason}")
+        if d.action == "ask_user":
+            ask = getattr(self.responder, "ask", None)
+            answer = ask(d.question) if ask is not None else None
+            self.ts.questions.append({"question": d.question, "answer": answer, "asked_by": "gemma"})
+            self.log("ask_user", answer="text" if answer else "none", raw=answer or "", question=d.question,
+                     source="terminal" if type(self.responder).__name__ == "TerminalResponder" else "scripted")
+            if answer is None:
+                return self._finish("CANCELLED", "cancelled", f"I asked: {d.question} No answer, so I stopped."
+                                    + self._done_so_far())
+            self.event, self.event_outcome = f"the user answered {d.question!r}: {answer!r}", outcome
+            return {"next": "DECIDING"}
+        # replan
+        # the new plan starts with a step that already failed, and nothing has moved since: the same result follows
         unchanged = getattr(self.tools, "motion_count", 0) == self.failed_motion
-        done = [(s.capability, s.args) for s in self.ts.plan if s.status == "done"]
-        if not plan.steps:
-            why = f"Gemma found no further steps ({plan.reason or 'no reason given'})"
-        elif failed is not None and not any(achieves(st.capability, failed.capability) for st in plan.steps):
-            why = f"the new plan no longer pursues the failed step ({failed.capability})"
-        elif unchanged and any((st.capability, st.args) == (a["capability"], a["args"]) for st in plan.steps for a in self.ts.attempted):
-            why = "the new plan repeats an attempted step in an unchanged situation"
-        elif gap and unchanged and all((st.capability, st.args) in done for st in plan.steps):
-            why = "the new plan only repeats completed steps in an unchanged situation"
-        else:
-            why = None
-        self.ts.consults.append({"reason": "goal" if gap else "failure", "accepted": why is None, "why": why or plan.reason,
-                                 "steps": [st.capability for st in plan.steps]})
-        if why:
-            self.log("replan", accepted=False, reason=why)
-            if gap:
-                return self._finish("FAILED", "failed", f"The steps ran, but the goal is not met: {gap}. Re-planning offered "
-                                    "nothing different." + self._done_so_far() + " I did not report success.")
-            return self._finish("FAILED", failed.outcome, f"Step {failed.index} ({failed.capability}) {failed.outcome}: "
-                                f"{failed.summary}. Replanning offered nothing different." + self._done_so_far())
+        first = (d.steps[0].capability, d.steps[0].args)
+        repeats = unchanged and any(first == (a["capability"], a["args"]) for a in self.ts.attempted)
+        if repeats:
+            record["accepted"] = False
+            self.log("replan", accepted=False, reason="repeats a failed step in an unchanged situation")
+            self.event = f"{event} | your last plan repeated a failed step although nothing changed; choose differently"
+            return {"next": "DECIDING"}
         self.log("replan", accepted=True)
-        if failed is not None:
-            failed.status = "replaced"
-        self._add_steps([(st.capability, st.args) for st in plan.steps], "replan")
+        if self.event_step is not None and self.event_step.status in ("done", "failed"):
+            self.event_step.status = "replaced"  # the failed / doubtful step Gemma re-planned around
+        for s in pending:
+            s.status = "skipped"
+        self._add_steps([(st.capability, st.args) for st in d.steps], "replan")
         self._refresh_conditions()
-        self._log_plan("re-planned by Gemma (" + ("goal not met" if gap else "after a failure") + ")")
+        self._log_plan("re-planned by Gemma")
         return {"next": "DISPATCHING"}
 
+    def _stop(self, outcome: str | None, message: str) -> dict:
+        status = STOP_STATUS.get(outcome or "", "FAILED")
+        tail = "" if status == "UNSUPPORTED" else " I did not report success."
+        return self._finish(status, outcome or "failed", message + self._done_so_far() + (tail if status == "FAILED" else ""))
+
     def _verifying_goal(self, state) -> dict:
-        """The original objective is the final authority: the verification worker evaluates every desired-final-state
-        condition over measured state (Gemma answers count only as 'model', never as verified). If the goal is not
-        shown and re-planning budget remains, Gemma decides the remaining steps (closed loop)."""
+        """The original objective is the final authority: the verification worker evaluates every goal condition over
+        measured state (Gemma answers count only as 'model', never as verified). If the goal is not shown, Gemma
+        decides what to do next (within the budget)."""
         steps = [s for s in self.ts.plan if s.status not in ("skipped", "replaced", "refused")]
-        if not steps or not all(s.status == "done" and s.outcome == "completed" for s in steps):
-            return self._finish("FAILED", "failed", "not every step was completed" + self._done_so_far())
-        for r in (s for s in self.ts.plan if s.status == "replaced"):  # a replaced step's objective must be achieved later
-            if r.origin != "subtask policy" and not any(s.index > r.index and achieves(s.capability, r.capability) for s in steps):
-                return self._finish("FAILED", r.outcome or "failed", f"Step {r.index} ({r.capability}) {r.outcome}: {r.summary}; "
-                                    "the replanned steps did not achieve it." + self._done_so_far() + " I did not report success.")
         _, v = self._delegate("verify", {"conditions": list(self.ts.conditions), "scope": "goal"}, "verify the user's goal",
                               expected=list(self.ts.conditions))
         rows = v.data.get("results", [])
@@ -497,22 +495,29 @@ class GoalSupervisor:
         self.log("goal_check", results=self.ts.goal_check)
         false = [r for r in rows if r["satisfied"] is False]
         unknown = [r for r in rows if r["satisfied"] is None and r["confidence"] != "model"]
+        failed_steps = [s for s in steps if s.status == "failed"]
         summary = self._result_message(steps)
 
         def fmt(rs):
             return "; ".join(f"{r['condition']['pred']}({', '.join(map(str, r['condition'].get('args', [])))}): {r['evidence']}" for r in rs)
-        if (false or unknown) and self.ts.replans < self.controls.max_replans and self.executed < MAX_STEPS_EXECUTED:
-            self.goal_gap = fmt(false + unknown)
-            self.failed_motion = getattr(self.tools, "motion_count", 0)
-            self.log("review", index=None, capability="verify", outcome=v.outcome, needs="replan", uncertainty=v.uncertainty,
-                     decision="ask Gemma for the remaining steps", reason=f"goal not shown: {self.goal_gap}")
-            return {"next": "REPLANNING"}
-        if false:
-            return self._finish("FAILED", "failed", f"The steps ran, but the goal is not met: {fmt(false)}.\n{summary}\n"
-                                "I did not report success.")
-        if unknown:
-            return self._finish("FAILED", "insufficient_info", f"The steps ran, but the evidence does not show the goal: "
-                                f"{fmt(unknown)}.\n{summary}")
+        if false or unknown or (failed_steps and not rows):
+            gap = fmt(false + unknown) or f"step {failed_steps[0].index} ({failed_steps[0].capability}) failed"
+            if self.ts.replans < self.controls.max_replans and self.executed < MAX_STEPS_EXECUTED:
+                self.event, self.event_outcome = f"every step ran, but the goal is not shown: {gap}", "failed"
+                self.event_step = None
+                self.failed_motion = getattr(self.tools, "motion_count", 0)
+                self.log("review", index=None, capability="verify", outcome=v.outcome, needs="replan",
+                         uncertainty=v.uncertainty, decision="ask Gemma", reason=f"goal not shown: {gap}")
+                return {"next": "DECIDING"}
+            if false:
+                return self._finish("FAILED", "failed", f"The steps ran, but the goal is not met: {fmt(false)}.\n{summary}\n"
+                                    "I did not report success.")
+            if unknown:
+                return self._finish("FAILED", "insufficient_info", f"The steps ran, but the evidence does not show the goal: "
+                                    f"{fmt(unknown)}.\n{summary}")
+            return self._finish("FAILED", failed_steps[0].outcome or "failed", f"Step {failed_steps[0].index} "
+                                f"({failed_steps[0].capability}) {failed_steps[0].outcome}: {failed_steps[0].summary}"
+                                + self._done_so_far() + " I did not report success.")
         model = [r for r in rows if r["confidence"] == "model"]
         refused = (f" I did not {', '.join(sorted({r['capability'] for r in self.ts.refused}))}: your request did not ask me to "
                    "change any objects." if self.ts.refused else "")
@@ -539,7 +544,7 @@ class GoalSupervisor:
         self.ts = TaskState(instruction)
         self.ts.sensors = list(getattr(self.tools, "SENSORS", ()))
         self.ts.capabilities = [n for n, s in self.specs.items() if s.implemented]
-        self.goal_gap = None
+        self.event, self.event_outcome, self.event_step = "", None, None
         self.ctx = caps.Context(self.tools, self.log, self.run_dir, self.responder, self.budgets, self.ts)
         self.ctx.vlm_calls = lambda: getattr(self.tools.roles, "calls", 0)
         self.log("instruction", text=instruction, held=self.tools.held_object, last_referent=self.tools.last_referent)
@@ -561,3 +566,12 @@ class GoalSupervisor:
                   "failure": None if status == "COMPLETED" else {"cls": self.ts.outcome, "reason": self.ts.message}}
         self.log("report", status=status, message=self.ts.message)
         return report
+
+
+def _args_line(args: dict) -> str:
+    parts = []
+    for k, v in (args or {}).items():
+        v = v.get("text") if isinstance(v, dict) else v
+        if v not in (None, "", []):
+            parts.append(f"{k}={v}")
+    return ", ".join(parts)

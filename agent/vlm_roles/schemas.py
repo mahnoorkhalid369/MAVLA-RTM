@@ -73,6 +73,14 @@ class PlanStep(BaseModel):
         return {}
 
 
+class Decision(BaseModel):
+    """Gemma's next decision in the closed loop (Roles.decide), executed by the supervisor after validation."""
+    action: Literal["continue", "replan", "ask_user", "finish", "stop"]
+    steps: list[PlanStep] = []  # replan: the remaining steps (they replace the pending ones)
+    question: str | None = None  # ask_user: one short question for the user
+    reason: str = ""
+
+
 class Condition(BaseModel):
     pred: str
     args: list[str] = []

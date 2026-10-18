@@ -51,6 +51,8 @@ ISAAC_WINDOW = True          # show the Isaac Sim window (False: headless, faste
 DEMO_VIEWER = True           # the agent viewer: live camera, detections, supervisor state, logs
 CAMERA_WINDOWS = True        # raw wrist and table RGB-D windows
 ASK = "terminal"             # who answers clarification questions: "terminal" (you) | "scripted" (always cancel)
+MAX_GEMMA_DECISIONS = 3      # per instruction: how often Gemma may decide again after its first plan (failure,
+                             # uncertain result, goal not shown); 0 = stop at the first problem
 
 # ----------------------------------------------------------------------------------- tracing and output
 TRACE = True                 # print every agent handoff: request, delegation input, worker output, review, failures
@@ -75,7 +77,8 @@ def validate(values: dict | None = None) -> list[str]:
     """Problems with the settings (empty = valid). `values` overrides the module values (tests)."""
     v = {k: globals()[k] for k in ("SCENARIO", "DIFFICULTY", "SEED", "TARGET", "START_SIMULATOR", "MOTION", "ROS_DOMAIN_ID",
                                    "GEMMA_MODEL", "YOLO_WEIGHTS", "YOLO_IMAGE_SIZE", "YOLO_CONFIDENCE", "ISAAC_WINDOW",
-                                   "DEMO_VIEWER", "CAMERA_WINDOWS", "ASK", "TRACE", "OUTPUT_DIR", "LIVE_DIR", "LOG_DIR")}
+                                   "DEMO_VIEWER", "CAMERA_WINDOWS", "ASK", "MAX_GEMMA_DECISIONS", "TRACE", "OUTPUT_DIR",
+                                   "LIVE_DIR", "LOG_DIR")}
     v.update(values or {})
     errors = []
     if v["TARGET"] not in TARGETS:
@@ -102,6 +105,9 @@ def validate(values: dict | None = None) -> list[str]:
         errors.append(f"YOLO_CONFIDENCE={v['YOLO_CONFIDENCE']!r}: between 0 and 1")
     if v["ASK"] not in ("terminal", "scripted"):
         errors.append(f"ASK={v['ASK']!r}: 'terminal' or 'scripted'")
+    m = v["MAX_GEMMA_DECISIONS"]
+    if not isinstance(m, int) or isinstance(m, bool) or not 0 <= m <= 10:
+        errors.append(f"MAX_GEMMA_DECISIONS={m!r}: an integer 0-10")
     for k in ("START_SIMULATOR", "ISAAC_WINDOW", "DEMO_VIEWER", "CAMERA_WINDOWS", "TRACE"):
         if not isinstance(v[k], bool):
             errors.append(f"{k}={v[k]!r}: True or False")
@@ -127,6 +133,7 @@ def summary() -> str:
         f"[settings]   models     Gemma {Path(GEMMA_MODEL).name} | YOLO {Path(YOLO_WEIGHTS).parent.parent.name} "
         f"(imgsz {YOLO_IMAGE_SIZE}, conf {YOLO_CONFIDENCE})",
         f"[settings]   windows    {windows}",
+        f"[settings]   gemma      decides the plan, and again up to {MAX_GEMMA_DECISIONS} time(s) per instruction",
         f"[settings]   tracing    {'every agent handoff in the terminal' if TRACE else 'progress lines only'}; full trace in "
         f"{OUTPUT_DIR}/<date>/live_<time>/<nn>/events.jsonl",
     ])
@@ -137,7 +144,7 @@ def run_defaults() -> dict:
     import time
     return {"scenario": SCENARIO, "difficulty": DIFFICULTY, "seed": SEED, "motion": MOTION,
             "start_sim": START_SIMULATOR, "gui": ISAAC_WINDOW, "weights": YOLO_WEIGHTS, "imgsz": YOLO_IMAGE_SIZE,
-            "conf": YOLO_CONFIDENCE, "gemma": GEMMA_MODEL, "ask": ASK, "trace": TRACE, "live_dir": LIVE_DIR,
+            "conf": YOLO_CONFIDENCE, "gemma": GEMMA_MODEL, "ask": ASK, "max_decisions": MAX_GEMMA_DECISIONS, "trace": TRACE, "live_dir": LIVE_DIR,
             "out": str(ROOT / OUTPUT_DIR / time.strftime("%Y-%m-%d") / time.strftime("live_%H%M%S")), "target": TARGET}
 
 

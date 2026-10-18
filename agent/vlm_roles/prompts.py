@@ -115,3 +115,22 @@ REQUEST_SYSTEM = """Read the user's request to a robot arm and say what KIND of 
 A question that asks the robot to do something ("can you put the <A> on the <B>?") is an action.
 "evidence": copy, word for word, the part of the request that shows the kind.
 Answer with ONE JSON object only: {"kind": "question" | "description" | "action", "evidence": "<words copied from the request>"}"""
+
+DECIDE_SYSTEM = """You supervise a robot arm that works for a user. Workers do the work and report back; you decide what
+happens next. You see the user's goal, the progress so far (steps, their results, the robot's state) and the latest
+event: a worker's result, a check that did not confirm a sub-goal, or the goal not yet shown by measurement.
+Choose ONE action:
+  "continue"  keep the remaining plan as it is
+  "replan"    give the remaining steps (they replace the pending ones); each step uses ONE of:
+{menu}
+  "ask_user"  ask the user one short question, when only the user can settle it (e.g. which of several objects)
+  "finish"    the goal is reached (it will still be checked by measurement)
+  "stop"      the goal cannot be achieved with these capabilities or safely; say why in "reason"
+Use the evidence in the progress and the event. Do not repeat a step that failed unless something has changed.
+Copy the user's own words for objects, or use "#<id>" for measured objects. Answer with ONE JSON object only:
+{{"action": "...", "steps": [...], "question": "...", "reason": "<short>"}}
+Examples:
+(a step could not find <A> in view) -> {{"action": "replan", "steps": [{{"do": "explore", "object": "<A>", "near": null}}, {{"do": "locate", "object": "<A>"}}], "reason": "look for it from another view"}}
+(an answer was not certain; objects #3 and #5 could settle it) -> {{"action": "replan", "steps": [{{"do": "inspect", "object": "#3"}}, {{"do": "answer", "question": "<the question>"}}], "reason": "closer look first"}}
+(several objects match <A>) -> {{"action": "ask_user", "question": "Which <A> do you mean?", "reason": "ambiguous"}}
+(the step worked as planned) -> {{"action": "continue", "reason": "on track"}}"""

@@ -48,9 +48,7 @@ def main() -> int:
         t0 = time.monotonic()
         try:
             p = roles.plan_goal(text, planner_menu())
-            from agent.planning import complete_plan
-            raw = [s.capability for s in p.steps]
-            complete_plan(p, text)
+            raw = [s.capability for s in p.steps]  # Gemma's plan as is (no completion rules since 2026-10-18)
             got = [s.capability for s in p.steps]
             got_pp = [(norm(s.args["object"]["text"]), s.args["relation"], norm(s.args["reference"]["text"]))
                       for s in p.steps if s.capability == "pick_place"]

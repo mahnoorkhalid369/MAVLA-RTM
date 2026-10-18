@@ -170,19 +170,24 @@ def test_nondeterministic_planning_failure_is_still_replanned(tmp_path, monkeypa
         raise PlanningError("descend to grasp: collision, pads with tube_3 (0.4 mm)")
     monkeypatch.setattr(t, "plan_pick", collides)
     r, ev = run_in(tmp_path, "1", t)
-    assert r["status"] == "FAILED" and r["replans"] == 1 and len(t.plan_calls) == 2 and t.executed == []
+    assert r["status"] == "FAILED" and len(t.plan_calls) == 2 and t.executed == []
     assert [e["accepted"] for e in ev if e["kind"] == "replan"] == [False]  # same step, unchanged situation
+    assert r["replans"] == 2  # the rejected re-plan, then Gemma had nothing more (both count against the budget)
 
 
-def test_deterministic_infeasibility_is_not_replanned(tmp_path, monkeypatch):
+def test_infeasibility_goes_to_gemma_and_an_identical_retry_is_rejected(tmp_path, monkeypatch):
+    """Behaviour change (2026-10-18): the reachability check still refuses the motion, but the result is no longer
+    classified by its error text as 'never replan': Gemma sees it; an identical retry is rejected deterministically."""
     from control.motion import PlanningError
     t = session([plan(PICK_A), plan(PICK_A)])
 
     def unreachable(*a, **k):
         raise PlanningError("grasp approach: [302, 148, 206] mm is out of reach")
     monkeypatch.setattr(t, "plan_pick", unreachable)
-    r, _ = run_in(tmp_path, "1", t)
-    assert r["status"] == "FAILED" and r["outcome"] == "infeasible" and len(t.plan_calls) == 1 and t.executed == []
+    r, ev = run_in(tmp_path, "1", t)
+    assert r["status"] == "FAILED" and r["outcome"] == "infeasible" and t.executed == []
+    assert "out of reach" in t.decide_calls[0]["event"]
+    assert [e["accepted"] for e in ev if e["kind"] == "replan"] == [False]
     assert r["holding"] is None
 
 
@@ -214,7 +219,8 @@ def test_decomposition_whose_final_state_is_not_reached_is_not_success(tmp_path)
     _decomposer(t, SubPlan.model_validate({"steps": [{"do": "pick_place", "object": "#1", "relation": "on", "target": "#2"}],
                                            "goal": [{"pred": "on", "args": ["#3", "#2"]}], "reason": "wrong object"}))
     r, _ = run_in(tmp_path, "1", t)
-    assert r["status"] == "FAILED" and "goal is not met" in r["message"] and "did not report success" in r["message"]
+    assert r["status"] == "FAILED" and "goal is not shown" in r["message"] and "did not report success" in r["message"]
+    assert "on(#3, #2)" in t.decide_calls[0]["event"]  # the unmet condition is what Gemma decides from
 
 
 # ------------------------------------------------------------------------------- uncertainty-driven inspection
@@ -229,7 +235,12 @@ def test_uncertain_answer_triggers_a_closer_look_then_answers_again(tmp_path, mo
                SceneAnswer(answer="object 3", object_ids=[3])]
     t = session([plan(("observe", {}), ("answer", {"question": "which small one is round?"}))])
     t.roles.answer = lambda q, f, ids: answers.pop(0)
+    # Gemma (not a rule) decides the closer look from the worker's uncertainty and advice
+    t.decisions = [lambda: {"action": "replan", "steps": [{"do": "inspect", "object": "#%d" % t.ids[1]},
+                                                          {"do": "inspect", "object": "#%d" % t.ids[3]},
+                                                          {"do": "answer", "question": "which small one is round?"}]}]
     r, ev = run_in(tmp_path, "1", t)
+    assert "not certain" in t.decide_calls[0]["event"] and "suggests: closer_look" in t.decide_calls[0]["event"]
     assert r["status"] == "COMPLETED" and inspected == ["#%d" % t.ids[1], "#%d" % t.ids[3]]
     assert [s["capability"] for s in r["plan"]] == ["observe", "answer", "inspect", "inspect", "answer"]
     assert r["plan"][1]["status"] == "replaced" and "object 3" in r["message"] and "not independently verified" in r["message"]

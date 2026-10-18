@@ -74,14 +74,19 @@ def explore_stub(monkeypatch):
     return calls
 
 
-def test_not_visible_target_triggers_one_exploration_then_locate_again(tmp_path, explore_stub):
-    t = GoalTools([plan(("observe", {}), ("locate", {"object": "zz"})), plan(("observe", {}), ("locate", {"object": "zz"}))],
-                  ambiguous={"zz": []})
+def test_not_visible_target_goes_to_gemma_which_decides_to_explore(tmp_path, explore_stub):
+    """No keyword / needs rule adds the exploration: Gemma decides it from the worker's result."""
+    t = GoalTools([plan(("observe", {}), ("locate", {"object": "zz"}))], ambiguous={"zz": []})
+    t.decisions = [{"action": "replan", "steps": [{"do": "explore", "object": "zz"}, {"do": "locate", "object": "zz"}],
+                    "reason": "not visible: look into hidden regions"},
+                   {"action": "stop", "reason": "still not visible after exploring"}]
     r, ev = run(tmp_path, t)
     assert [s["capability"] for s in r["plan"]] == ["observe", "locate", "explore", "locate"]
     assert [s["status"] for s in r["plan"]][:3] == ["done", "replaced", "done"]
-    assert len(explore_stub) == 1 and any(e["kind"] == "subtask" for e in ev)
+    assert len(explore_stub) == 1 and "insufficient_info" in t.decide_calls[0]["event"]
+    assert "the worker suggests: explore" in t.decide_calls[0]["event"]  # the worker's advice reaches Gemma
     assert r["status"] == "FAILED" and r["outcome"] == "insufficient_info"  # exploring is not finding
+    assert [e["action"] for e in ev if e["kind"] == "gemma_decision"] == ["replan", "stop"]
 
 
 def test_found_after_exploration_completes_the_goal(tmp_path, monkeypatch):
@@ -97,6 +102,7 @@ def test_found_after_exploration_completes_the_goal(tmp_path, monkeypatch):
                                {"mark": 9, "camera": "wrist", "bindings": {"zz": 1}})
     monkeypatch.setattr(caps, "run_locate", locate)
     t = GoalTools([plan(("observe", {}), ("locate", {"object": "zz"}))])
+    t.decisions = [{"action": "replan", "steps": [{"do": "explore", "object": "zz"}, {"do": "locate", "object": "zz"}]}]
     r, _ = run(tmp_path, t)
     assert r["status"] == "COMPLETED" and r["message"].startswith("looked behind") is False and "found with the wrist camera" in r["message"]
 
@@ -129,12 +135,15 @@ def test_unsafe_failure_is_never_replanned(tmp_path):
     assert r["status"] == "FAILED" and r["outcome"] == "unsafe" and len(t.plan_calls) == 1 and r["replans"] == 0
 
 
-def test_recoverable_failure_replans_once_and_detects_repetition(tmp_path):
-    t = GoalTools([plan(("pick_place", PP)), plan(("pick_place", PP))], placement=(False,))
+def test_a_repeated_failed_step_is_sent_back_to_gemma(tmp_path):
+    """Gemma re-plans the identical failed step although nothing changed: rejected (deterministic guard), Gemma is told
+    why and decides again (here: stop). Each decision counts against the budget."""
+    t = GoalTools([plan(("pick_place", PP))], placement=(False,))
+    t.decisions = [{"action": "replan", "steps": [{"do": "pick_place", **PP}]}, {"action": "stop", "reason": "cannot place it"}]
     r, ev = run(tmp_path, t)
-    assert r["status"] == "FAILED" and r["replans"] == 1 and len(t.plan_calls) == 2
-    assert "Replanning offered nothing different" in r["message"]
+    assert r["status"] == "FAILED" and r["replans"] == 2 and "Gemma stopped: cannot place it" in r["message"]
     assert [e["accepted"] for e in ev if e["kind"] == "replan"] == [False]
+    assert "repeated a failed step" in t.decide_calls[1]["event"]
 
 
 def test_replanned_alternative_can_complete_the_goal(tmp_path):
@@ -182,15 +191,18 @@ def test_planner_menu_lists_only_registry_capabilities():
     assert {s.safety for s in SPECS.values()} == {"read_only", "motion"}
 
 
-def test_plan_completion_rules_are_generic_and_logged(tmp_path):
-    t = GoalTools([plan(("observe", {}))])  # "take a look": observation nobody uses -> reported
-    r, ev = run(tmp_path, t, instruction="Take a look at your surroundings.")
-    assert r["status"] == "COMPLETED" and [s["capability"] for s in r["plan"]] == ["observe", "describe_scene"]
-    assert any(e["kind"] == "plan_completed" for e in ev)
+def test_gemma_plan_is_executed_as_written_and_a_missing_answer_goes_back_to_gemma(tmp_path):
+    """No completion rules rewrite Gemma's plan (behaviour change 2026-10-18). A question whose plan never answers
+    fails the goal check (answered(...) comes from the request kind), and Gemma adds the missing step."""
     t = GoalTools([plan(("observe", {}))])
+    r, ev = run(tmp_path, t, instruction="Take a look at your surroundings.")
+    assert r["status"] == "COMPLETED" and [s["capability"] for s in r["plan"]] == ["observe"] and t.decide_calls == []
+    t = GoalTools([plan(("observe", {})), plan(("answer", {"question": "how many cubes are there?"}))])
+    t.request_kind = "question"
     (tmp_path / "q").mkdir()
-    r, _ = run(tmp_path / "q", t, instruction="How many cubes are there?")  # a question gets an answer step
+    r, _ = run(tmp_path / "q", t, instruction="How many cubes are there?")
     assert [s["capability"] for s in r["plan"]] == ["observe", "answer"] and "not verified" in r["message"]
+    assert "goal is not shown" in t.decide_calls[0]["event"] and r["status"] == "COMPLETED"
 
 
 def test_locate_reports_not_visible_when_no_description_matches(tmp_path, explore_stub):
@@ -212,26 +224,11 @@ def test_counting_answer_must_match_the_cited_objects():
     assert a.answer == "3" and "count again" in vlm.calls[1]
 
 
-def test_replan_that_drops_the_objective_is_rejected(tmp_path, explore_stub):
-    """Regression (live 18:48): 'find the banana' -> locate failed (also after exploring) -> a replan [observe]
-    must not complete the goal."""
+def test_replan_that_drops_the_objective_cannot_complete_the_goal(tmp_path, explore_stub):
+    """Regression (live 18:48): 'find the banana' -> locate failed -> a replan [observe] must not complete the goal:
+    the located(banana) condition stays part of the goal, so the final check fails and the loop stops."""
     t = GoalTools([plan(("observe", {}), ("locate", {"object": "banana"})), plan(("observe", {}))],
                   ambiguous={"banana": [1, 2, 3]})
     r, ev = run(tmp_path, t)
-    assert r["status"] == "FAILED" and "do not see 'banana'" in r["message"]
-    assert [e["reason"] for e in ev if e["kind"] == "replan"] == ["the new plan no longer pursues the failed step (locate)"]
-
-
-def test_explore_at_the_end_of_a_plan_gets_a_locate(tmp_path, explore_stub):
-    t = GoalTools([plan(("explore", {"object": "thing", "near": "b"})), plan(("observe", {}))], ambiguous={"thing": []})
-    r, ev = run(tmp_path, t)
-    assert [s["capability"] for s in r["plan"]] == ["explore", "locate"] and r["status"] != "COMPLETED"
-    assert any(e["kind"] == "plan_completed" for e in ev)
-
-
-def test_planner_explore_needs_the_hiding_place_when_the_instruction_names_one():
-    bad = json.dumps({"steps": [{"do": "explore", "object": "box"}]})
-    good = json.dumps({"steps": [{"do": "explore", "object": "thing", "near": "box"}]})
-    vlm = RecordedVLM([bad, good])
-    p = Roles(vlm).plan_goal("Find the object behind the box.", "menu")
-    assert p.steps[0].args == {"target": "thing", "near": "box"} and "explore.near" in vlm.calls[1]
+    assert r["status"] == "FAILED" and "banana" in r["message"]
+    assert any(c["condition"]["pred"] == "located" and not c["satisfied"] for c in r["goal_check"])

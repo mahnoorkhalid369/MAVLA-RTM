@@ -168,10 +168,35 @@ class GoalTools(StubTools):
             if isinstance(p, Exception):
                 raise p
             return p
+        self.decisions: list = []  # scripted Gemma decisions (Decision / dict / Exception / callable) for the closed loop
+        self.decide_calls: list = []  # what Gemma was given at each decision: {"event", "progress", "context"}
+
+        def decide(goal, progress, event, menu, has_pending, context=""):
+            """Scripted Gemma decision, validated like Roles.decide. Without scripted decisions the next scripted plan
+            is Gemma's re-plan (an empty plan = stop); with neither left, Gemma fails (VLMFailure)."""
+            from agent.vlm_roles import Decision, VLMFailure, check_decision
+            tools.decide_calls.append({"event": event, "progress": progress, "context": context})
+            if tools.decisions:
+                d = tools.decisions.pop(0)
+                d = d() if callable(d) else d  # built at decision time (e.g. from ids measured during the run)
+                if isinstance(d, Exception):
+                    raise d
+                d = d if isinstance(d, Decision) else Decision.model_validate(d)
+            elif tools.plans:
+                p = tools.roles.plan_goal(event, menu, context="\n".join(x for x in (context, progress) if x))
+                d = Decision(action="replan", steps=p.steps, reason=p.reason) if p.steps else \
+                    Decision(action="stop", reason=p.reason or "no plan")
+            else:
+                raise VLMFailure("decide: no scripted decision left")
+            try:
+                check_decision(d, has_pending)
+            except ValueError as exc:
+                raise VLMFailure(f"decide: {exc}") from exc
+            return d
         from agent.vlm_roles import RequestKind
         # the request classifier (agent/authority.py): tests set request_kind; "action" grants every effect
         self.request_kind = "action"
-        self.roles = SimpleNamespace(plan_goal=plan_goal, answer=lambda q, facts, ids: answer or SceneAnswer(answer="two", object_ids=[1]),
+        self.roles = SimpleNamespace(plan_goal=plan_goal, decide=decide, answer=lambda q, facts, ids: answer or SceneAnswer(answer="two", object_ids=[1]),
                                      classify_request=lambda text: RequestKind(kind=tools.request_kind, evidence=text))
 
     def execute(self, steps, label):

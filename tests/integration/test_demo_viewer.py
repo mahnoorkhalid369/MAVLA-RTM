@@ -25,7 +25,7 @@ def test_lines_reflect_only_logged_outcomes():
     assert ok.level == "success" and "confirmed" in ok.text
     assert bad.level == "error" and "OUT OF TOLERANCE" in bad.text and "confirmed" not in bad.text
     home = format_event(ev("verification", check="home", max_error_deg=0.04, tolerance_deg=1.5, tcp_error_mm=0.2, **{"pass": True}))
-    assert home.component == "VERIFY" and "reached" in home.text
+    assert home.component == "VERIFICATION" and "reached" in home.text
     assert format_event(ev("vlm", role="describe", valid=True)) is None  # no noise for each valid call
     q = format_event(ev("question", question="Which one?", candidates=[5, 7]))
     a = format_event(ev("ask_user", answer="choice", mark=5, raw="5", source="terminal"))
@@ -110,7 +110,7 @@ def test_goal_plan_and_steps_are_tracked_and_formatted():
         rs.apply(e, None)
     assert [s["status"] for s in rs.steps] == ["completed", "pending"] and rs.status == "UNSUPPORTED"
     lines = [str(format_event(e)) for e in [ev("goal_plan", goal="g", steps=[], reason="cannot sing")]]
-    assert "cannot sing" in lines[0] and "[PLANNER]" in lines[0]
+    assert "cannot sing" in lines[0] and "[GEMMA]" in lines[0]
 
 
 def stale_run(live_dir: Path) -> None:

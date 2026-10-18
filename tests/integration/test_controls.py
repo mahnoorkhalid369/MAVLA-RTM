@@ -66,7 +66,7 @@ def run_supervisor(tmp_path, tools, controls, instruction="do it"):
 # ------------------------------------------------------------------------------------------- motion modes
 def test_default_controls_are_normal_operation():
     c = ExecutionControls()
-    assert (c.motion, c.disabled, c.max_replans, c.on_event) == ("real", frozenset(), 1, None)
+    assert (c.motion, c.disabled, c.max_replans, c.on_event) == ("real", frozenset(), 3, None)
 
 
 def test_unknown_motion_mode_is_rejected():

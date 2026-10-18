@@ -1,7 +1,6 @@
 """Authorization boundary (agent/authority.py + WorkerRegistry.dispatch), location constraints on targets, and goal
 verification of questions. Mocked execution only (no sim, no robot)."""
 
-import json
 
 import numpy as np
 import pytest
@@ -57,6 +56,7 @@ def test_question_decomposed_into_pick_and_place_moves_nothing(tmp_path):
     t.roles.decompose = lambda goal, facts, ids, context="": SubPlan.model_validate(
         {"steps": [{"do": "pick", "object": "#1"}, {"do": "place", "relation": "on", "target": "#2"}],
          "goal": [{"pred": "on", "args": ["#1", "#2"]}], "reason": "group them"})
+    t.decisions = [{"action": "replan", "steps": [{"do": "answer", "question": QUESTION}]}]  # the question is unanswered
     r, ev = run(tmp_path, t, instruction=QUESTION)
     assert t.executed == [] and t.parks == 0  # no grasp, no carry, not even the parking move for them
     assert {x["capability"] for x in r["refused"]} == {"pick", "place"}
@@ -93,16 +93,6 @@ def test_camera_inspection_stays_available_for_information_requests(tmp_path, mo
 
 
 # --------------------------------------------------------------------------- location constraints
-def test_planner_must_keep_the_location_of_the_target():
-    lost = json.dumps({"goal": "inspect the vial in the buffer tray", "steps": [{"do": "inspect", "object": "purple-capped vial"}]})
-    kept = json.dumps({"goal": "g", "steps": [{"do": "inspect", "object": "purple-capped vial", "object_relation": "in",
-                                              "object_anchor": "buffer tray"}]})
-    vlm = RecordedVLM([lost, kept])
-    p = Roles(vlm).plan_goal("Inspect the purple-capped vial in the buffer tray.", "menu")
-    assert "buffer tray" in vlm.calls[1] and p.steps[0].args == {"target": "purple-capped vial", "relation": "in",
-                                                                  "anchor": "buffer tray"}
-
-
 def test_in_relation_is_measured_containment():
     from agent.tools import Tools
     t = Tools(bridge=None, detector=None, roles=None, executor=None, log=lambda *a, **k: None, run_dir=".")
@@ -136,8 +126,9 @@ def test_a_scene_report_does_not_answer_a_question():
 def test_an_uncertain_answer_does_not_complete_a_question(tmp_path):
     t = question_tools([plan(("observe", {}), ("describe_scene", {}))],
                        answer=SceneAnswer(answer="probably 1 is a tube", object_ids=[1], certain=False))
+    t.decisions = [{"action": "replan", "steps": [{"do": "answer", "question": QUESTION}]}]  # a report is not an answer
     r, _ = run(tmp_path, t, instruction=QUESTION)
-    assert [s["capability"] for s in r["plan"]] == ["observe", "describe_scene", "answer"]  # answer added: report is not one
+    assert [s["capability"] for s in r["plan"]] == ["observe", "describe_scene", "answer"]
     assert r["status"] == "FAILED" and "not certain" in r["message"] and "did not report success" in r["message"]
 
 

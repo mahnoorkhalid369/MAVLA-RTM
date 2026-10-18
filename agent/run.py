@@ -89,6 +89,8 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--motion", default="blocked", choices=["blocked", "dry_run", "real"],
                     help="robot motion (agent/controls.py): blocked (default: nothing is sent), dry_run (planned and "
                          "logged, not sent) or real. Authorization and the simulator's safety layer apply in every mode")
+    ap.add_argument("--max-decisions", type=int, default=None,
+                    help="Gemma decisions per instruction after the first plan (default: agent/controls.py)")
     ap.add_argument("--sim-flag", help="write this file when the models are loaded (rehearsal harness)")
     ap.add_argument("--ask", choices=["terminal", "scripted"], default="terminal",
                     help="who answers clarification questions: the person at this terminal (default) or, for "
@@ -109,7 +111,10 @@ def parser() -> argparse.ArgumentParser:
 def controls_for(args, controls=None):
     """The execution controls of this process: the harness's own, or the --motion mode (default blocked)."""
     from agent.controls import ExecutionControls
-    return controls if controls is not None else ExecutionControls(motion=args.motion)
+    if controls is not None:
+        return controls
+    budget = getattr(args, "max_decisions", None)
+    return ExecutionControls(motion=args.motion) if budget is None else ExecutionControls(motion=args.motion, max_replans=budget)
 
 
 def main(controls=None, on_directive=None, argv=None) -> int:

@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from agent import settings
-from agent.run import parser, sim_command, simulator_on_graph
+from agent.run import controls_for, parser, sim_command, simulator_on_graph
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -35,6 +35,8 @@ def test_the_shipped_settings_are_valid_and_summarised():
     ({"YOLO_CONFIDENCE": 1.5}, "YOLO_CONFIDENCE"),
     ({"ASK": "gemma"}, "ASK"),
     ({"TRACE": "yes"}, "TRACE"),
+    ({"MAX_GEMMA_DECISIONS": -1}, "MAX_GEMMA_DECISIONS"),
+    ({"MAX_GEMMA_DECISIONS": True}, "MAX_GEMMA_DECISIONS"),
 ])
 def test_invalid_settings_are_reported(override, needle):
     assert any(needle in p for p in settings.validate(override))
@@ -55,6 +57,8 @@ def test_launcher_defaults_come_from_the_settings():
     assert a.out.startswith(str(ROOT / settings.OUTPUT_DIR))
     b = ap.parse_args(["--settings", "--motion", "blocked", "--headless"])  # one-run overrides win
     assert b.motion == "blocked" and b.gui is False
+    assert controls_for(a).max_replans == settings.MAX_GEMMA_DECISIONS  # the Gemma decision budget reaches the loop
+    assert controls_for(ap.parse_args(["--settings", "--max-decisions", "0"])).max_replans == 0
 
 
 def test_harnesses_without_settings_keep_the_old_defaults():

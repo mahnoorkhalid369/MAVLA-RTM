@@ -180,6 +180,18 @@ class TerminalResponder:
             rejected.append({"input": line, "reason": why})
             print(f"[agent] {why}. Please answer again.", file=self.out, flush=True)
 
+    def ask(self, text: str) -> str | None:
+        """A free-text question from the supervisor (Gemma's ask_user decision). The person's answer is returned as
+        typed (Gemma interprets it in its next decision); None = no answer (timeout or end of input)."""
+        print(f"\n[QUESTION] {text}", file=self.out, flush=True)
+        print("answer> ", end="", file=self.out, flush=True)
+        try:
+            line = self.reader.get(self.timeout_s if self.timeout_s > 0 else None)
+        except TimeoutError:
+            print(f"\n[agent] no answer within {self.timeout_s:.0f} s", file=self.out, flush=True)
+            return None
+        return None if line is None or not line.strip() else line.strip()
+
 
 class ScriptedResponder:
     """Unattended runs only (rehearsal harness): fixed answers, logged as scripted, never a person."""
@@ -193,3 +205,8 @@ class ScriptedResponder:
         a = a or Answer("cancel", raw=raw)
         a.source = "scripted"
         return a
+
+    def ask(self, text: str) -> str | None:
+        """Free-text question: the next scripted answer ("cancel" counts as no answer)."""
+        raw = self.answers.pop(0) if len(self.answers) > 1 else self.answers[0]
+        return None if raw.strip().lower() == "cancel" else raw

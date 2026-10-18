@@ -6,10 +6,10 @@ ExecutionControls() is normal operation.
                      "dry_run"  planned motions are logged (event tool=execute_dry_run) and NOT executed; the
                                 motion step fails ("dry run: ..."), so nothing downstream assumes the robot moved
                      "blocked"  planned motions are NOT executed; the step fails with blocked_reason
-    disabled         capability names shown to the planner as "(not available yet)" and refused with outcome
-                     "unsupported" if a plan names them anyway (the supervisor's subtask policy does not add a
-                     disabled inspect / explore either)
-    max_replans      supervisor replanning budget per instruction
+    disabled         capability names shown to Gemma as "(not available yet)" and refused with outcome
+                     "unsupported" if a plan names them anyway
+    max_replans      Gemma decision budget per instruction: how many times the supervisor may ask Gemma what to do
+                     next after the first plan (a failure, an uncertain result, a goal not shown); 0 = never
     disabled_reason  completes "<capability> is disabled <reason>" in the refusal
     blocked_reason   the failure reason of a blocked motion
     on_event         optional callback(event, **fields) for a harness log: capability_refused, motion_refused,
@@ -31,7 +31,7 @@ MOTION_MODES = ("real", "dry_run", "blocked")
 class ExecutionControls:
     motion: str = "real"
     disabled: frozenset = frozenset()
-    max_replans: int = 1
+    max_replans: int = 3
     disabled_reason: str = "by the execution controls"
     blocked_reason: str = "motion blocked by the execution controls"
     on_event: Callable | None = None

@@ -93,6 +93,7 @@ PROMPT_SHA256_16 = {  # identical to the prompts before the 2026-10-17 restructu
     "ANSWER_PROMPT": "89876bc14da608e2",
     "COMPARE_PROMPT": "d9c0c00cf26b401e",
     "CONFIRM_PROMPT": "60d867c0f1984edf",
+    "DECIDE_SYSTEM": "a9db8618c6d1d474",  # added 2026-10-18: the closed-loop decision (Roles.decide)
     "DECOMPOSE_PROMPT": "8fbef0fcba9bbf48",
     "DESCRIBE_ONE_PROMPT": "30e7f4389ba0ab9c",
     "DESCRIBE_PROMPT": "c76f8ba28b9ad381",

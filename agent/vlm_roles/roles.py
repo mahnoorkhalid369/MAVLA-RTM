@@ -11,26 +11,50 @@ import numpy as np
 from pydantic import ValidationError
 
 from agent.vlm_roles.gemma import VLM
-from agent.vlm_roles.prompts import (ANSWER_PROMPT, COMPARE_PROMPT, CONFIRM_PROMPT, DECOMPOSE_PROMPT, DESCRIBE_ONE_PROMPT,
-                                     DESCRIBE_PROMPT, PARSE_SYSTEM, PLAN_SYSTEM, REQUEST_SYSTEM, RESOLVE_PROMPT,
-                                     SHORTLIST_PROMPT)
-from agent.vlm_roles.schemas import (Confirmation, Descriptions, GoalPlan, ObjectDescription, RequestKind, Resolution,
-                                     SceneAnswer, Shortlist, SubPlan, TaskSpec, VLMFailure)
+from agent.vlm_roles.prompts import (ANSWER_PROMPT, COMPARE_PROMPT, CONFIRM_PROMPT, DECIDE_SYSTEM, DECOMPOSE_PROMPT,
+                                     DESCRIBE_ONE_PROMPT, DESCRIBE_PROMPT, PARSE_SYSTEM, PLAN_SYSTEM, REQUEST_SYSTEM,
+                                     RESOLVE_PROMPT, SHORTLIST_PROMPT)
+from agent.vlm_roles.schemas import (Confirmation, Decision, Descriptions, GoalPlan, ObjectDescription, PlanStep, RequestKind,
+                                     Resolution, SceneAnswer, Shortlist, SubPlan, TaskSpec, VLMFailure)
 
-# Plan validation rules (deterministic checks of Gemma's plan against the user's own words)
-HIDING_WORDS = re.compile(r"\b(behind|under|beneath|below|inside)\b", re.I)  # English prepositions of hiding
-# A location phrase in the user's request ("in the buffer tray", "at the front of the incoming rack"): its anchor must
-# survive into the plan's steps (validation only: a missing anchor is rejected and asked again, never invented).
-LOCATION_PHRASE = re.compile(
-    r"\b(?:at the front of|at the back of|in front of|on top of|next to|left of|right of|inside|behind|beside|near|in|on)"
-    r"\s+(?:the|a|an)\s+([a-z0-9][a-z0-9\- ]*?)(?=\s*(?:[,.?!;]|$|\band\b|\bthat\b|\bwhich\b|\bwith\b|\bfrom\b|\bto\b|\bfor\b))",
-    re.I)
-WORKSPACE_WORDS = {"table", "bench", "workspace", "floor", "scene", "work surface"}  # the whole scene, not an anchor
+def check_decision(d: Decision, has_pending: bool) -> None:
+    """Structural validation of a closed-loop decision (no language rules): raises ValueError with the reason."""
+    if d.action == "replan":
+        if not d.steps:
+            raise ValueError("replan needs the remaining steps")
+        check_steps(d.steps)
+    if d.action == "continue" and not has_pending:
+        raise ValueError("no steps remain: choose replan, finish, ask_user or stop")
+    if d.action == "ask_user" and not (d.question or "").strip():
+        raise ValueError("ask_user needs a question")
 
 
-def location_anchors(instruction: str) -> list[str]:
-    return [m.group(1).strip().lower() for m in LOCATION_PHRASE.finditer(instruction or "")
-            if m.group(1).strip().lower() not in WORKSPACE_WORDS]
+def check_steps(steps: list[PlanStep], max_steps: int = 6) -> None:
+    """Structural validation of planned steps (schema-level: each capability gets the arguments it needs); raises
+    ValueError with what to fix, which Gemma sees on its one retry. No interpretation of the user's words."""
+    if len(steps) > max_steps:
+        raise ValueError(f"at most {max_steps} steps")
+    for i, st in enumerate(steps, 1):
+        if st.do == "pick_place":
+            if not (st.object and st.relation and st.target):
+                raise ValueError(f"step {i}: pick_place needs object, relation and a real target object; with no "
+                                 "destination use pick")
+            if st.object_anchor and st.object_anchor.strip().lower() == st.target.strip().lower() \
+                    and st.object_relation == st.relation:
+                raise ValueError(f"step {i}: object_relation / object_anchor repeat the destination; leave them "
+                                 "out unless the user describes where the object to move is now")
+            if bool(st.object_anchor) != bool(st.object_relation):
+                raise ValueError(f"step {i}: object_relation and object_anchor go together")
+        elif st.do == "pick" and not st.object:
+            raise ValueError(f"step {i}: pick needs object")
+        elif st.do == "place" and not (st.relation and st.target):
+            raise ValueError(f"step {i}: place needs relation and a real target object")
+        elif st.do == "decompose" and not st.goal:
+            raise ValueError(f"step {i}: decompose needs goal")
+        elif st.do in ("locate", "inspect", "explore") and not st.object:
+            raise ValueError(f"step {i}: {st.do} needs object")
+        elif st.do == "answer" and not (st.question or "").strip():
+            raise ValueError(f"step {i}: answer needs question")
 
 
 def _json(text: str):
@@ -98,40 +122,17 @@ class Roles:
         """Goal -> capability plan (one call). Validated deterministically: capability names (schema enum), the keys
         each capability needs (placeholder strings like "null" count as missing), step count, consistency rules."""
         def check(p: GoalPlan):
-            if len(p.steps) > max_steps:
-                raise ValueError(f"at most {max_steps} steps")
-            for i, st in enumerate(p.steps, 1):
-                if st.do == "pick_place":
-                    if not (st.object and st.relation and st.target):
-                        raise ValueError(f"step {i}: pick_place needs object, relation and a real target object; with no "
-                                         "destination use pick")
-                    if st.object_anchor and st.object_anchor.strip().lower() == st.target.strip().lower() \
-                            and st.object_relation == st.relation:
-                        raise ValueError(f"step {i}: object_relation / object_anchor repeat the destination; leave them "
-                                         "out unless the user describes where the object to move is now")
-                    if bool(st.object_anchor) != bool(st.object_relation):
-                        raise ValueError(f"step {i}: object_relation and object_anchor go together")
-                elif st.do == "pick" and not st.object:
-                    raise ValueError(f"step {i}: pick needs object")
-                elif st.do == "place" and not (st.relation and st.target):
-                    raise ValueError(f"step {i}: place needs relation and a real target object")
-                elif st.do == "decompose" and not st.goal:
-                    raise ValueError(f"step {i}: decompose needs goal")
-                elif st.do == "explore" and not st.near and HIDING_WORDS.search(instruction):
-                    raise ValueError(f"step {i}: the instruction says where the thing is hidden; set explore.object to "
-                                     "the thing to find and explore.near to the object it is behind / under")
-                elif st.do in ("locate", "inspect", "explore") and not st.object:
-                    raise ValueError(f"step {i}: {st.do} needs object")
-                elif st.do == "answer" and not (st.question or "").strip():
-                    raise ValueError(f"step {i}: answer needs question")
-            said = " ".join(str(x or "") for st in p.steps for x in (st.object, st.object_anchor, st.target, st.near,
-                                                                    st.question, st.goal)).lower()
-            lost = [a for a in location_anchors(instruction) if a not in said]
-            if lost and p.steps:
-                raise ValueError(f"the user located the object with {lost}: keep it in the step (object_relation + "
-                                 "object_anchor, e.g. \"object_relation\": \"in\", \"object_anchor\": \"" + lost[0] + "\")")
+            check_steps(p.steps, max_steps)
         text = f"{context}\nInstruction: {instruction}" if context else f"Instruction: {instruction}"
         return self._call("plan", GoalPlan, text, system=PLAN_SYSTEM.format(menu=menu), check=check, max_new_tokens=300)
+
+    def decide(self, goal: str, progress: str, event: str, menu: str, has_pending: bool, context: str = "") -> Decision:
+        """The supervisor's next decision in the closed loop, from the goal, the progress (task ledger) and the latest
+        event (a worker result / a check / the goal not shown). Schema-validated; replan steps are checked like a plan."""
+        def check(d: Decision):
+            check_decision(d, has_pending)
+        text = "\n".join(x for x in (context, f"Goal: {goal}", progress, f"Latest: {event}") if x)
+        return self._call("decide", Decision, text, system=DECIDE_SYSTEM.format(menu=menu), check=check, max_new_tokens=350)
 
     def decompose(self, goal: str, facts: str, ids: list[int], context: str = "", max_steps: int = 8) -> SubPlan:
         """Planning over the measured scene: steps and final conditions referring to world objects as #id."""
