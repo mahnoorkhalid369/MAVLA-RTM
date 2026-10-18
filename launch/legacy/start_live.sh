@@ -8,11 +8,11 @@
 #   source /opt/ros/jazzy/setup.bash && python3 ros_nodes/text_command_node.py
 # Ctrl-C stops them all. Other arguments go to sim/run_live.py (e.g. --headless).
 #
-#   ./launch/start_live.sh              # text commands only (microphone off)
-#   ./launch/start_live.sh --voice      # also start the microphone node
-#   ./launch/start_live.sh --headless
+#   ./launch/legacy/start_live.sh              # text commands only (microphone off)
+#   ./launch/legacy/start_live.sh --voice      # also start the microphone node
+#   ./launch/legacy/start_live.sh --headless
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 VOICE=0
 SIM_ARGS=()
 for arg in "$@"; do
@@ -57,7 +57,7 @@ echo "[start_live] camera viewers started: wrist + table camera (q in a window c
 /usr/bin/python3 ros_nodes/command_interpreter.py > out/logs/command_interpreter.log 2>&1 &
 pids+=($!)
 echo "[start_live] command interpreter started. To type instructions, open a second terminal and run:"
-echo "             ./launch/tasks.sh   (free-form tasks, needs ./launch/start_vlm_agent.sh running)"
+echo "             ./launch/legacy/tasks.sh   (free-form tasks, needs ./launch/legacy/start_vlm_agent.sh running)"
 
 if [ "$VOICE" = 1 ]; then
     /usr/bin/python3 ros_nodes/microphone_node.py &

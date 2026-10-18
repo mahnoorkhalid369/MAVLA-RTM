@@ -35,14 +35,16 @@ This guide lists what each folder and module is for and where to look for a give
 | ask the user a question during a task | `agent/ask.py` |
 | change thresholds, tolerances, budgets, model paths | `config/` (`perception.py`, `agent.py`, `models.py`); robot and camera constants: frozen `control/robot.py`; Gemma: `vlm/config.py` |
 | build or change a test scene | `scenarios/` (`laboratory.py`, `parts.py`, `core.py`); small JSON scenes in `scenarios/scenes/` |
-| start the simulator | frozen `sim/run_live.py` (default scene); `sim/run_scenario.py` (test scenes) |
-| validate a scenario | `scenarios/checks.py` (offline); `evaluation/validate_scenarios.py` (Isaac) |
+| start the simulator | `launch/sim.sh` → `sim/run_scenario.py` (test scenes) or frozen `sim/run_live.py` (`--scenario default`) |
+| run the tests | `launch/tests.sh` (all / agent / system / frozen / sim) |
+| run an experiment | `launch/evaluate.sh` (planner / segmentation / validate-scenarios / lab-exp1 / score / ...) |
+| validate a scenario | `scenarios/checks.py` (offline); `launch/evaluate.sh validate-scenarios` → `evaluation/validate_scenarios.py` (Isaac) |
 | see the ROS topics the simulator publishes | `sim/ros_bridge.py` |
 | read the agent's ROS input (cameras, joints) | `agent/ros_bridge.py` `RosBridge` |
 | watch or replay a run | `agent/viewer.py` (live window); `agent/events.py` (event → readable line) |
 | score an experiment | `evaluation/lab_exp1_score.py`, `evaluation/historical/demo_summary.py`, `evaluation/historical/active_summary.py` |
 | evaluate segmentation offline | `evaluation/seg_diagnosis.py`, `evaluation/seg_generalization.py` |
-| write a test with fake tools | `tests/support/fakes.py` (`StubTools`, `GoalTools`, `geom`), `tests/support/runners.py` |
+| write a test with fake tools | `tests/support/fakes.py` (`StubTools`, `GoalTools`, `geom`), `tests/support/runners.py`; put it in `tests/unit/` or `tests/integration/` |
 
 ## 2. Final directory structure
 
@@ -112,14 +114,19 @@ control/ F                   robot model, kinematics, collision, skill planner
 execution/ F                 RosExecutor
 safety/ F                    joint limits
 vlm/                         Gemma loader (model.py, config.py: shared) + legacy planner (L)
-evaluation/                  experiment runners, probes, scorers, scenario validation, studies
+evaluation/                  experiments, probes, scorers, scenario validation, studies (README.md)
+  historical/                earlier-phase scripts (default-scene demo, active perception)
 experiments/                 manipulation baseline experiments (known_pose_* F, payload_study F)
 scripts/                     validation scripts (validate_robot_m1.py F)
 ros_nodes/                   camera viewers; legacy nodes (vlm_agent_node.py P)
-launch/                      agent.sh, sim.sh, tests.sh, evaluate.sh; run.sh P; legacy/
-tests/                       offline tests; tests/support/ shared fakes and runners
+launch/                      agent.sh, sim.sh, tests.sh, evaluate.sh (motion blocked by default)
+  run.sh P, legacy/          the legacy stack (start_live.sh, start_vlm_agent.sh, tasks.sh)
+tests/                       automated tests
+  unit/, integration/        14 + 9 test files
+  support/                   shared fakes and runners
 datagen/, seg/               synthetic data generation; segmentation training (offline tooling)
-docs/                        architecture/, scenarios/, baselines/ (frozen manifest), DEVELOPER_GUIDE.md
+docs/                        DEVELOPER_GUIDE.md, architecture/, scenarios/, validation/, baselines/ (frozen
+                             evidence), history/ (earlier designs, audits, demo reports, LEGACY_SETUP.md)
 assets/ F                    URDF and USD of the VT6L
 ```
 
@@ -166,7 +173,10 @@ config/ <- perception/, agent/          scenarios/ -> perception/viewpoints, fro
 **Entry points kept:**
 
 - `python -m agent.run`, `python -m sim.run_scenario` and `python -m sim.run_live`;
-- `agent/viewer.py`, `evaluation/*.py`, `launch/*.sh`;
+- `agent/viewer.py`, the active `evaluation/*.py` scripts, `launch/run.sh`;
+- changed on 2026-10-18: `launch/start_demo.sh` → `launch/agent.sh` (motion blocked unless `--motion real`);
+  earlier-phase evaluation scripts → `evaluation/historical/`; legacy launchers → `launch/legacy/`;
+  tests → `tests/unit/`, `tests/integration/`; historical docs → `docs/history/`.
 - `from agent.tools import Tools`, `from agent.capabilities import …`, `from agent.vlm_roles import …`.
 
 **Renamed import paths** (no compatibility module was left at the old name):

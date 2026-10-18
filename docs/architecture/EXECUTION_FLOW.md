@@ -261,7 +261,7 @@ flowchart TD
 | 3 | `run_inspect` → `_target_mark` → `run_locate` | resolve the target (§5). In the current-system test the resolver chose a shelf bottle 1.3 m away and `confirm` said **yes** | same folder |
 | 3′ | `_location_check` (since `91429c4`) | would reject that candidate ("not in 'incoming rack'") before viewpoint planning: offline-tested only | `test_wrong_location_target_is_rejected_even_if_it_looks_right` |
 | 4 | `ViewpointPlanner.plan(target, q, Tools.obstacles())` | camera on 0.35 / 0.45 m spheres around the target; IK, line of sight, collision-checked path. For the shelf bottle: "no safe viewpoint: unreachable" → FAILED infeasible, no motion | current-system test |
-| 5 | `Tools.execute([MoveStep])` → `RosExecutor` | move the wrist camera; `bridge.wait_still`; `ViewpointPlanner.reached` (≤ 1.5° per joint) | live in the active-perception phase (default scene): Test B, wrist position 0.7 mm vs table 3.6 mm (`docs/architecture/ACTIVE_PERCEPTION.md` §5) |
+| 5 | `Tools.execute([MoveStep])` → `RosExecutor` | move the wrist camera; `bridge.wait_still`; `ViewpointPlanner.reached` (≤ 1.5° per joint) | live in the active-perception phase (default scene): Test B, wrist position 0.7 mm vs table 3.6 mm (`docs/history/architecture/ACTIVE_PERCEPTION.md` §5) |
 | 6 | `_wrist_observation` → `Tools.perceive("wrist")`, `WorldModel.add_observation` | close-up measurement, association (matched / partial / new), Gemma description of the wrist crop | same |
 | 7 | `run_return_home` → `Tools.return_home`, `verify_home` | arm back to HOME, joint check | same |
 | 8 | `GoalEvaluator._observed` | condition `observed(target, wrist)`: at least one wrist observation of the bound object | — |
@@ -275,7 +275,7 @@ flowchart TD
 |---|---|---|---|
 | 1 | `authority.classify` | kind **action** with verbatim evidence → grants include object_change | design; live probe of "Pick up the vial." |
 | 2 | `Roles.plan_goal` | `pick_place(object="red cube", relation="on", target="green cube")`. **Currently fails offline with the HEAD prompt (BD-1)**; valid with the earlier prompt | `trackA/planner_ab/results.json` |
-| 3 | `run_pick_place` → `_skill("pick_place")` → `PickPlaceWorkflow.run` | a nested LangGraph workflow: | regression F, live, default scene (`ACTIVE_PERCEPTION.md` §5: 187.8 s, 7 Gemma calls, placement 3.9 mm, HOME 0.016°) |
+| 3 | `run_pick_place` → `_skill("pick_place")` → `PickPlaceWorkflow.run` | a nested LangGraph workflow: | regression F, live, default scene (`../history/architecture/ACTIVE_PERCEPTION.md` §5: 187.8 s, 7 Gemma calls, placement 3.9 mm, HOME 0.016°) |
 | 3a | `_observing` | `park_for_view` (arm out of the camera's view), `perceive`, `describe`, `update_world` | |
 | 3b | `_localizing` → `_resolve_one` (×2) | object and destination resolved + confirmed; asks the user if ambiguous | |
 | 3c | `_planning_grasp` → `Tools.plan_pick_place` | `SkillPlanner` with `CollisionChecker(Tools.obstacles())`: hover, approach, close, lift, carry, lower, release, retreat; `PickPlan` | |

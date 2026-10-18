@@ -13,7 +13,7 @@ verification done, and how to undo it.
 ## Revised objective (2026-10-17)
 
 The architecture review at `8b99000` proposed a `src/vt6l/` package, `pyproject` packaging, protocols and import
-contracts (`REFACTOR_ROADMAP.md`, `TARGET_ARCHITECTURE.md`). **That roadmap is superseded by this one.**
+contracts (`../history/architecture/REFACTOR_ROADMAP.md`, `../history/architecture/TARGET_ARCHITECTURE.md`). **That roadmap is superseded by this one.**
 
 The goal now is simpler modular Python:
 
@@ -219,7 +219,7 @@ The full before → after module mapping is in `MODULE_GUIDE.md` §4, and the fi
 | 9 | Supervisor with default controls | the planner menu now comes from `available(())`, which should give identical text and order | `test_planner_menu_lists_only_registry_capabilities` |
 | 10 | The source scan for object words | now scans `agent/**`, the moved perception modules and `config/` (previously `agent/*.py` only). A static replica of the scan found no hits | `test_no_object_knowledge_or_ground_truth_in_agent_code` |
 | 11 | The viewer and system-Python tools | `agent/viewer.py` imports only `agent.events` (unchanged) | `tests/test_demo_viewer.py`; open the viewer once |
-| 12 | Docs outside `docs/architecture/` and `docs/scenarios/` (DEMO.md, historical reports, `docs/perception_redesign/`) | they cite the old paths as historical records and were not rewritten | — |
+| 12 | Docs outside `docs/architecture/` and `docs/scenarios/` (docs/history/DEMO.md, historical reports, `docs/history/perception_redesign/`) | they cite the old paths as historical records and were not rewritten | — |
 
 **Suggested order for manual testing:**
 

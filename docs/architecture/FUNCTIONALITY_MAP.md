@@ -164,12 +164,12 @@ The capabilities live in `agent/capabilities/`, and every name is importable fro
 
 | Part | Files | Status |
 |---|---|---|
-| Previous agent node | `ros_nodes/vlm_agent_node.py` (protected: do not modify), `launch/run.sh` (protected), `launch/start_vlm_agent.sh`, `launch/tasks.sh` | legacy |
+| Previous agent node | `ros_nodes/vlm_agent_node.py` (protected: do not modify), `launch/run.sh` (protected), `launch/legacy/start_vlm_agent.sh`, `launch/legacy/tasks.sh` | legacy |
 | Planner / plan schema | `vlm/planner.py`, `vlm/plan.py`, `vlm/prompts.py` | legacy |
 | Model loader (**shared**) | `vlm/model.py` `VisionLanguageModel`, `vlm/config.py` | **active** (used by `agent/vlm_roles/gemma.py` `GemmaVLM`) |
 | Box grounding (**shared**) | `perception/grounding.py`: `footprint_yaw`, `grasp_pose` used by `perception/geometry.py`; also used by the legacy node and (through the classical detector) the frozen known-pose experiments | mixed |
 | Memory, classical detector | `perception/world_memory.py` (legacy node), `perception/classical_detector.py` (frozen `experiments/known_pose_suite.py`, `scripts/validate_cameras_phaseA.py`, tests) | legacy / shared with frozen code |
-| Text command path | `ros_nodes/command_interpreter.py`, `text_command_node.py`, `microphone_node.py`, `launch/start_live.sh` | legacy (text only; voice off) |
+| Text command path | `ros_nodes/command_interpreter.py`, `text_command_node.py`, `microphone_node.py`, `launch/legacy/start_live.sh` | legacy (text only; voice off) |
 | Camera viewers | `ros_nodes/camera_viewer.py`, `cameras_view.py` | active tools (used by `agent.sh`, `run.sh`) |
 
 ## J. Code removed by the restructuring

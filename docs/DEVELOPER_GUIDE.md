@@ -10,6 +10,19 @@ All commands run from the repository root.
 
 > **Restructured 2026-10-17;** automated verification passed on 2026-10-18 (unit, integration, saved-data, model inference, Isaac Sim + ROS with motion blocked); manual acceptance pending: `docs/validation/FINAL_MAIN_READINESS.md`. Expected results below are from that validation.
 
+## One command per workflow
+
+| Workflow | Command |
+|---|---|
+| Agent (Gemma → YOLO → Isaac → viewer → prompt) | `./launch/agent.sh [--scenario laboratory] [--difficulty easy] [--seed 42] [--motion blocked\|dry_run\|real]` |
+| Simulator only | `./launch/sim.sh [--scenario laboratory\|default\|NAME] [--difficulty …] [--seed …] [--headless]` |
+| Automated tests | `./launch/tests.sh [all\|agent\|system\|frozen\|sim]` |
+| Research experiments | `./launch/evaluate.sh list` |
+
+- **Motion is blocked unless `--motion real`.**
+- Each launcher picks its Python environment and uses ROS domain 42.
+- The sections below show what the launchers run, and how to run single parts by hand.
+
 ## 0. Which Python for what
 
 | Environment | Use it for | Notes |
@@ -32,16 +45,19 @@ while the simulator runs.
 ## 1. Offline tests (no simulator, no GPU, no motion)
 
 ```bash
+./launch/tests.sh            # = the frozen check + the two suites below (expect 389 passed; 202 passed, 29 skipped)
+./launch/tests.sh sim        # Isaac smoke check: laboratory headless, ROS topics, then stop (expect "sim: PASS")
+
 # Robot, safety, perception helpers, scenarios, scorers (agent tests are skipped here):
-/usr/bin/python3 -m pytest                                  # expect: 199 passed, 29 skipped (agent tests need the agent env)
+/usr/bin/python3 -m pytest                                  # expect: 202 passed, 29 skipped (agent tests need the agent env)
 
 # The agent: supervisor, workflows, authorization, session, ask (mocked tools, scripted Gemma):
 env -u PYTHONPATH -u AMENT_PREFIX_PATH .venv-seg/bin/python -m pytest \
     tests/integration/test_agent.py tests/integration/test_agent_ask.py tests/integration/test_supervisor_goal.py \
     tests/integration/test_orchestration.py tests/integration/test_session.py tests/integration/test_authority.py   # expect: 142 passed
 
-# Everything (all 383 tests, incl. controls, structure, saved frames + YOLO) in the agent environment:
-env -u PYTHONPATH -u AMENT_PREFIX_PATH .venv-seg/bin/python -m pytest       # expect: 383 passed
+# Everything (all 389 tests in tests/unit/ and tests/integration/, incl. saved frames + YOLO) in the agent environment:
+env -u PYTHONPATH -u AMENT_PREFIX_PATH .venv-seg/bin/python -m pytest       # expect: 389 passed
 
 # Frozen manipulation baseline unchanged:
 grep -v '^#' docs/baselines/manipulation_A_2026-10-14/MANIFEST.sha256 | sha256sum -c --quiet && echo FROZEN-OK
@@ -88,7 +104,7 @@ Other recorded calls: `t.plan_calls`, `t.home_calls`, `t.parks`. For the pick-an
 **Real Gemma planning, no simulator.** This calls the planner on fixed instructions and checks the plan only:
 
 ```bash
-.venv-seg/bin/python -m evaluation.planner_check --out out/perf/planner_check.json
+./launch/evaluate.sh planner          # = .venv-seg/bin/python -m evaluation.planner_check --out out/eval/planner_check_<time>.json
 ```
 
 Expect failures at the current HEAD (BD-1).
@@ -140,21 +156,22 @@ The scenario code is in `scenarios/` (laboratory definition `scenarios/laborator
 ```
 
 ```bash
-source /opt/ros/jazzy/setup.bash && export ROS_DOMAIN_ID=42 OMNI_KIT_ACCEPT_EULA=YES
-.venv/bin/python -m sim.run_scenario --scenario laboratory --difficulty easy --seed 42            # window
-.venv/bin/python -m sim.run_scenario --scenario laboratory --difficulty easy --seed 42 --headless
+./launch/sim.sh --seed 42                         # laboratory, easy, window
+./launch/sim.sh --difficulty hard --seed 42 --headless
+./launch/sim.sh --scenario default                # the frozen default cube scene
+# what sim.sh runs: source ROS; ROS_DOMAIN_ID=42; .venv/bin/python -m sim.run_scenario --scenario laboratory ...
 ```
 
 - Difficulties: `easy`, `medium`, `hard`.
 - The same seed gives the same layout.
-- The default scene (cubes) is `.venv/bin/python -m sim.run_live`.
 - The scene description is in `docs/scenarios/LABORATORY.md`.
 
 **Validate the scenario.** This is slow: run it alone, in a separate session.
 
 ```bash
-.venv/bin/python evaluation/validate_scenarios.py --scenario laboratory --seed 42 --reload --drop-mm 10   # add --resume to continue
-.venv/bin/python evaluation/validate_scenarios.py --scenario laboratory --difficulty easy --no-design     # quick
+./launch/evaluate.sh validate-scenarios --scenario laboratory --seed 42 --reload --drop-mm 10   # add --resume to continue
+./launch/evaluate.sh validate-scenarios --scenario laboratory --difficulty easy --no-design     # quick
+# results replace out/scenarios/laboratory/<level>_s<seed>/: copy that folder first if you want to keep the old ones
 ```
 
 ## 4. Test cameras and ROS (simulator running, same shell setup)
@@ -167,7 +184,7 @@ ros2 topic hz /table_camera/color/image_raw
     --color-topic /table_camera/color/image_raw --depth-topic /table_camera/depth/image_rect_raw \
     --depth-min 1.2 --depth-max 3.2 --ros-args -r __node:=table_viewer
 /usr/bin/python3 ros_nodes/camera_viewer.py --snapshot out/view.png                 # one frame, then exit
-.venv-seg/bin/python -m evaluation.lab_probe snapshot out/probe.json                # joint states + ground truth (evaluation only)
+./launch/evaluate.sh probe snapshot out/probe.json                                  # joint states + ground truth (evaluation only)
 ```
 
 ## 5. Test perception on its own
@@ -175,23 +192,21 @@ ros2 topic hz /table_camera/color/image_raw
 **Offline, on the 27 saved laboratory frames** (`out/lab_seg_frames/`; no simulator, GPU optional):
 
 ```bash
-.venv-seg/bin/python evaluation/seg_generalization.py out/lab_seg_frames      # approaches A / B / B2 / C vs simulator masks
+./launch/evaluate.sh segmentation                                          # approaches A / B / B2 / C on a copy of the frames
 .venv-seg/bin/python evaluation/seg_diagnosis.py out/lab_exp1/current_system_test
 ```
 
-**Capture new frames:** `.venv/bin/python evaluation/lab_capture_frames.py --out out/lab_seg_frames` (Isaac only;
+**Capture new frames:** `./launch/evaluate.sh capture-frames --out out/lab_seg_frames` (Isaac only;
 no agent running).
 
 **Live perception, no motion.** Start the agent and give an observation-only instruction:
 
 ```bash
-.venv-seg/bin/python -m agent.run --start-sim --scenario laboratory --instruction "Take a look at your surroundings." \
-    --out out/dev/observe
+./launch/agent.sh --scenario laboratory --headless --instruction "Take a look at your surroundings." --out out/dev/observe
 ```
 
-Authorization grants no object changes for this request, and the plan is observe + describe_scene. The arm can
-still move once: `Tools.park_for_view` parks it out of the table camera's view if it is in the way. That is a real
-motion through the frozen executor, so don't run it during refactoring work.
+Motion is blocked by default, so nothing moves. If a step wants to park the arm out of the camera's view, the park
+is refused and logged (`execute_refused`).
 
 ## 6. Run the whole agent
 
@@ -200,11 +215,12 @@ source /opt/ros/jazzy/setup.bash && export ROS_DOMAIN_ID=42
 ./launch/agent.sh                           # Gemma → YOLO → Isaac (window) + viewer; motion BLOCKED
 ./launch/agent.sh --headless --scenario laboratory --difficulty easy --seed 42
 ./launch/agent.sh --motion real                 # the robot moves (simulator)
-.venv-seg/bin/python -m agent.run --start-sim --gui         # the same without the viewer
+./launch/agent.sh --motion dry_run              # motions planned and logged, never sent
+./launch/agent.sh --no-viewer                    # terminal only
 ```
 
-**Motion.** Instructions that ask for object changes ("Put … on …") move the robot. Avoid them during refactoring
-work.
+**Motion.** Only with `--motion real` do instructions that ask for object changes ("Put … on …") move the robot
+(in the simulator). Authorization and the joint-limit safety layer apply in every mode.
 
 ## 7. Inspect logs and outcomes
 
