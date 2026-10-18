@@ -32,6 +32,7 @@ from agent.tools.resolution import ResolutionTools, unit
 from agent.tools.verification import VerificationTools
 from config.agent import Relations, Tolerances
 from control.kinematics import Kinematics
+from perception.viewpoints import CAM_TIP
 from perception.world_model import WorldModel
 
 __all__ = ["Tools", "Observation", "PickPlan", "DescriptionMemory", "mean_rgb", "unit"]
@@ -51,7 +52,7 @@ class Tools(HeldObjectState, PerceptionTools, ResolutionTools, ManipulationTools
         self.view_cleared_at = -1  # motion_count right after the last successful park_for_view
         self.world = WorldModel()
         self.kin = Kinematics()
-        self.wrist_kin = Kinematics(tip="camera_color_optical_frame")
+        self.wrist_kin = Kinematics(tip=CAM_TIP)  # the wrist camera's optical frame
         self.tol, self.rel = Tolerances(), Relations()
         self.held_box = None  # (pose in tool0, size) while holding, from measured geometry
         self._frames = 0

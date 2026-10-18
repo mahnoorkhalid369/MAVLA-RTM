@@ -21,9 +21,11 @@ from dataclasses import asdict, dataclass, field
 
 import numpy as np
 
+from config.agent import REACH_MAX_M, REACH_MIN_M
+
 LIBRARY_VERSION = "1.0"
 DIFFICULTIES = ("easy", "medium", "hard")
-REACH_MIN, REACH_MAX = 0.45, 0.90  # m from the base: reliable top-down picks (grasp-feasibility map, 2026-10-14)
+REACH_MIN, REACH_MAX = REACH_MIN_M, REACH_MAX_M  # m from the base: reliable top-down picks (config/agent.py)
 MAX_GRIP_WIDTH = 0.080  # m (2F-85 opens 85 mm; skills keep 5 mm margin)
 # Kept clear for the frozen scene's props (sim/scene_objects.py): microphone and the table-camera stand
 KEEP_CLEAR = [((-0.45, 0.35), 0.09), ((1.5, 0.25), 0.20)]

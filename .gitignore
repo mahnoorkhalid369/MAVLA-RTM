@@ -1,6 +1,7 @@
 # environments and downloaded models (large, reproducible)
 .venv/
 .venv-vlm/
+.venv-seg/
 models/
 __pycache__/
 *.pyc

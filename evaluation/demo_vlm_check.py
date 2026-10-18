@@ -13,6 +13,7 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from perception.detector import YoloDetector  # noqa: E402
+from config.models import YOLO_WEIGHTS  # noqa: E402
 from perception.somark import draw_marks, draw_names, isolate  # noqa: E402
 from agent.vlm_roles import GemmaVLM, Roles  # noqa: E402
 from seg.evaluate import iou_matrix  # noqa: E402
@@ -28,7 +29,7 @@ def main() -> int:
     events = []
     log = lambda kind, **f: events.append({"kind": kind, **f})  # noqa: E731
     roles = Roles(GemmaVLM(), log)
-    det = YoloDetector(str(ROOT / "out/seg/runs/yolo11s_seg_r1/weights/best.pt"))
+    det = YoloDetector(str(YOLO_WEIGHTS))
     d = ROOT / "data/perception/eval_layouts/today"
     A = json.loads((d / "annotations.json").read_text())
     rgb = cv2.cvtColor(cv2.imread(str(d / "images/today_000.png")), cv2.COLOR_BGR2RGB)

@@ -31,6 +31,7 @@ def main() -> int:
     ap.add_argument("--modes", nargs="+", default=["single", "batched"])
     a = ap.parse_args()
     from perception.detector import YoloDetector
+    from config.models import YOLO_WEIGHTS
     from perception.somark import draw_marks
     from agent.tools import Observation, Tools
     from agent.vlm_roles import GemmaVLM, Roles
@@ -39,7 +40,7 @@ def main() -> int:
     events = []
     log = lambda kind, **f: events.append({"kind": kind, **f})  # noqa: E731
     vlm = GemmaVLM()
-    det = YoloDetector(str(ROOT / "out/seg/runs/yolo11s_seg_r1/weights/best.pt"))
+    det = YoloDetector(str(YOLO_WEIGHTS))
     d = ROOT / "data/perception/eval_layouts/today"
     A = json.loads((d / "annotations.json").read_text())
     rgb = cv2.cvtColor(cv2.imread(str(d / "images/today_000.png")), cv2.COLOR_BGR2RGB)

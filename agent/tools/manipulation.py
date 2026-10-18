@@ -8,6 +8,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from config.agent import REACH_MAX_M, REACH_MIN_M
 from config.perception import FIXTURES
 from control.collision import Box, CollisionChecker
 from control.motion import PlanningError, joint_move
@@ -120,7 +121,7 @@ class ManipulationTools:
                 dd = np.array([d[0] * np.cos(a) - d[1] * np.sin(a), d[0] * np.sin(a) + d[1] * np.cos(a)])
                 for extra in np.arange(0.0, self.rel.search_max_m + 1e-9, self.rel.search_step_m):
                     xy = ref_xy + dd * (reach + extra)
-                    if not 0.45 <= np.hypot(*xy) <= 0.90:  # reliable pick/place ring (feasibility map, measured)
+                    if not REACH_MIN_M <= np.hypot(*xy) <= REACH_MAX_M:  # reliable pick/place ring (feasibility map, measured)
                         continue
                     if self._too_close(xy, g, exclude=None):
                         continue

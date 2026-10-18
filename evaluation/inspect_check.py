@@ -26,6 +26,7 @@ def main() -> int:
     from agent.ask import ScriptedResponder
     from config.agent import Budgets
     from perception.detector import YoloDetector
+    from config.models import YOLO_WEIGHTS
     from agent.eventlog import EventLog
     from agent.ros_bridge import RosBridge
     from agent.tools import Tools
@@ -40,7 +41,7 @@ def main() -> int:
     (run / "images").mkdir(parents=True, exist_ok=True)
     log = EventLog(run / "events.jsonl", echo=True)
     vlm = GemmaVLM()
-    det = YoloDetector(str(ROOT / "out/seg/runs/yolo11s_seg_r1/weights/best.pt"))
+    det = YoloDetector(str(YOLO_WEIGHTS))
     bridge, ex = RosBridge(), RosExecutor()
     truth = Truth(bridge.node)
     assert bridge.ready(300) and ex.wait_ready(120)

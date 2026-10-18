@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from config.agent import REACH_TOLERANCE_DEG
 from control.collision import CollisionChecker
 from control.kinematics import Kinematics
 from control.motion import joint_move
@@ -36,7 +37,7 @@ ELEVATIONS_DEG = (60.0, 40.0)  # camera above the target, from the horizontal
 AZIMUTH_STEP_DEG = 45.0
 MIN_DEPTH = 0.20
 LIMIT_MARGIN = np.radians(5.0)
-REACH_TOL_DEG = 1.5
+REACH_TOL_DEG = REACH_TOLERANCE_DEG  # config/agent.py: the executor's validated reach tolerance
 MAX_CANDIDATES_EXECUTED = 2
 VIEW_PAD = 0.010  # m: line-of-sight clearance from measured objects
 REGION_RADIUS = 0.03  # m: a hidden region is seen only if points this far around its centre are all visible

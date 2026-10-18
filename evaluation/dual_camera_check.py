@@ -33,6 +33,7 @@ def main() -> int:
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
     from perception.detector import YoloDetector
+    from config.models import YOLO_WEIGHTS
     from agent.ros_bridge import RosBridge
     from agent.tools import Tools
     from perception.world_model import WorldModel
@@ -44,7 +45,7 @@ def main() -> int:
     end = time.monotonic() + 30
     while truth.latest is None and time.monotonic() < end:
         time.sleep(0.2)
-    det = YoloDetector(str(ROOT / "out/seg/runs/yolo11s_seg_r1/weights/best.pt"))
+    det = YoloDetector(str(YOLO_WEIGHTS))
     out = Path(a.out)
     (out.parent / "cp2_images").mkdir(parents=True, exist_ok=True)
     t = Tools(bridge, det, None, None, lambda *x, **k: None, out.parent / "cp2_images")

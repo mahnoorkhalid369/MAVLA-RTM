@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from config.agent import REACH_TOLERANCE_DEG
 from control.robot import ARM_HOME, gripper_gap
 
 if TYPE_CHECKING:
@@ -13,7 +14,7 @@ if TYPE_CHECKING:
 
 
 class VerificationTools:
-    HOME_TOLERANCE_DEG = 1.5  # per joint: RosExecutor's validated reach tolerance (a step fails beyond it)
+    HOME_TOLERANCE_DEG = REACH_TOLERANCE_DEG  # per joint: RosExecutor's validated reach tolerance (config/agent.py)
 
     def verify_contact(self, close_target: float) -> dict:
         finger = self.bridge.finger()

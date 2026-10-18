@@ -4,6 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+# Reliable top-down pick / place ring around the robot base axis (grasp-feasibility map, 2026-10-14), metres.
+# Used by placement search (agent/tools/manipulation.py) and scenario design (scenarios/core.py).
+REACH_MIN_M, REACH_MAX_M = 0.45, 0.90
+# Per-joint reach tolerance validated for the frozen executor (a step fails beyond it), degrees. Used by the HOME
+# check (agent/tools/verification.py) and the wrist-viewpoint reach check (perception/viewpoints.py).
+REACH_TOLERANCE_DEG = 1.5
+
 
 @dataclass
 class Tolerances:
