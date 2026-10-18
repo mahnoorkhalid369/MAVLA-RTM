@@ -341,3 +341,44 @@ This rewrites local `main` only, and only with your approval.
 **Merge-conflict risk:** none, since `main` has no commits of its own. The other branches stay as they are
 (`feature/active-perception`, `feature/scenario-library`, `refactor/goal-supervisor` are already contained; see
 section 10). Delete none without your approval.
+
+## 13. Addendum: repository simplification (2026-10-18), decision unchanged: READY FOR MANUAL ACCEPTANCE
+
+The core architecture is unchanged: no module moved between `agent/`, `perception/`, `config/`, `scenarios/`,
+`sim/`, `datagen/` and `seg/`, and the frozen files did not move.
+
+**Changes** (commits `e671227` … `f7a5e22`):
+
+| Change | Detail |
+|---|---|
+| Stale viewer fix | A fresh agent launch clears the previous task and detection overlays; the viewer shows "(waiting for an instruction)". Cause: the live files were never cleared. Regression tests in `tests/integration/test_demo_viewer.py` (2 fail without the fix) |
+| `agent.run --motion blocked\|dry_run\|real` | Default **blocked**; `--difficulty` / `--seed` for the started scene. Harnesses with their own controls keep them |
+| Launchers | `launch/agent.sh`, `sim.sh`, `tests.sh`, `evaluate.sh`. `launch/start_demo.sh` was removed after `agent.sh` was verified with all its options |
+| `evaluation/historical/` | 10 earlier-phase scripts; active experiment commands unchanged |
+| `tests/unit/` (14 files), `tests/integration/` (9 files) | The same 389 test ids |
+| `docs/history/` | Historical documents and the previous README (`LEGACY_SETUP.md`); `README.md` is the entry point |
+| `launch/legacy/` | The legacy launchers. `launch/run.sh` is protected and stays |
+| `.vscode/settings.json` | The Explorer hides git-ignored files (`.venv*`, `models/`, `data/`, `out/`, `epson-robot-ros2/`, caches, logs); `out/` stays searchable |
+| Root logs | The ten old root `*.log` files moved (not deleted) to `out/logs/root_2026-09-30_to_10-07/` |
+
+**Verification after the changes:**
+
+| Check | Result |
+|---|---|
+| `./launch/tests.sh` | frozen baseline OK; `.venv-seg` **389 passed**; `/usr/bin/python3` **202 passed, 29 skipped** (= 199 + the 3 new viewer tests) |
+| Saved-frame geometry | **466 / 466 masks identical** to the pre-restructuring code |
+| `./launch/tests.sh sim` | PASS: laboratory headless, 9 required topics, `/joint_states` publishing, clean stop |
+| `./launch/sim.sh` | laboratory medium seed 7 headless loaded; second instance refused |
+| `./launch/evaluate.sh` | `score` reproduces the recorded Experiment 1 corrected score (on a copy of `run1`); `planner` 5 / 12 (BD-1, unchanged) |
+| `./launch/agent.sh --scenario laboratory --headless` | BLOCKED banner; "Take a look" COMPLETED (14 objects); "Pick up the vial." refused 3 park motions, **0 sent**; viewer first showed "(waiting for an instruction)" although the previous run's files were present, then the new task with this run's detections |
+| Legacy launchers in `launch/legacy/` | syntax-checked and the root path verified; not run live (they start the legacy stack and its windows) |
+
+**Command changes:**
+
+| Old | New |
+|---|---|
+| `./launch/start_demo.sh [opts]` | `./launch/agent.sh [opts]` (add `--motion real` to move) |
+| `python -m agent.run …` (moved the robot) | `python -m agent.run … --motion real` |
+| `python -m evaluation.demo_rehearsal` (and the other 9 historical scripts) | `python -m evaluation.historical.demo_rehearsal` |
+| `./launch/start_live.sh`, `start_vlm_agent.sh`, `tasks.sh` | `./launch/legacy/…` |
+| `tests/test_X.py` | `tests/unit/test_X.py` or `tests/integration/test_X.py` |
