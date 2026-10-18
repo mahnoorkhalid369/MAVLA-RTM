@@ -89,17 +89,18 @@ def test_library_scenario_registry_resolves():
 
 
 # --------------------------------------------------------------------------- agent: registry and prompts
-PROMPT_SHA256_16 = {  # identical to the prompts before the 2026-10-17 restructuring (commit aa9a6a4)
-    "ANSWER_PROMPT": "89876bc14da608e2",
+PROMPT_SHA256_16 = {  # deliberate prompt versions; 2026-10-18: shared robot identity (IDENTITY_SYSTEM) and first-person wording
+    "ANSWER_PROMPT": "c10ead90d926c631",
     "COMPARE_PROMPT": "d9c0c00cf26b401e",
     "CONFIRM_PROMPT": "60d867c0f1984edf",
-    "DECIDE_SYSTEM": "a9db8618c6d1d474",  # added 2026-10-18: the closed-loop decision (Roles.decide)
-    "DECOMPOSE_PROMPT": "8fbef0fcba9bbf48",
+    "DECIDE_SYSTEM": "04bb04f3a9c0ecaf",
+    "DECOMPOSE_PROMPT": "96bdb7d34f3530ff",
     "DESCRIBE_ONE_PROMPT": "30e7f4389ba0ab9c",
     "DESCRIBE_PROMPT": "c76f8ba28b9ad381",
+    "IDENTITY_SYSTEM": "3ebcae62cf2ad72a",
     "PARSE_SYSTEM": "35cb5a94bc3508a9",
-    "PLAN_SYSTEM": "0f14440da0535f1c",
-    "REQUEST_SYSTEM": "be95de3b6adede69",
+    "PLAN_SYSTEM": "c97a153238c3babe",
+    "REQUEST_SYSTEM": "812fa5277d18fc2a",
     "RESOLVE_PROMPT": "8195f33d0eec2a60",
     "SHORTLIST_PROMPT": "32ae760793cc8575",
 }

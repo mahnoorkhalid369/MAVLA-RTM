@@ -12,8 +12,8 @@ from pydantic import ValidationError
 
 from agent.vlm_roles.gemma import VLM
 from agent.vlm_roles.prompts import (ANSWER_PROMPT, COMPARE_PROMPT, CONFIRM_PROMPT, DECIDE_SYSTEM, DECOMPOSE_PROMPT,
-                                     DESCRIBE_ONE_PROMPT, DESCRIBE_PROMPT, PARSE_SYSTEM, PLAN_SYSTEM, REQUEST_SYSTEM,
-                                     RESOLVE_PROMPT, SHORTLIST_PROMPT)
+                                     DESCRIBE_ONE_PROMPT, DESCRIBE_PROMPT, IDENTITY_SYSTEM, PARSE_SYSTEM, PLAN_SYSTEM,
+                                     REQUEST_SYSTEM, RESOLVE_PROMPT, SHORTLIST_PROMPT)
 from agent.vlm_roles.schemas import (Confirmation, Decision, Descriptions, GoalPlan, ObjectDescription, PlanStep, RequestKind,
                                      Resolution, SceneAnswer, Shortlist, SubPlan, TaskSpec, VLMFailure)
 
@@ -57,6 +57,11 @@ def check_steps(steps: list[PlanStep], max_steps: int = 6) -> None:
             raise ValueError(f"step {i}: answer needs question")
 
 
+# Roles that reason as the robot (what it is, what it can do, its directions) get IDENTITY_SYSTEM in front of their
+# system prompt. The perception roles (describe, shortlist, resolve, compare, confirm) judge images only: no identity.
+EMBODIED_ROLES = {"request", "plan", "decide", "decompose", "answer"}
+
+
 def _json(text: str):
     text = re.sub(r"```(?:json)?", "", text).strip()
     starts = [i for i in (text.find("{"), text.find("[")) if i >= 0]
@@ -73,6 +78,8 @@ class Roles:
         self.calls, self.tokens = 0, {"prompt": 0, "answer": 0, "images": 0}  # instrumentation (per session)
 
     def _call(self, role: str, schema, text: str, image=None, system=None, check=None, max_new_tokens: int = 400):
+        if role in EMBODIED_ROLES:  # the robot's identity, once, in front of the role's own instructions
+            system = IDENTITY_SYSTEM + ("\n\n" + system if system else "")
         error = None
         for attempt in (1, 2):  # one retry with the validation error
             prompt = text if error is None else f"{text}\n\nYour previous answer was not valid ({error}). Answer again with only the JSON."
