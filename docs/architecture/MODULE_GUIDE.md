@@ -83,7 +83,7 @@ agent/                       orchestration: one instruction -> verified result
     held.py                  held-object / session state
     perception.py            perceive, describe, update_world, is_fresh, Observation
     memory.py                DescriptionMemory
-    resolution.py            resolve, lexical check, compare, confirm, relation_holds
+    resolution.py            resolve (Gemma), confirm (Gemma), relation_holds (measured)
     manipulation.py          grasp / place planning, park_for_view, return_home, PickPlan
     execution.py             execute (motion gate)
     verification.py          verify_contact, verify_home, verify_placement

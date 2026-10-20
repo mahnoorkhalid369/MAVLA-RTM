@@ -52,7 +52,7 @@ The perception roles judge images without it.
 3. **every decision a result calls for** (`Roles.decide`, prompt `DECIDE_SYSTEM`, schema `Decision`):
    - after a failed step;
    - after an uncertain answer or an unverified sub-goal;
-   - after a worker suggests something (`needs`: explore, closer_look, clarification, ...);
+   - after a worker reports something it needs (`needs`, only when the worker itself says so);
    - when every step ran but the goal is not shown;
    - after the user answers Gemma's question;
 4. multi-object decomposition (`decompose`) over the measured objects;
@@ -78,8 +78,6 @@ Gemma's five actions:
 - Kinematics, collision checks, reachability and joint limits, in frozen `control/`, the executor and the simulator.
 - The bounds:
   - a re-plan whose first step already failed, with no motion since, is sent back to Gemma with the reason;
-  - a re-plan cannot drop what the user asked to move or find: the dropped condition stays in the goal unless a
-    later step pursues the same kind of objective.
 
 **Bounds:**
 
@@ -126,7 +124,7 @@ Gemma's five actions:
 | `evidence` | frames, verifications, conditions |
 | `confidence` | measured / model / none |
 | `uncertainty` | what is not settled |
-| `needs` | advisory: observation, closer_look, explore, clarification, replan, stop |
+| `needs` | advisory, only what the worker itself reports (Python suggests no next operation) |
 | `tools` | the tools and Gemma roles invoked, in order |
 | `failure_reason`, `metrics` | why it failed; seconds and Gemma calls |
 
@@ -251,7 +249,7 @@ and `test_planner_explore_needs_the_hiding_place_*` were removed with their rule
 
 - the loop above, one subtask at a time, with the real `WorkerResult` returned to the supervisor;
 - the five Gemma actions, validation and retry (`test_roles_decide_validates_and_retries_with_the_error`);
-- the budget, the repeated-step guard and the objective guard;
+- the budget and the repeated-step guard;
 - safety and authorization stops that never ask Gemma;
 - structured contracts on every delegation;
 - measured sub-goal and goal verification;
@@ -263,7 +261,7 @@ only when `ASK = "scripted"`.
 
 **Embodied instructions (2026-10-20):** see `docs/validation/LOOK_VALIDATION.md`.
 
-- **`look`** (inspection worker) points the wrist camera left, right, forward, backward or down in an explicit
+- **`look`** (inspection worker) points the wrist camera along a direction vector [x, y, z] in an explicit
   frame. It uses the existing viewpoint planner with collision checks, then takes a wrist observation, and the arm
   stays at the viewpoint.
 - **`viewing(direction)`** measures where the camera looks from joint feedback, as a sub-goal and in the goal check.
@@ -279,20 +277,21 @@ only when `ASK = "scripted"`.
 - **Not yet run live.** `DECIDE_SYSTEM` has not been run on the real Gemma 4 E2B. Its JSON validity is the main risk:
   the planning prompt is valid on 3 of 8 offline cases (**BD-1**). An invalid decision ends the instruction with
   "Gemma could not decide". Gemma is called after one retry, and each decision adds Gemma latency.
-- **Language rules that remain, by instruction:**
-  - inside the perception algorithms (`GENERIC_WORDS` and the lexical cross-checks in target resolution);
-  - in `agent/ask.py`'s parsing of the user's answer to the skill's "which object?" question (cancel / yes / no /
-    nearest words, numbers);
-  - in the skill's failure classification by error text.
-
-  These sit inside perception and manipulation, which this task left unchanged.
-- **The objective guard works by capability kind.** A re-plan that moves or finds a different object than asked
-  still counts as pursuing the objective. The final measured check catches it only if the original condition is
-  still in the goal.
+- **No language rules remain in the agent code (cleanup 2026-10-20, `docs/validation/CLEANUP_2026-10-20.md`).**
+  What remains is structural:
+  - `#id` reference syntax;
+  - the number protocol of the "which object?" question;
+  - verbatim-evidence authorization;
+  - classification of the planner's own error strings (`Tools.deterministic`, the "safety" rejection), awaiting
+    typed errors.
+- **No objective guard.** A re-plan may drop what the user asked for; the goal is whatever Gemma's current plan
+  sets. `test_replan_that_drops_the_objective_*` is a strict xfail until the goal is owned by Gemma for the whole
+  task (next phase).
 - **What is verified.** Measurable predicates (holding, relations, located, observed, at_home) are measured. Answers
   and reports are model outputs. A question is complete only if Gemma's answer is certain, and it is reported as
   "not independently verified".
-- **Fixed capabilities.** Gemma composes the registered capabilities and cannot add new skills. A new skill is a new
-  capability (spec, executor, worker), with no change to the loop.
+- **Open names, finite implementations.** Gemma may name any operation. Only the implemented ones run; others are
+  reported "not implemented" and never substituted. A new operation is a spec (argument interface, effect, safety) +
+  an executor, with no change to the supervisor.
 - **Perception limits** (single-camera views, robot self-filtering: BD-4, BD-5, BD-9) are outside this
   architecture.

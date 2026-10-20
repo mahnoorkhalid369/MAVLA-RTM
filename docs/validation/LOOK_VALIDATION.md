@@ -96,7 +96,7 @@ Errors are measured from joint feedback after the move:
   look-at IK did not converge (seeds: the current pose and HOME).
 - **The arm stays at the viewpoint after `look`** (by design, so that the view can be measured). The next motion,
   or `return_home`, moves it.
-- **Directions are fixed:** left, right, forward, backward and down, in the robot frame or the fixed camera's
+- **Directions (superseded 2026-10-20: `look` now takes a vector [x, y, z]; see CLEANUP_2026-10-20.md).** At the time: left, right, forward, backward and down, in the robot frame or the fixed camera's
   picture frame. "Up", angles ("a bit to the left") and the user's own frame ("my left") are not supported; a word
   outside the vocabulary fails validation rather than being guessed.
 - **What the view proves.** The verification measures where the camera points, not what it saw.

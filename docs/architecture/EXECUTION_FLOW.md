@@ -21,7 +21,7 @@ Where the functions named below live:
 | `run_pick`, `run_place`, `run_pick_place`, `run_return_home`, `_failure_outcome` | `agent/capabilities/manipulation.py` |
 | `run_decompose` | `agent/capabilities/planning.py` |
 | `Tools.perceive`, `describe`, `update_world`, `is_fresh` | `agent/tools/perception.py` |
-| `Tools.resolve`, `lexical_candidates`, `confirm`, `relation_holds` | `agent/tools/resolution.py` |
+| `Tools.resolve`, `confirm`, `relation_holds` | `agent/tools/resolution.py` |
 | `Tools.plan_*`, `park_for_view`, `return_home`, `obstacles` | `agent/tools/manipulation.py` |
 | `Tools.execute` | `agent/tools/execution.py` |
 | `Tools.verify_*` | `agent/tools/verification.py` |
@@ -118,17 +118,20 @@ stateDiagram-v2
 
 ## 3. How a tool (capability) is selected and executed
 
-1. **Gemma names capabilities.**
-   - The capability menu comes from `capabilities.planner_menu()`.
-   - The plan schema (`vlm_roles.PlanStep.do`) is a closed enum, so Gemma can only name these capabilities.
-   - Deterministic validation in `Roles.plan_goal.check` rejects missing arguments, placeholders such as "null",
-     missing hiding places and lost location phrases. Gemma gets one retry with the error message.
+1. **Gemma names operations.**
+   - The implemented operations are shown as "available now" (`capabilities.planner_menu()`).
+   - The plan schema (`vlm_roles.PlanStep.do`) is an open string: Gemma may name any operation.
+   - An implemented operation checks its own arguments (`capabilities.specs.adapt_args`: required fields, a relation
+     the geometry can compute, a known frame, a direction vector); Gemma gets one retry with the error message.
+   - An operation nobody implements stays in the plan; when reached it fails as "not implemented" (nothing is
+     executed or substituted) and Gemma decides.
 2. **The supervisor turns each step into a typed request.** `WorkerRegistry.request` builds it, with the
    worker name and safety class taken from `capabilities.SPECS`.
 3. **Authorization.** `WorkerRegistry.dispatch` compares `SPECS[cap].effect` (none / sensing / object_change)
    with the instruction's `RequestAuthority.grants`. If the effect isn't granted, the executor is never called.
-4. **The executor runs.** `GoalSupervisor._executors()` maps the name to a lambda, which calls
-   `caps.run_<name>(ctx, args, …)`.
+4. **The executor runs.** `agent.capabilities.EXECUTORS` maps the operation to its worker and executor, which calls
+   `caps.run_<name>(ctx, args, req)`; plan-position facts (step index, the later steps' safety / effect classes) come
+   in the request context, so the supervisor holds no operation names.
 5. **The result is wrapped.** The capability returns `StepResult(outcome, summary, data)`; the registry wraps it as
    a `WorkerResult` (status, evidence, world changes, Gemma calls, seconds).
 
@@ -156,11 +159,9 @@ flowchart LR
 ```mermaid
 flowchart TD
   S[reference text + optional relation/anchor] --> W{wrist views this instruction?}
-  W -->|yes| FI["_find_in: new objects, lexical / overlap candidates, confirm on crop"]
-  W -->|no or not found| R["Tools.resolve: Roles.resolve over the SoM image + descriptions"]
-  R --> LX["lexical cross-check (description contains every word)"]
-  LX -->|disagreement| CMP[Roles.compare crops side by side]
-  R -->|id None, no lexical match| NV[insufficient_info: not visible]
+  W -->|yes| FI["_find_in: Gemma checks each newly seen object's crop (at most 4)"]
+  W -->|no or not found| R["Tools.resolve: Roles.resolve over the SoM image + descriptions (Gemma's choice stands)"]
+  R -->|id None, no candidates| NV[insufficient_info: not seen]
   R -->|id None, candidates| AMB[ambiguous]
   R -->|id| LOC{"relation + anchor given?"}
   LOC -->|yes| LC["_location_check: resolve anchor, Tools.relation_holds (measured)"]
