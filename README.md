@@ -84,7 +84,7 @@ blocked unless `--motion real`. Commands, environments and the expected test res
 | Where do I configure a run? | `agent/settings.py` (validated at startup; `python -m agent.settings` prints the summary) |
 | Where is the supervisor? | `agent/supervisor.py` (`GoalSupervisor`, a LangGraph state machine); plan rules in `agent/planning.py`; session state in `agent/session.py` |
 | Where are the tools? | `agent/tools/`: one `Tools` object, the agent's only access to sensors and motion (perception, resolution, manipulation, execution, verification, held-object state) |
-| Where are the capabilities the planner can choose? | `agent/capabilities/` (observe, describe, answer, locate; inspect, explore; pick, place, pick_place, return_home; decompose) |
+| Where are the capabilities the planner can choose? | `agent/capabilities/` (observe, describe, answer, locate; inspect, explore, look; pick, place, pick_place, return_home; decompose) |
 | Where is YOLO? | `perception/detector.py` (weights path in `config/models.py`); depth geometry in `perception/geometry.py`; world model in `perception/world_model.py` |
 | Where is Gemma? | `agent/vlm_roles/`: `gemma.py` (model adapter), `prompts.py`, `schemas.py`, `roles.py`; model loader `vlm/model.py`; settings `vlm/config.py` |
 | What may a request do? | `agent/authority.py`, enforced in `agent/workers.py` before any capability runs |

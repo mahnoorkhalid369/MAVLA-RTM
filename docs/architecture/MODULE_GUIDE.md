@@ -20,7 +20,7 @@ This guide lists what each folder and module is for and where to look for a give
 | see what the robot is allowed to do for a request | `agent/authority.py`; enforced in `agent/workers.py` `WorkerRegistry.dispatch` |
 | block motion, dry-run, disable capabilities, limit replanning | `agent/controls.py` `ExecutionControls` (pass to `agent.run.main`, `Session`, `Tools`, `GoalSupervisor`) |
 | find the list of capabilities | `agent/capabilities/specs.py` `SPECS` |
-| see how a capability runs | `agent/capabilities/perception.py` (observe, describe_scene, answer, locate), `inspection.py` (inspect, explore), `manipulation.py` (pick, place, pick_place, return_home), `planning.py` (decompose) |
+| see how a capability runs | `agent/capabilities/perception.py` (observe, describe_scene, answer, locate), `inspection.py` (inspect, explore, look), `manipulation.py` (pick, place, pick_place, return_home), `planning.py` (decompose) |
 | change or read a Gemma prompt | `agent/vlm_roles/prompts.py` (answer schemas: `schemas.py`) |
 | see how the camera image becomes objects | `agent/tools/perception.py` `Tools.perceive` → `perception/detector.py` (YOLO) → `perception/geometry.py` `measure` |
 | see how objects keep their ids | `perception/world_model.py` `WorldModel.observe` / `add_observation` |
@@ -74,7 +74,7 @@ agent/                       orchestration: one instruction -> verified result
   capabilities/              what the planner may ask for
     specs.py                 SPECS, available(), planner_menu(), StepResult, Context
     perception.py            observe, describe_scene, answer, locate
-    inspection.py            inspect, explore (inspection worker, wrist camera)
+    inspection.py            inspect, explore, look (inspection worker, wrist camera)
     manipulation.py          pick, place, pick_place, return_home, failure mapping
     planning.py              decompose
     verification.py          verify (verification worker; internal, not plannable)

@@ -35,6 +35,16 @@ flowchart TD
   FV -->|"not shown, budget used"| STOP
 ```
 
+**Gemma reasons as the robot.** The embodied roles (request, plan, decide, decompose, answer) get one shared
+identity in front of their own prompt (`IDENTITY_SYSTEM`, composed once in `Roles._call`):
+
+- "you" is the robot, the hand is the gripper, and the eyes are the fixed and wrist cameras;
+- pointing the camera is not moving the hand;
+- directions are in an explicit frame: "robot" (x right, y forward) or "camera" (the fixed camera's picture);
+- never guess a frame or a direction.
+
+The perception roles judge images without it.
+
 **Gemma reasons and decides:**
 
 1. what the request may change (its kind, with the exact words as evidence);
@@ -85,7 +95,7 @@ Gemma's five actions:
 | **Supervisor** (`agent/supervisor.py` `GoalSupervisor`, LangGraph) | the task ledger, the plan, the loop | routes each step to its worker, applies the deterministic checks, executes Gemma's validated decisions | runs tools itself, accepts a worker's or Gemma's word for success, overrides Gemma with language rules |
 | **Gemma** (`agent/vlm_roles/`) | — | the request's kind, the plan, every next-step decision (continue / replan / ask_user / finish / stop), decompositions, descriptions / answers | moves the robot, produces joint values, bypasses authorization or verification |
 | **Perception worker**: observe, describe_scene, answer, locate | — | how to observe and ground a reference | moves objects |
-| **Inspection worker**: inspect, explore | — | which wrist viewpoint helps | moves objects (moves the arm only, collision-checked) |
+| **Inspection worker**: inspect, explore, look | — | which wrist viewpoint helps (look: the one closest to the named direction) | moves objects (moves the arm only, collision-checked) |
 | **Manipulation worker**: pick, place, pick_place, return_home | — | how to execute one physical action (`PickPlaceWorkflow` with its own recovery budget) | runs unless authorized |
 | **Planning worker**: decompose | — | concrete steps over the measured objects | adds effects the request did not authorize (the supervisor filters them) |
 | **Verification worker**: verify (internal, not in Gemma's menu) | — | whether measured state meets conditions | declares the user's task complete |
@@ -250,6 +260,19 @@ and `test_planner_explore_needs_the_hiding_place_*` were removed with their rule
 
 Mocks exist only in `tests/support/`. `agent/run.py` builds the real workers and Gemma, and the scripted responder
 only when `ASK = "scripted"`.
+
+**Embodied instructions (2026-10-20):** see `docs/validation/LOOK_VALIDATION.md`.
+
+- **`look`** (inspection worker) points the wrist camera left, right, forward, backward or down in an explicit
+  frame. It uses the existing viewpoint planner with collision checks, then takes a wrist observation, and the arm
+  stays at the viewpoint.
+- **`viewing(direction)`** measures where the camera looks from joint feedback, as a sub-goal and in the goal check.
+- **A plan whose steps set no checkable effect** is never COMPLETED.
+- **Planner benchmark:** 4/19 → 9/19 correct plans, and valid JSON 15/19 → 18/19.
+- **Isaac Sim:**
+  - left and backward were reached with ≤ 0.4° view error and ≤ 3.8 mm camera error;
+  - `down` from a side pose was infeasible and was reported as such;
+  - "move your hand to the left" was planned as `look left`, a remaining intent error.
 
 **Remaining limitations:**
 
