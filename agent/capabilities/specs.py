@@ -73,8 +73,9 @@ _SPECS = [
                    "object visible and confirmed; nothing held", "close-up position / size / description (wrist camera); arm back at HOME",
                    "object not found / no safe viewpoint / move failed", "viewpoint reached (joint feedback), wrist measurement associated"),
     CapabilitySpec("look", "point your wrist camera in a direction and see what is there (the arm moves only to aim the "
-                   "camera, and stays there)",
-                   '{"do": "look", "direction": "left" | "right" | "forward" | "backward" | "down", "frame": "robot" | "camera"}',
+                   "camera, and stays there). frame \"robot\" = your own directions; \"camera\" only when the user means "
+                   "directions in the fixed camera's picture",
+                   '{"do": "look", "direction": "left" | "right" | "forward" | "backward" | "down", "frame": "robot"}',
                    "motion", "nothing held", "the wrist camera points that way (arm stays there); wrist observation in the world model",
                    "no safe viewpoint that way / move not executed / viewpoint not reached / holding an object",
                    "camera direction measured from joint feedback (forward kinematics): the looked-at floor point within 30 deg of "

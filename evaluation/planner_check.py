@@ -63,7 +63,8 @@ def matches(steps, acceptable) -> bool:
         ok = True
         for want, (cap, args) in zip(seq, steps):
             name, direction = want if isinstance(want, tuple) else (want, None)
-            if cap != name or (direction is not None and (args.get("direction"), args.get("frame", "robot")) != (direction, "robot")):
+            frame = "robot" if direction == "down" else args.get("frame", "robot")  # down is the same in every frame
+            if cap != name or (direction is not None and (args.get("direction"), frame) != (direction, "robot")):
                 ok = False
                 break
         if ok:

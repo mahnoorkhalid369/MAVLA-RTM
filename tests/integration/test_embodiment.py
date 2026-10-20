@@ -100,7 +100,7 @@ def context(t):
 def test_look_is_a_sensing_motion_of_the_inspection_worker_in_the_menu():
     s = SPECS["look"]
     assert (s.safety, s.effect) == ("motion", "sensing") and "- look:" in planner_menu()
-    assert '"frame": "robot" | "camera"' in s.args and all(d in s.args for d in DIRECTIONS)
+    assert '"frame": "robot"' in s.args and '"camera" only when' in s.summary and all(d in s.args for d in DIRECTIONS)
 
 
 def test_look_steps_carry_an_explicit_direction_and_frame():
