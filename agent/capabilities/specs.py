@@ -239,6 +239,12 @@ def planner_menu(specs: dict[str, CapabilitySpec] | None = None) -> str:
     return "\n".join(out)
 
 
+def worker_name(worker: str | None) -> str:
+    """A worker as Gemma names it, in the menu's own label form ("manipulation worker") or bare ("manipulation")."""
+    w = (worker or "").strip().lower()
+    return w[:-len(" worker")] if w.endswith(" worker") else w
+
+
 def check_worker(name: str, worker: str | None) -> None:
     """Interface check of Gemma's worker choice: the named worker must implement the operation. An operation nobody
     implements is not an error here (it is reported unavailable when reached)."""
@@ -247,7 +253,7 @@ def check_worker(name: str, worker: str | None) -> None:
         return
     if not worker:
         raise ValueError(f"{name}: name the worker for this subtask (\"worker\")")
-    if worker.strip().lower() != spec.worker:
+    if worker_name(worker) != spec.worker:
         raise ValueError(f"{name}: the {worker} worker does not implement {name}; it is an operation of the {spec.worker} worker")
 
 

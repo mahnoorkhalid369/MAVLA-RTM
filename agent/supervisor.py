@@ -182,7 +182,7 @@ class GoalSupervisor:
         new = []
         for i, st in enumerate(steps):
             c, a, w = (tuple(st) + ("",))[:3]
-            new.append(Step(nxt + i, c, copy.deepcopy(a), worker=(w or "").strip().lower(), origin=origin))
+            new.append(Step(nxt + i, c, copy.deepcopy(a), worker=caps.worker_name(w), origin=origin))
         for i, st in enumerate(new):  # sequential dependency: each step needs the previous one
             st.depends_on = [new[i - 1].index] if i else []
         if after is None:

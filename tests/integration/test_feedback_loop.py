@@ -399,3 +399,12 @@ def test_words_bound_to_the_held_object_in_this_task_name_it(tmp_path):
     pp = r["exchanges"][1]
     assert (pp["operation"], pp["outcome"]) == ("pick_place", "infeasible") and "already in the gripper" in pp["happened"]
     assert r["status"] == "COMPLETED" and [x["worker"] for x in r["exchanges"]] == ["manipulation"] * 3
+
+
+def test_a_worker_named_by_its_menu_label_is_the_same_worker():
+    """Live 2026-10-20: Gemma wrote "manipulation worker" (the menu's label); a different worker is still refused."""
+    from agent.capabilities import check_worker
+    check_worker("pick_place", "manipulation worker")
+    check_worker("pick_place", "Manipulation")
+    with pytest.raises(ValueError):
+        check_worker("pick_place", "inspection worker")

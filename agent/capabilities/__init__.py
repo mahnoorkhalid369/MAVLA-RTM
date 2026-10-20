@@ -28,14 +28,14 @@ from agent.capabilities.perception import (_ensure_described, _find_in, _locatio
                                            scene_report)
 from agent.capabilities.planning import run_decompose, world_facts
 from agent.capabilities.specs import (EFFECT, INTERNAL, MOTION, SPECS, CapabilitySpec, Context, StepResult, adapt_args,
-                                      available, check_worker, planner_menu)
+                                      available, check_worker, planner_menu, worker_name)
 from agent.capabilities.verification import run_verify
 
 __all__ = ["MAX_EXPLORE_VIEWPOINTS", "_wrist_observation", "run_explore", "run_inspect", "run_look", "_failure_outcome", "_skill",
            "run_pick", "run_pick_place", "run_place", "run_return_home", "_ensure_described", "_find_in",
            "_location_check", "_target_mark", "facts_text", "run_answer", "run_describe_scene", "run_locate",
            "run_observe", "scene_report", "run_decompose", "world_facts", "EFFECT", "MOTION", "SPECS", "CapabilitySpec",
-           "Context", "StepResult", "available", "planner_menu", "INTERNAL", "run_verify", "adapt_args", "EXECUTORS", "check_worker"]
+           "Context", "StepResult", "available", "planner_menu", "INTERNAL", "run_verify", "adapt_args", "EXECUTORS", "check_worker", "worker_name"]
 
 _me = _sys.modules[__name__]
 
