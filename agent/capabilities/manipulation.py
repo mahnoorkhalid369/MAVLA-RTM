@@ -57,10 +57,16 @@ def _skill(ctx: Context, mode: str, task: dict, final_home: bool, step_no: int) 
     return StepResult(_failure_outcome(f.get("cls"), f.get("reason", "")), r["message"], data)
 
 
+def _names_held(ctx: Context, text: str) -> bool:
+    """The reference names the held object: its "#id", or words this task already bound to it (task memory)."""
+    held = ctx.tools.held_object
+    return held is not None and (text == f"#{held}" or (ctx.state is not None and ctx.state.bindings.get(text) == held))
+
+
 def run_pick(ctx: Context, args: dict, step_no: int) -> StepResult:
-    t, text = ctx.tools, (args.get("object") or {}).get("text", "")
+    t, text = ctx.tools, (args.get("object") or {}).get("text") or ""
     if t.held_object is not None:
-        if text == f"#{t.held_object}":
+        if _names_held(ctx, text):
             return StepResult("completed", f"already holding #{t.held_object} (no new grasp)", {"bindings": {text: t.held_object}})
         return StepResult("unsafe", f"the gripper already holds #{t.held_object}; place it before picking another object")
     return _skill(ctx, "pick", {"object": args["object"], "relation": None, "reference": None, "frame": "robot"}, False, step_no)
@@ -93,7 +99,7 @@ def run_place(ctx: Context, args: dict, final_home: bool, step_no: int) -> StepR
 def run_pick_place(ctx: Context, args: dict, final_home: bool, step_no: int) -> StepResult:
     held = ctx.tools.held_object
     if held is not None:
-        if (args.get("object") or {}).get("text") == f"#{held}":  # a precondition fact (no motion); Gemma decides
+        if _names_held(ctx, (args.get("object") or {}).get("text") or ""):  # a precondition fact (no motion); Gemma decides
             return StepResult("infeasible", f"#{held} is already in the gripper; pick_place starts with a grasp, so "
                                             "nothing was executed")
         return StepResult("unsafe", f"the gripper already holds #{held}; place it before picking another object")

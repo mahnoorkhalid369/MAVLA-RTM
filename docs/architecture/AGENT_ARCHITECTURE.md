@@ -7,33 +7,59 @@ files are listed in `MODULE_GUIDE.md`.
 
 ## 1. The loop
 
+Every instruction opens a fresh **task memory** (`agent/task_state.py`), which is closed when the instruction ends.
+The world model and the held object stay for the whole session; reasoning memory does not.
+
 ```mermaid
 flowchart TD
-  U([User goal, natural language]) --> A["Supervisor: authority\n(agent/authority.py: Gemma classifies, verbatim-evidence check)"]
-  A --> P["Gemma plans with the capability menu\n(Roles.plan_goal, schema + structural checks)"]
-  P --> L[("Task ledger (agent/task_state.py)\ngoal · plan · results · facts · hypotheses · assumptions\nrobot snapshot · uncertainties · checks · decisions")]
-  L --> D{"Supervisor: next pending step?"}
-  D -->|yes| R["WorkerRequest\nsender, receiver, goal, sub-goal,\ncontext, constraints, expected"]
-  R --> AU{"Registry: effect authorized?\n(agent/workers.py dispatch)"}
-  AU -->|no| RV
-  AU -->|yes| W["Worker: perception · inspection · manipulation · planning\n(agent/capabilities/*)"]
-  W --> T["Tools (agent/tools/): perceive · resolve · plan · execute · verify\nperception/, Gemma roles, frozen control/ + execution/ + safety/"]
-  T --> W
-  W --> RS["WorkerResult (the real result)\nstatus, outputs, evidence, uncertainty,\nneeds, tools used, failure reason"]
-  RS --> V["Verification worker: measured sub-goal check"]
-  V --> RV["Supervisor review (deterministic, traced)"]
-  RV -->|"routine success / decomposition / refused step"| D
-  RV -->|"unsafe / cancelled by the user"| STOP([Stop: say why])
-  RV -->|"failure, doubt, unverified sub-goal, worker advice"| G["Gemma decides (Roles.decide)\ngoal + progress + latest event"]
-  G -->|"continue / replan (validated)"| L
-  G -->|"ask_user"| Q["User answers in the terminal"] --> G
-  G -->|"finish"| FV
+  U([User instruction]) --> A["Authority: Gemma classifies, verbatim-evidence check\n(agent/authority.py)"]
+  A --> P["Gemma: goal + measurable success criteria + first subtasks\n(Roles.plan_goal; each step names worker + operation)"]
+  P --> M[("TASK MEMORY (fresh per instruction)\nORIGINAL goal + criteria (fixed) · unmet criteria · plan (strategy)\nworker exchanges · verifications · failures · uncertainty\nrobot / held object · Gemma's decisions")]
+  M --> D{"next planned subtask?"}
+  D -->|yes| R["WorkerRequest to the worker Gemma named\n(interface check: it implements the operation)"]
+  R --> AU{"effect authorized?"}
+  AU -->|no| UP
+  AU -->|yes| W["Worker executes with its trusted tools"]
+  W --> RS["WorkerResult: attempted, what happened, evidence,\nuncertainty, failure, tools used  (TOOL success)"]
+  RS --> V["Verification: the subtask's own measured effect  (SUBTASK success)"]
+  V --> UP["Update task memory"]
+  UP --> G0{"unsafe / cancelled?"}
+  G0 -->|yes| STOP([Stop: say why])
+  G0 -->|no| GOAL["Verification: the ORIGINAL goal's criteria on measured state"]
+  GOAL -->|"all shown"| DONE([COMPLETED  (TASK success)])
+  GOAL -->|"not yet"| G["Gemma reads the task memory and decides"]
+  G -->|"continue"| D
+  G -->|"replan: another worker / changed information / another approach"| M
+  G -->|"ask_user"| Q["your answer"] --> G
+  G -->|"finish"| GOAL
   G -->|"stop / invalid / budget used"| STOP
-  D -->|no| FV["Verification worker: final goal check"]
-  FV -->|"all met (or model-only answer)"| DONE([COMPLETED])
-  FV -->|"not shown, budget left"| G
-  FV -->|"not shown, budget used"| STOP
+  D -->|"no"| GOAL
 ```
+
+**Goal ownership.** The original goal is fixed when the instruction is interpreted:
+
+- Gemma's measurable success criteria (`"success"`, required whenever there are steps);
+- for a question, also `answered(<question>)`.
+
+A re-plan changes the strategy (the plan), never the criteria. A decomposition may *add* criteria over measured ids
+(logged), never replace them. Each step's own expected effect is a subtask check only. Example: "Pick the second
+block" planned as an observation completes the observation subtask, but `holding(the second block)` stays unmet, so
+the task is not completed (`test_4_a_successful_worker_does_not_complete_an_unfinished_task`).
+
+**Grounding.** A criterion names objects in your words. If no worker has bound such a reference, the goal check grounds
+it once per camera frame with perception's Gemma resolve, and keeps the binding for the task. This never applies to
+`located()`, which grounding alone would satisfy.
+
+**Three levels of success, kept apart:**
+
+| Level | Means | Recorded as |
+|---|---|---|
+| Tool | the operation ran (`WorkerResult.status`) | `exchanges[].tool` |
+| Subtask | its own effect measured (verification worker) | `exchanges[].subtask`, `subgoal_checks` |
+| Task | the original goal's criteria shown on measured state | `goal_check`, `unmet`, the final status |
+
+**No unchanged retry.** A re-plan whose first subtask already failed is sent back to Gemma, unless something has
+changed since: motion, a new camera frame, or an answer from you.
 
 **Gemma reasons as the robot.** The embodied roles (request, plan, decide, decompose, answer) get one shared
 identity in front of their own prompt (`IDENTITY_SYSTEM`, composed once in `Roles._call`):
@@ -49,12 +75,8 @@ The perception roles judge images without it.
 
 1. what the request may change (its kind, with the exact words as evidence);
 2. the first plan;
-3. **every decision a result calls for** (`Roles.decide`, prompt `DECIDE_SYSTEM`, schema `Decision`):
-   - after a failed step;
-   - after an uncertain answer or an unverified sub-goal;
-   - after a worker reports something it needs (`needs`, only when the worker itself says so);
-   - when every step ran but the goal is not shown;
-   - after the user answers Gemma's question;
+3. **after every subtask whose result does not already show the original goal** (`Roles.decide`, prompt
+   `DECIDE_SYSTEM`, schema `Decision`), from the task memory: which worker does what next;
 4. multi-object decomposition (`decompose`) over the measured objects;
 5. the perception roles inside the workers (describe, resolve, confirm, answer).
 
@@ -284,9 +306,9 @@ only when `ASK = "scripted"`.
   - verbatim-evidence authorization;
   - classification of the planner's own error strings (`Tools.deterministic`, the "safety" rejection), awaiting
     typed errors.
-- **No objective guard.** A re-plan may drop what the user asked for; the goal is whatever Gemma's current plan
-  sets. `test_replan_that_drops_the_objective_*` is a strict xfail until the goal is owned by Gemma for the whole
-  task (next phase).
+- **The goal is only as good as Gemma's criteria.** Measured: 12 of 18 benchmark cases get criteria that capture
+  the request. Misses are free text (never verifiable, so never completed) and contradictions (`holding(x)` together
+  with `on(x, y)`, which cannot both hold at the end). In both cases the task fails honestly instead of completing.
 - **What is verified.** Measurable predicates (holding, relations, located, observed, at_home) are measured. Answers
   and reports are model outputs. A question is complete only if Gemma's answer is certain, and it is reported as
   "not independently verified".

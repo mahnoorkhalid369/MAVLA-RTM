@@ -375,3 +375,25 @@ def test_criteria_in_the_prompts_notation_and_nested_shapes_are_read_structurall
                        {"pred": "at_home", "args": []}]
     assert got[3] == {"pred": "viewing", "args": [], "direction": [-1, 0, 0], "frame": "robot"}
     assert got[4]["direction"] == [0, 0, -1] and got[5]["pred"] == "the robot reports"
+
+
+def test_continue_with_new_steps_is_ambiguous_and_rejected():
+    """Live 2026-10-20: Gemma answered continue + new steps; continue keeps the plan, so this is sent back."""
+    vlm = RecordedVLM([json.dumps({"action": "continue", "steps": [{"worker": "manipulation", "do": "place", "object": "#6",
+                                                                     "relation": "on", "target": "blue block"}]}),
+                       json.dumps({"action": "replan", "steps": [{"worker": "manipulation", "do": "place", "object": "#6",
+                                                                   "relation": "on", "target": "blue block"}]})])
+    d = Roles(vlm).decide("g", "", "e", "menu", has_pending=True)
+    assert d.action == "replan" and "to give new steps choose replan" in vlm.calls[1]
+
+
+def test_words_bound_to_the_held_object_in_this_task_name_it(tmp_path):
+    """Live 2026-10-20: 'red block' was bound to #6 by the pick; a pick_place of 'red block' is then the held object
+    (a precondition fact, no motion; Gemma decides), not 'another object' (an unsafe stop)."""
+    t = tools([plan(("pick", {"object": "a"}), ("pick_place", {"object": "a", "relation": "on", "target": "b"}),
+                    success=[{"pred": "on", "args": ["a", "b"]}])])
+    t.decisions = [{"action": "replan", "steps": [{"do": "place", "object": "#1", "relation": "on", "target": "b"}]}]
+    r, ev = run(tmp_path, t, instruction="Put a on b.")
+    pp = r["exchanges"][1]
+    assert (pp["operation"], pp["outcome"]) == ("pick_place", "infeasible") and "already in the gripper" in pp["happened"]
+    assert r["status"] == "COMPLETED" and [x["worker"] for x in r["exchanges"]] == ["manipulation"] * 3

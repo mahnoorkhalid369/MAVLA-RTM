@@ -90,11 +90,10 @@ stateDiagram-v2
   INTERPRETING --> FAILED: planner JSON invalid twice (BD-1)
   DISPATCHING --> DELEGATING: next pending step
   DISPATCHING --> VERIFYING_GOAL: no step left
-  DISPATCHING --> CANCELLED: "it" cannot be bound
   DISPATCHING --> FAILED: > MAX_STEPS_EXECUTED (14)
   DELEGATING --> REVIEWING
-  REVIEWING --> DISPATCHING: routine success / decomposition inserted / step refused (no Gemma call)
-  REVIEWING --> DECIDING: failure, uncertain result, unverified sub-goal, worker advice
+  REVIEWING --> VERIFYING_GOAL: the original goal is shown after this subtask
+  REVIEWING --> DECIDING: otherwise (every subtask result, success or not, after the task-memory update)
   REVIEWING --> CANCELLED: cancelled by the user
   REVIEWING --> FAILED: unsafe (no new motion is planned)
   DECIDING --> DISPATCHING: continue / replan accepted
@@ -102,19 +101,19 @@ stateDiagram-v2
   DECIDING --> VERIFYING_GOAL: finish
   DECIDING --> FAILED: stop / invalid decision / budget used (UNSUPPORTED or CANCELLED by the last outcome)
   DECIDING --> CANCELLED: no answer to Gemma's question
-  VERIFYING_GOAL --> COMPLETED: every condition satisfied (or model-only)
+  VERIFYING_GOAL --> COMPLETED: every ORIGINAL criterion satisfied (or model-only answer)
   VERIFYING_GOAL --> DECIDING: goal not shown, decision budget left
   VERIFYING_GOAL --> FAILED: a condition false / unverifiable, budget used
 ```
 
 | State | Function | What it does |
 |---|---|---|
-| INTERPRETING | `_interpreting` | `authority.classify` → `Roles.plan_goal` (Gemma, `PLAN_SYSTEM`) → `_add_steps` (Gemma's plan as written). Questions get the condition `answered(<instruction>)`; other conditions are derived from the steps (`goals.derive_conditions`). |
-| DISPATCHING | `_dispatching` | picks `TaskState.current()`, `_bind_refs` ("it" → `#id`), `_adapt_to_robot_state` (pick_place of the held object → place), auto-observe (`capabilities.run_observe`) if the step needs a fresh view (`NEEDS_OBSERVATION`, `Tools.is_fresh`) |
+| INTERPRETING | `_interpreting` | `authority.classify` → `Roles.plan_goal` (Gemma: goal, success criteria, steps with worker + operation) → the ORIGINAL goal fixed in task memory (`conditions`, `original_goal`; + `answered(...)` for a question) → `_add_steps` |
+| DISPATCHING | `_dispatching` | `TaskState.current()`; an operation nobody implements, or a worker that does not implement it → "not executed" result; precondition: a fresh measured view if the operation needs one (`spec.needs_view`, auto-observe) |
 | DELEGATING | `_delegating` | `WorkerRegistry.request` → `dispatch(req, ctx, authority)`; records the result in the ledger |
-| REVIEWING | `_reviewing` | deterministic only: measured sub-goal check (verification worker), `unauthorized` → refuse and continue, `unsafe` → stop, `cancelled` → stop, decomposition insert (refusing out-of-authority steps), routine success → continue; anything else → DECIDING with the event text (step, outcome, summary, uncertainty, worker advice) |
-| DECIDING | `_deciding` | `Roles.decide` (Gemma, `DECIDE_SYSTEM`; goal + `TaskState.progress_text()` + event) → schema-validated `Decision`: continue / replan (steps validated like a plan; a first step that already failed with no motion since is sent back) / ask_user (`responder.ask`) / finish / stop. Budget `controls.max_replans` (settings `MAX_GEMMA_DECISIONS`, 3) |
-| VERIFYING_GOAL | `_verifying_goal` | `GoalEvaluator.evaluate` per condition (verification worker); not shown + budget → DECIDING |
+| REVIEWING | `_reviewing` | subtask check (verification worker, `spec.verify_after`); refusal recorded; `_remember` (task-memory exchange, failure + evidence signature); `unsafe` / `cancelled` → stop; decomposition insert (authorization-filtered; its criteria added); `_evaluate_goal` (original criteria, grounding unbound references) → shown: VERIFYING_GOAL, else DECIDING |
+| DECIDING | `_deciding` | `Roles.decide` (Gemma, `DECIDE_SYSTEM`; `TaskState.memory_text()` + the latest result) → validated `Decision`: continue / replan (worker choice checked; no unchanged retry) / ask_user / finish / stop. Changes of course bounded by `controls.max_replans` (`MAX_GEMMA_DECISIONS`, 3); continue bounded by the delegation limit (14) |
+| VERIFYING_GOAL | `_verifying_goal` | the original criteria on measured state; not shown + budget → DECIDING; else FAILED with the unmet criteria |
 
 ## 3. How a tool (capability) is selected and executed
 

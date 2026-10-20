@@ -113,8 +113,9 @@ flowchart TD
   M --> X["Tools.execute: motion gate (blocked / dry_run / real)"]
   X --> R["execution/ros_executor.py (frozen) → Isaac Sim + joint-limit safety layer"]
   C --> VW["verification worker: sub-goal met? (measured)"]
-  VW -->|routine success| D
-  VW -->|failure / doubt| GD["Gemma decides: continue · replan · ask you · finish · stop"]
+  VW --> TM["task memory updated · original goal checked"]
+  TM -->|"goal not shown yet"| GD["Gemma decides: continue · replan (another worker) · ask you · finish · stop"]
+  TM -->|"goal verified"| O
   GD --> D
   D -->|all steps done| V["verification worker: goal met? (agent/goals.py)"]
   V -->|not shown, budget left| GD
