@@ -18,6 +18,9 @@ Predicates (reusable building blocks, not a list of supported sentences):
   answered(question)      an answer was produced (confidence: model)
   reported()              a scene report was produced
   at_home()               HOME joint check passed
+  viewing(direction)      the wrist camera points that way now ("frame": robot | camera): forward kinematics of the
+                          measured joint state, within agent/directions.VIEW_TOLERANCE_DEG
+  seen()                  a frame from that "camera" (table | wrist) was taken and measured in this task
 Anything else -> satisfied None, "no evaluator for <pred>" (reported as unverifiable, never as done).
 """
 
@@ -28,8 +31,11 @@ from dataclasses import dataclass, field
 import numpy as np
 
 PREDICATES = ("holding", "not_holding", "on", "next_to", "left_of", "right_of", "in_front_of", "behind", "located",
-              "observed", "ordered", "answered", "reported", "at_home")
+              "observed", "ordered", "answered", "reported", "at_home", "viewing", "seen")
 RELATIONS = ("next_to", "left_of", "right_of", "in_front_of", "behind")
+# capabilities that move the arm (= agent.capabilities.specs MOTION; kept here so this module needs no pydantic;
+# tests/unit/test_structure.py checks they agree)
+ARM_MOTION = frozenset({"pick", "place", "pick_place", "return_home", "inspect", "explore", "look"})
 
 
 @dataclass
@@ -46,6 +52,8 @@ def derive_conditions(steps) -> list[dict]:
     out = []
     last_pick = None  # the holding(x) condition of the most recent pick: a later place / pick_place releases it
     for cap, a in steps:
+        if cap in ARM_MOTION:  # the camera's direction is a state of the arm: a later motion ends an earlier look
+            out = [c for c in out if c["pred"] != "viewing"]
         obj = ((a.get("object") or {}).get("text") if isinstance(a.get("object"), dict) else a.get("target")) or None
         ref = (a.get("reference") or {}).get("text") if isinstance(a.get("reference"), dict) else None
         if cap in ("place", "pick_place") and last_pick is not None and last_pick in out:
@@ -71,6 +79,10 @@ def derive_conditions(steps) -> list[dict]:
             out.append({"pred": "reported", "args": []})
         elif cap == "return_home":
             out.append({"pred": "at_home", "args": []})
+        elif cap == "look":
+            out.append({"pred": "viewing", "args": [a.get("direction")], "frame": a.get("frame") or "robot"})
+        elif cap == "observe":
+            out.append({"pred": "seen", "args": [], "camera": "table"})
     # a later pick of the same object supersedes nothing; a later place supersedes an earlier holding(x)
     placed = {c["args"][0] for c in out if c["pred"] in RELATIONS + ("on",)}
     return [c for c in out if not (c["pred"] == "holding" and c["args"][0] in placed)]
@@ -174,6 +186,21 @@ class GoalEvaluator:
 
     def _reported(self, ids, c):
         return bool(self.s.facts.get("objects")), "measured", "report lists measured objects"
+
+    def _viewing(self, ids, c):
+        from agent.directions import view_error
+        direction, frame = (c.get("args") or [None])[0], c.get("frame", "robot")
+        if direction is None:
+            return None, "none", "no direction given"
+        v = view_error(self.t.bridge.q(), direction, frame)  # measured joint state -> forward kinematics
+        return v["pointing"], "measured", (f"wrist camera axis {v['error_deg']} deg from {direction} ({frame} frame; "
+                                           f"limit {v['tolerance_deg']}), camera at {v['camera_position_mm']} mm")
+
+    def _seen(self, ids, c):
+        cam = c.get("camera", "table")
+        frames = [f for f in self.s.frames if f.get("camera") == cam]
+        return bool(frames), "measured", (f"{len(frames)} {cam} frame(s) measured this task" if frames
+                                          else f"no {cam} frame this task")
 
     def _at_home(self, ids, c):
         v = [x for x in self.s.verified if x.get("check") == "home"]

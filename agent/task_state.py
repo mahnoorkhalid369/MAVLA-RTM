@@ -50,6 +50,7 @@ class TaskState:
     success_condition: str = ""  # the planner's statement of what "done" means (hypothesis)
     plan: list[Step] = field(default_factory=list)
     facts: dict = field(default_factory=dict)  # {"objects": [...], "frame_id", "taken_at", "view_blocked", ...}
+    frames: list = field(default_factory=list)  # every observation of this task: {"camera", "frame_id", "objects"}
     hypotheses: dict = field(default_factory=dict)  # {"descriptions": {world_id: {...}}, "answers": [...]}
     verified: list[dict] = field(default_factory=list)  # independent verification records
     actions: list[dict] = field(default_factory=list)  # capability calls with outcome and duration
@@ -88,6 +89,7 @@ class TaskState:
             objs.append({"mark": k, "world_id": obs.object_ids.get(k), "centre_m": [round(v, 4) for v in g.get("centre", [])],
                          "footprint_m": [round(v, 4) for v in g.get("footprint", [])], "height_m": round(g.get("height", 0.0), 4),
                          "top_visible": g.get("tilt_deg") is not None, "detector_score": obs.scores.get(k)})
+        self.frames.append({"camera": obs.camera, "frame_id": obs.frame_id, "objects": len(objs)})
         self.facts = {"frame_id": obs.frame_id, "camera": obs.camera, "objects": objs, "cleared_view": obs.cleared_view,
                       "excluded_masks": len(obs.excluded)}
         self.hypotheses.setdefault("descriptions", {})

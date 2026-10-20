@@ -15,20 +15,13 @@ Lower-level constants (thresholds, tolerances, budgets) are in config/. Gemma's 
 """
 
 from __future__ import annotations
-
 from pathlib import Path
-
 from config import models as _models
-
 ROOT = Path(__file__).resolve().parents[1]
 
-SCENARIO = "default"
-TARGET = "isaac_sim"
-MOTION = "real"
-TRACE = True
 
 # ---------------------------------------------------------------------------------------------- scene
-SCENARIO = "laboratory"      # any scenario in scenarios/ (python -c "import scenarios; print(scenarios.available())"):
+SCENARIO = "default"      # any scenario in scenarios/ (python -c "import scenarios; print(scenarios.available())"):
                              # "default" (frozen cube scene), "laboratory", "ap_occlusion", "ap_categories", ...
 DIFFICULTY = "easy"          # laboratory: "easy" | "medium" | "hard"
 SEED = 42                    # laboratory layout seed (42 = the Experiment 1 scene)

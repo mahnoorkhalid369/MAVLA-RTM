@@ -16,7 +16,8 @@ import numpy as np
 
 DIRECTIONS = ("left", "right", "forward", "backward", "down")
 FRAMES = ("robot", "camera")
-VIEW_TOLERANCE_DEG = 30.0  # the measured view counts as pointing that way within this angle
+VIEW_TOLERANCE_DEG = 30.0  # a horizontal direction: the looked-at floor point within this bearing of it
+DOWN_TOLERANCE_DEG = 15.0  # 'down': the optical axis within this angle of straight down (HOME's camera is 30 deg off)
 CAMERA_TIP = "camera_color_optical_frame"  # the wrist camera frame (URDF); its +z is the optical axis
 
 
@@ -51,20 +52,29 @@ def camera_pose(q) -> np.ndarray:
 
 
 def view_error(q, direction: str, frame: str = "robot") -> dict:
-    """How far the wrist camera's optical axis (from joint state q) is from pointing `direction`.
-    Horizontal directions compare the axis's heading on the floor (the camera may look down while it looks left);
-    'down' compares the full axis with straight down."""
+    """How far the wrist camera (joint state q) is from looking `direction`.
+    Horizontal directions: where the optical axis meets the floor, as a bearing from the base, against the direction
+    (what the camera looks at lies on that side of the robot; a camera that looks down beside itself does not count
+    as looking sideways). An axis that does not meet the floor in front of it uses its heading. 'down' compares the
+    full axis with straight down."""
     T = camera_pose(q)
-    axis = T[:3, 2]
+    axis, pos = T[:3, 2], T[:3, 3]
     want = direction_vector(direction, frame)
+    seen = None
     if direction == "down":
         err = float(np.degrees(np.arccos(np.clip(axis @ want, -1.0, 1.0))))
     else:
-        h = axis[:2]
-        if np.linalg.norm(h) < 0.2:  # looking (almost) straight down: no heading
+        if axis[2] < -0.1:  # meets the floor (z = 0)
+            seen = pos + (-pos[2] / axis[2]) * axis
+            h = seen[:2]
+        else:
+            h = axis[:2]
+        if np.linalg.norm(h) < 0.15:  # looking at the base itself / straight up: no side
             err = 90.0
         else:
             err = float(np.degrees(np.arccos(np.clip(_unit(h) @ want[:2], -1.0, 1.0))))
+    tol = DOWN_TOLERANCE_DEG if direction == "down" else VIEW_TOLERANCE_DEG
     return {"direction": direction, "frame": frame, "error_deg": round(err, 1),
-            "axis": [round(float(v), 3) for v in axis], "camera_position_mm": [round(float(v) * 1000) for v in T[:3, 3]],
-            "pointing": bool(err <= VIEW_TOLERANCE_DEG), "tolerance_deg": VIEW_TOLERANCE_DEG}
+            "axis": [round(float(v), 3) for v in axis], "camera_position_mm": [round(float(v) * 1000) for v in pos],
+            "looks_at_mm": None if seen is None else [round(float(v) * 1000) for v in seen[:2]],
+            "pointing": bool(err <= tol), "tolerance_deg": tol}

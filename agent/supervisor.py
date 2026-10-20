@@ -173,7 +173,7 @@ class GoalSupervisor:
     def _measured_subgoal(step: Step) -> list[dict]:
         """The conditions a completed step should have made true, when they are measurable (physical or located /
         observed objects). Answers and reports are model / text outputs: checked only in the final goal check."""
-        if step.capability not in ("pick", "place", "pick_place", "return_home", "locate", "inspect"):
+        if step.capability not in ("pick", "place", "pick_place", "return_home", "locate", "inspect", "look"):
             return []
         return derive_conditions([(step.capability, step.args)])
 
@@ -225,7 +225,7 @@ class GoalSupervisor:
             group = MANIPULATION if st.capability in MANIPULATION else {st.capability}
             return any(o.capability in group and o.index > st.index for o in current)
         live = [(s.capability, s.args) for s in plan
-                if s.status != "refused" and s.capability not in ("observe", "decompose")
+                if s.status != "refused" and s.capability != "decompose"
                 and (s in current or (s.capability in OBJECTIVES and not pursued_later(s)))]
         derived = [{**c, "source": "derived"} for c in derive_conditions(live)]
         if any(c["pred"] == "answered" for c in request):  # the request's own question already stands for the answer
@@ -501,8 +501,10 @@ class GoalSupervisor:
 
         def fmt(rs):
             return "; ".join(f"{r['condition']['pred']}({', '.join(map(str, r['condition'].get('args', [])))}): {r['evidence']}" for r in rs)
-        if false or unknown or (failed_steps and not rows):
-            gap = fmt(false + unknown) or f"step {failed_steps[0].index} ({failed_steps[0].capability}) failed"
+        nothing = not self.ts.conditions  # no step sets a checkable effect: nothing can show the goal was reached
+        if false or unknown or nothing or (failed_steps and not rows):
+            gap = (fmt(false + unknown) or (f"step {failed_steps[0].index} ({failed_steps[0].capability}) failed" if failed_steps
+                   else "no step of the plan sets an effect that can be verified"))
             if self.ts.replans < self.controls.max_replans and self.executed < MAX_STEPS_EXECUTED:
                 self.event, self.event_outcome = f"every step ran, but the goal is not shown: {gap}", "failed"
                 self.event_step = None
@@ -516,6 +518,9 @@ class GoalSupervisor:
             if unknown:
                 return self._finish("FAILED", "insufficient_info", f"The steps ran, but the evidence does not show the goal: "
                                     f"{fmt(unknown)}.\n{summary}")
+            if nothing:
+                return self._finish("FAILED", "insufficient_info", "The steps ran, but none of them sets an effect I can "
+                                    f"verify, so I cannot say the goal was reached.\n{summary}")
             return self._finish("FAILED", failed_steps[0].outcome or "failed", f"Step {failed_steps[0].index} "
                                 f"({failed_steps[0].capability}) {failed_steps[0].outcome}: {failed_steps[0].summary}"
                                 + self._done_so_far() + " I did not report success.")

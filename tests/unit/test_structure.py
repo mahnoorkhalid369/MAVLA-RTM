@@ -134,7 +134,9 @@ def test_capability_registry_planner_schema_and_supervisor_agree(tmp_path):
     assert {n for n, s in SPECS.items() if s.safety == "motion"} == {"pick", "place", "pick_place", "return_home",
                                                                      "inspect", "explore", "look"}
     from agent.supervisor import MOTION
-    assert MOTION == {n for n, s in SPECS.items() if s.safety == "motion"}  # the supervisor's motion set = the specs'
+    assert MOTION == {n for n, s in SPECS.items() if s.safety == "motion"}  # the supervisor's motion set = the specs
+    from agent.goals import ARM_MOTION
+    assert ARM_MOTION == MOTION  # the goal conditions' motion set too'
     assert set(EFFECT) <= set(SPECS)
 
 

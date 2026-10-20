@@ -77,7 +77,8 @@ _SPECS = [
                    '{"do": "look", "direction": "left" | "right" | "forward" | "backward" | "down", "frame": "robot" | "camera"}',
                    "motion", "nothing held", "the wrist camera points that way (arm stays there); wrist observation in the world model",
                    "no safe viewpoint that way / move not executed / viewpoint not reached / holding an object",
-                   "camera direction measured from joint feedback (forward kinematics), within 30 deg"),
+                   "camera direction measured from joint feedback (forward kinematics): the looked-at floor point within 30 deg of "
+                   "the direction (down: axis within 15 deg)"),
     CapabilitySpec("explore", "look for something the fixed camera cannot see (e.g. behind another object)",
                    '{"do": "explore", "object": "<words>", "near": "<words for an object it may be behind, or null>"}', "motion",
                    "nothing held", "wrist observations of hidden regions in the world model; arm back at HOME",

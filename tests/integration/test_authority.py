@@ -63,7 +63,7 @@ def test_question_decomposed_into_pick_and_place_moves_nothing(tmp_path):
     assert any(e["kind"] == "authorization" and e.get("allowed") is False for e in ev)
     assert [s["capability"] for s in r["plan"]] == ["observe", "decompose", "answer"]  # the question is still answered
     assert r["status"] == "COMPLETED" and "did not pick, place" in r["message"]
-    assert [c["pred"] for c in r["conditions"]] == ["answered"]  # the decomposition's on(#1, #2) was not adopted
+    assert [c["pred"] for c in r["conditions"]] == ["answered", "seen"]  # the decomposition's on(#1, #2) was not adopted
 
 
 def test_planner_naming_a_manipulation_for_a_question_is_refused_before_execution(tmp_path):

@@ -125,7 +125,7 @@ def test_goal_conditions_do_not_leak_into_the_next_instruction(new_session):
     r1, _ = run(s, "Pick up a.")
     r2, _ = run(s, "Take a look at the table.")
     assert [c["pred"] for c in r1["conditions"]] == ["holding"]
-    assert [c["pred"] for c in r2["conditions"]] == ["reported"]
+    assert [c["pred"] for c in r2["conditions"]] == ["seen", "reported"]
     assert [p["capability"] for p in r2["plan"]] == ["observe", "describe_scene"]
 
 

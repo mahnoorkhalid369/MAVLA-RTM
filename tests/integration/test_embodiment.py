@@ -154,3 +154,89 @@ def test_no_looking_around_while_holding_an_object():
     t.world.holding = 1
     r = caps.run_look(context(t), {"direction": "left", "frame": "robot"})
     assert r.outcome == "infeasible" and t.executed == []
+
+
+# ------------------------------------------------------------------------------- measured goal verification
+from agent.goals import GoalEvaluator, derive_conditions  # noqa: E402
+from tests.support.runners import plan, run_supervisor as run  # noqa: E402
+
+LOOK_LEFT = ("look", {"direction": "left", "frame": "robot"})
+
+
+def test_look_sets_a_measured_viewing_condition_that_a_later_motion_ends():
+    assert derive_conditions([("look", {"direction": "left", "frame": "robot"})]) == [
+        {"pred": "viewing", "args": ["left"], "frame": "robot"}]
+    assert derive_conditions([("look", {"direction": "left", "frame": "robot"}), ("return_home", {})]) == [
+        {"pred": "at_home", "args": []}]
+    assert derive_conditions([("observe", {})]) == [{"pred": "seen", "args": [], "camera": "table"}]
+
+
+def test_viewing_is_evaluated_from_the_measured_joint_state():
+    t = ArmTools()
+    caps.run_look(context(t), {"direction": "right", "frame": "robot"})
+    ev = GoalEvaluator(t, None)
+    yes = ev.evaluate({"pred": "viewing", "args": ["right"], "frame": "robot"}, {})
+    no = ev.evaluate({"pred": "viewing", "args": ["left"], "frame": "robot"}, {})
+    assert (yes.satisfied, yes.confidence) == (True, "measured") and "deg from right" in yes.evidence
+    assert no.satisfied is False
+
+
+def test_look_left_is_delegated_to_the_inspection_worker_verified_and_completed(tmp_path):
+    t = ArmTools([plan(LOOK_LEFT)])
+    t.request_kind = "description"  # "look at your left side": sensing is authorized, object changes are not
+    r, ev = run(tmp_path, t, instruction="Look at your left side.")
+    assert r["status"] == "COMPLETED" and t.executed == ["look view"]
+    assert [e["worker"] for e in ev if e["kind"] == "delegate"][:2] == ["perception", "inspection"]  # observe first
+    sub = r["subgoal_checks"][0]
+    assert sub["outcome"] == "completed" and sub["results"][0]["condition"]["pred"] == "viewing"
+    check = r["goal_check"]
+    assert any(c["condition"]["pred"] == "viewing" and c["satisfied"] and c["confidence"] == "measured" for c in check)
+
+
+def test_a_blocked_look_is_never_completed(tmp_path):
+    t = ArmTools([plan(LOOK_LEFT)], ok=False, reason="motion blocked by the execution controls")
+    t.request_kind = "description"
+    t.decisions = [{"action": "stop", "reason": "the motion is blocked"}]
+    r, _ = run(tmp_path, t, instruction="Look at your left side.")
+    assert r["status"] == "FAILED" and "not executed" in r["message"] and "Gemma stopped" in r["message"]
+
+
+def test_a_camera_that_ends_up_pointing_elsewhere_fails_the_goal(tmp_path, monkeypatch):
+    """The worker reports success but the measured camera points elsewhere (e.g. the arm moved afterwards): the
+    verification worker's measurement wins."""
+    t = ArmTools([plan(LOOK_LEFT)])
+    t.request_kind = "description"
+    t.decisions = [{"action": "stop", "reason": "cannot confirm the view"}]
+    real = caps.run_look
+
+    def look_then_drift(ctx, args):
+        res = real(ctx, args)
+        t.q_now = np.array(ARM_HOME, float)  # the joints are back at HOME before the check
+        return res
+    monkeypatch.setattr(caps, "run_look", look_then_drift)
+    r, _ = run(tmp_path, t, instruction="Look at your left side.")
+    assert r["status"] != "COMPLETED"
+    assert r["subgoal_checks"][0]["outcome"] == "failed" and "deg from left" in r["subgoal_checks"][0]["summary"]
+
+
+def test_a_plan_with_nothing_verifiable_is_never_completed(tmp_path, monkeypatch):
+    """E.g. Gemma answers "look left" with an explore that finds nothing: no step sets a checkable effect, so the
+    goal is not shown; Gemma is asked, and without a better plan the task fails instead of completing."""
+    monkeypatch.setattr(caps, "run_explore", lambda ctx, args: caps.StepResult("completed", "looked around"))
+    t = ArmTools([plan(("explore", {"object": "thing"}))])
+    t.decisions = [{"action": "stop", "reason": "nothing to check"}]
+    r, _ = run(tmp_path, t, instruction="Look around.")
+    assert r["status"] == "FAILED" and r["conditions"] == [] and "no step of the plan sets an effect" in t.decide_calls[0]["event"]
+
+
+def test_moving_the_hand_is_not_turned_into_looking(tmp_path):
+    """No capability moves the gripper to a free position: Gemma's empty plan is reported as unsupported, nothing moves."""
+    t = ArmTools([plan(reason="I cannot move my hand to a free position; I can point my camera or pick and place")])
+    r, _ = run(tmp_path, t, instruction="Move your hand to the left.")
+    assert r["status"] == "UNSUPPORTED" and t.executed == []
+
+
+def test_home_is_not_counted_as_looking_anywhere_in_particular():
+    """At HOME the canted wrist camera looks down and to the front-left; it is not 'looking left' or 'looking down'."""
+    errs = {d: view_error(ARM_HOME, d) for d in DIRECTIONS}
+    assert not any(v["pointing"] for v in errs.values()), {d: v["error_deg"] for d, v in errs.items()}
