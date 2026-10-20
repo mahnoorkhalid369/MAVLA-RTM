@@ -15,7 +15,7 @@ The supervisor calls each executor through this package (`capabilities.run_<name
 importable from agent.capabilities.
 """
 
-from agent.capabilities.inspection import MAX_EXPLORE_VIEWPOINTS, _wrist_observation, run_explore, run_inspect
+from agent.capabilities.inspection import MAX_EXPLORE_VIEWPOINTS, _wrist_observation, run_explore, run_inspect, run_look
 from agent.capabilities.manipulation import _failure_outcome, _skill, run_pick, run_pick_place, run_place, run_return_home
 from agent.capabilities.perception import (GENERIC_WORDS, _ensure_described, _find_in, _location_check, _target_mark,
                                            facts_text, run_answer, run_describe_scene, run_locate, run_observe,
@@ -25,7 +25,7 @@ from agent.capabilities.specs import (EFFECT, INTERNAL, MOTION, SPECS, Capabilit
                                       planner_menu)
 from agent.capabilities.verification import run_verify
 
-__all__ = ["MAX_EXPLORE_VIEWPOINTS", "_wrist_observation", "run_explore", "run_inspect", "_failure_outcome", "_skill",
+__all__ = ["MAX_EXPLORE_VIEWPOINTS", "_wrist_observation", "run_explore", "run_inspect", "run_look", "_failure_outcome", "_skill",
            "run_pick", "run_pick_place", "run_place", "run_return_home", "GENERIC_WORDS", "_ensure_described", "_find_in",
            "_location_check", "_target_mark", "facts_text", "run_answer", "run_describe_scene", "run_locate",
            "run_observe", "scene_report", "run_decompose", "world_facts", "EFFECT", "MOTION", "SPECS", "CapabilitySpec",

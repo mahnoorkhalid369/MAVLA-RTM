@@ -55,6 +55,8 @@ def check_steps(steps: list[PlanStep], max_steps: int = 6) -> None:
             raise ValueError(f"step {i}: {st.do} needs object")
         elif st.do == "answer" and not (st.question or "").strip():
             raise ValueError(f"step {i}: answer needs question")
+        elif st.do == "look" and not st.direction:
+            raise ValueError(f"step {i}: look needs direction (left, right, forward, backward or down) and frame")
 
 
 # Roles that reason as the robot (what it is, what it can do, its directions) get IDENTITY_SYSTEM in front of their

@@ -52,6 +52,7 @@ Examples:
 "where is the <A>?" -> {{"goal": "find <A>", "steps": [{{"do": "observe"}}, {{"do": "locate", "object": "<A>"}}], "reason": "look and find"}}
 "move closer and inspect the <A>" -> {{"goal": "close look at <A>", "steps": [{{"do": "observe"}}, {{"do": "inspect", "object": "<A>"}}], "reason": "close-up"}}
 "inspect the <A> in the <B>" -> {{"goal": "close look at <A> in <B>", "steps": [{{"do": "observe"}}, {{"do": "inspect", "object": "<A>", "object_relation": "in", "object_anchor": "<B>"}}], "reason": "close-up of the one in <B>"}}
+"look to your right" -> {{"goal": "wrist camera pointing right", "steps": [{{"do": "look", "direction": "right", "frame": "robot"}}], "reason": "aim the camera; my own right"}}
 "find the thing behind the <B>" -> {{"goal": "find what is behind <B>", "steps": [{{"do": "observe"}}, {{"do": "explore", "object": "thing", "near": "<B>"}}, {{"do": "locate", "object": "thing"}}], "reason": "hidden region"}}
 "line up all <A> by size" -> {{"goal": "<A> in a row by size", "steps": [{{"do": "observe"}}, {{"do": "decompose", "goal": "line up all <A> by size"}}], "reason": "depends on the measured objects"}}"""
 

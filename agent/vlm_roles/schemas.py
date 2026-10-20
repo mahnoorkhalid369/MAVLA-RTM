@@ -29,7 +29,7 @@ PLACEHOLDERS = {"", "null", "none", "nothing", "n/a", "na", "?", "unknown", "no"
 
 class PlanStep(BaseModel):
     """One flat step (the 2B model drops braces in nested JSON; flat keys are converted deterministically)."""
-    do: Literal["observe", "describe_scene", "answer", "locate", "inspect", "explore", "pick", "place", "pick_place",
+    do: Literal["observe", "describe_scene", "answer", "locate", "inspect", "explore", "look", "pick", "place", "pick_place",
                 "return_home", "decompose"]
     object: str | None = None  # pick / pick_place: object to move; locate / inspect / explore: what to find
     relation: Literal["on", "next_to", "left_of", "right_of", "in_front_of", "behind"] | None = None
@@ -41,6 +41,12 @@ class PlanStep(BaseModel):
     question: str | None = None  # answer
     near: str | None = None  # explore: an object the thing may be hidden behind
     goal: str | None = None  # decompose: the goal to plan over the measured scene
+    direction: Literal["left", "right", "forward", "backward", "down"] | None = None  # look: where to point the camera
+
+    @field_validator("direction", mode="before")
+    @classmethod
+    def direction_text(cls, v):  # letter case / spaces only; any other word fails validation (Gemma retries)
+        return None if v is None or str(v).strip().lower() in PLACEHOLDERS else str(v).strip().lower()
 
     @field_validator("object", "target", "object_anchor", "question", "near", "goal", mode="before")
     @classmethod
@@ -66,6 +72,8 @@ class PlanStep(BaseModel):
             return {"target": self.object, "relation": self.object_relation, "anchor": self.object_anchor}
         if self.do == "explore":
             return {"target": self.object, "near": self.near}
+        if self.do == "look":
+            return {"direction": self.direction, "frame": self.frame}
         if self.do == "answer":
             return {"question": self.question}
         if self.do == "decompose":

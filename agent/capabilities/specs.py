@@ -72,6 +72,12 @@ _SPECS = [
                    '{"do": "inspect", "object": "<words>"}', "motion",
                    "object visible and confirmed; nothing held", "close-up position / size / description (wrist camera); arm back at HOME",
                    "object not found / no safe viewpoint / move failed", "viewpoint reached (joint feedback), wrist measurement associated"),
+    CapabilitySpec("look", "point your wrist camera in a direction and see what is there (the arm moves only to aim the "
+                   "camera, and stays there)",
+                   '{"do": "look", "direction": "left" | "right" | "forward" | "backward" | "down", "frame": "robot" | "camera"}',
+                   "motion", "nothing held", "the wrist camera points that way (arm stays there); wrist observation in the world model",
+                   "no safe viewpoint that way / move not executed / viewpoint not reached / holding an object",
+                   "camera direction measured from joint feedback (forward kinematics), within 30 deg"),
     CapabilitySpec("explore", "look for something the fixed camera cannot see (e.g. behind another object)",
                    '{"do": "explore", "object": "<words>", "near": "<words for an object it may be behind, or null>"}', "motion",
                    "nothing held", "wrist observations of hidden regions in the world model; arm back at HOME",
@@ -79,7 +85,7 @@ _SPECS = [
 ]
 
 EFFECT = {"pick": "object_change", "place": "object_change", "pick_place": "object_change", "inspect": "sensing",
-          "explore": "sensing", "return_home": "sensing"}  # everything else: none (read-only)
+          "explore": "sensing", "look": "sensing", "return_home": "sensing"}  # everything else: none (read-only)
 
 SPECS: dict[str, CapabilitySpec] = {s.name: replace(s, effect=EFFECT.get(s.name, "none")) for s in _SPECS}
 

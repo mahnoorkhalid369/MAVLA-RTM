@@ -1,5 +1,6 @@
 """Inspection capabilities (wrist camera; move the arm, never change objects): inspect one visible object
-closely, explore hidden regions. Both end with a verified return HOME."""
+closely, explore hidden regions (both end with a verified return HOME), and look in a named direction (the arm
+stays there so the camera's direction can be measured; a later motion or return_home moves it)."""
 
 from __future__ import annotations
 
@@ -166,3 +167,99 @@ def run_explore(ctx: Context, args: dict) -> StepResult:
     return StepResult("completed", f"Looked into {views} hidden region(s) with the wrist camera: {new_total} object(s) not "
                                    f"visible to the table camera" + (f"; {found.summary}" if found else f"; no {text!r} among them") + tail,
                       {**data, "found_summary": found.summary if found else None})
+
+
+# Look geometry (pure geometry over the robot's kinematics, no scene knowledge): the wrist camera stays high (the base
+# is raised and the camera is canted on the J5 housing) and looks outward and down at a floor point in the named
+# direction. Camera azimuths are tried closest-first, so the chosen view is the one nearest the requested direction.
+LOOK_RADIUS = 1.0  # m: floor point looked at, this far from the base in the named direction
+LOOK_DISTANCES = (0.8, 1.0, 1.2)  # m: camera to the look point
+LOOK_ELEVATIONS = (35.0, 45.0, 55.0)  # deg: camera above the look point, from the horizontal
+LOOK_OFFSETS_DEG = (0.0, 10.0, -10.0, 20.0, -20.0)  # camera azimuth offsets, closest first
+DOWN_RADIUS = (0.35, 0.60)  # m: 'down' looks at the floor below the camera, kept inside this ring
+
+
+def look_target(direction: str, frame: str, q_now) -> tuple[np.ndarray, list, tuple, tuple]:
+    """Look-at point, camera azimuth tries (closest first), elevations and distances for the viewpoint planner. The
+    camera sits between the base and the look point, so its optical axis points the named way (agent/directions.py)."""
+    from agent.directions import camera_pose, direction_vector
+    if direction == "down":
+        xy = camera_pose(q_now)[:2, 3]
+        r = float(np.hypot(*xy))
+        xy = (xy / r if r > 1e-3 else np.array([0.0, 1.0])) * float(np.clip(r, *DOWN_RADIUS))
+        return np.array([xy[0], xy[1], 0.0]), [None], (85.0,), (0.35, 0.45)
+    u = direction_vector(direction, frame)
+    target = np.array([u[0], u[1], 0.0]) * LOOK_RADIUS
+    back = float(np.degrees(np.arctan2(-u[1], -u[0])))  # from the look point back towards the base
+    return target, [(back + d) % 360.0 for d in LOOK_OFFSETS_DEG], LOOK_ELEVATIONS, LOOK_DISTANCES
+
+
+def run_look(ctx: Context, args: dict) -> StepResult:
+    """Point the wrist camera in a named direction of an explicit frame and observe there. Gemma names the direction;
+    the viewpoint is chosen and checked by the existing planner (look-at IK, joint limits, clear view, collision-free
+    path) and executed through Tools.execute (motion gate, frozen executor, simulator safety layer). The arm stays at
+    the viewpoint; the measured camera direction is reported (and verified by the verification worker)."""
+    from agent.directions import DIRECTIONS, FRAMES, view_error
+    from control.kinematics import Kinematics
+    from control.motion import joint_move
+    from control.robot import ARM_SPEED
+    from control.skills import MoveStep
+    from perception.viewpoints import ViewpointPlanner
+    from agent.vlm_roles import VLMFailure
+    direction, frame = (args or {}).get("direction"), (args or {}).get("frame") or "robot"
+    t, t0 = ctx.tools, time.monotonic()
+    if direction not in DIRECTIONS or frame not in FRAMES:
+        return StepResult("ambiguous", f"which direction? got {direction!r} in frame {frame!r}; I can look "
+                          f"{', '.join(DIRECTIONS)} in the {' or '.join(FRAMES)} frame")
+    if t.world.holding is not None:
+        return StepResult("infeasible", "not moving the camera around while holding an object (place it first)")
+    q0 = np.asarray(t.bridge.q(), float)
+    target, azimuths, elevations, distances = look_target(direction, frame, q0)
+    vp, obstacles = ViewpointPlanner(), t.obstacles()
+    tp = time.monotonic()
+    for az in azimuths:  # closest to the requested direction first; the first safe view wins
+        plan = vp.plan(target, q0, obstacles, azimuths=None if az is None else [az], elevations=elevations,
+                       distances=distances)
+        if plan.ok:
+            break
+    plan_s = round(time.monotonic() - tp, 2)
+    ctx.log("exploration", purpose="look", target=f"{direction} ({frame} frame)", plan=plan.summary(), seconds=plan_s,
+            look_point=[round(float(v), 3) for v in target])
+    data = {"direction": direction, "frame": frame, "look_point": [round(float(v), 3) for v in target],
+            "plan": plan.summary(), "plan_seconds": plan_s}
+    if not plan.ok:
+        return StepResult("infeasible", f"no safe viewpoint to look {direction} ({frame} frame): {plan.reason}", data)
+    b = plan.best
+    res = t.execute([MoveStep(joint_move(Kinematics(), q0, b.q, ARM_SPEED), f"point the wrist camera {direction}")], "look view")
+    if not res.ok:
+        return StepResult("unsafe" if "safety" in (res.reason or "").lower() else "failed",
+                          f"camera move to look {direction} was not executed or failed: {res.reason}", data)
+    t.bridge.wait_still()
+    q = np.asarray(t.bridge.q(), float)
+    reach = vp.reached(q, b)
+    view = view_error(q, direction, frame)  # measured: joint feedback -> forward kinematics
+    ctx.log("verification", check="viewpoint", **reach)
+    ctx.log("verification", check="view_direction", **{"pass": view["pointing"]}, **view)
+    data.update({"reach": reach, "view": view})
+    if not reach["pass"]:
+        return StepResult("failed", f"viewpoint not reached (max joint error {reach['max_joint_error_deg']} deg)", data)
+    wobs = t.perceive("wrist")
+    new = 0
+    for k, g in wobs.measured.items():
+        st, _ = t.world.add_observation(g, "wrist", wobs.frame_id, k)
+        new += st == "new"
+    try:
+        t.describe(wobs)
+    except (VLMFailure, TimeoutError) as exc:
+        ctx.log("tool", tool="describe_failed", camera="wrist", error=str(exc)[:200])
+    ctx.obs = wobs  # what the robot now sees: a following describe_scene / answer / locate uses this view
+    ctx.extra_obs.append(wobs)
+    ctx.state.record_observation(wobs)
+    n = len(wobs.marks)
+    data.update({"wrist_frame": wobs.frame_id, "objects": n, "new_objects": new, "seconds": round(time.monotonic() - t0, 1),
+                 "evidence": [{"kind": "frame", "id": wobs.frame_id, "camera": "wrist"}]})
+    cam = view["camera_position_mm"]
+    return StepResult("completed",
+                      f"Pointed the wrist camera {direction} ({frame} frame): its axis is {view['error_deg']:.0f} deg from "
+                      f"that direction (measured from the joint state; camera at x {cam[0]:+d}, y {cam[1]:+d}, z {cam[2]} mm). "
+                      f"It sees {n} object(s), {new} not measured before. The arm stays here.", data)

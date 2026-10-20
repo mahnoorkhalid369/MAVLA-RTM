@@ -7,7 +7,7 @@ Workers are logical roles in this process (one shared Gemma / YOLO / ROS bridge)
 operations implemented by agent/capabilities/ over the tools (agent/tools/):
 
     perception     observe, describe_scene, answer, locate
-    inspection     inspect, explore (wrist-camera viewpoints; moves the arm, never objects)
+    inspection     inspect, explore, look (wrist-camera viewpoints; moves the arm, never objects)
     manipulation   pick, place, pick_place, return_home
     planning       decompose (Gemma over the measured objects)
     verification   verify (goal / sub-goal conditions over measured state; internal, never planned by Gemma)

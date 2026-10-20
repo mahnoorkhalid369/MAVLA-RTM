@@ -99,7 +99,7 @@ PROMPT_SHA256_16 = {  # deliberate prompt versions; 2026-10-18: shared robot ide
     "DESCRIBE_PROMPT": "c76f8ba28b9ad381",
     "IDENTITY_SYSTEM": "3ebcae62cf2ad72a",
     "PARSE_SYSTEM": "35cb5a94bc3508a9",
-    "PLAN_SYSTEM": "c97a153238c3babe",
+    "PLAN_SYSTEM": "43a9ff363d542f38",
     "REQUEST_SYSTEM": "812fa5277d18fc2a",
     "RESOLVE_PROMPT": "8195f33d0eec2a60",
     "SHORTLIST_PROMPT": "32ae760793cc8575",
@@ -132,7 +132,9 @@ def test_capability_registry_planner_schema_and_supervisor_agree(tmp_path):
     assert sup.reg.worker_of("verify") == "verification" and INTERNAL["verify"].effect == "none"
     assert {n for n, s in SPECS.items() if s.effect == "object_change"} == {"pick", "place", "pick_place"}
     assert {n for n, s in SPECS.items() if s.safety == "motion"} == {"pick", "place", "pick_place", "return_home",
-                                                                     "inspect", "explore"}
+                                                                     "inspect", "explore", "look"}
+    from agent.supervisor import MOTION
+    assert MOTION == {n for n, s in SPECS.items() if s.safety == "motion"}  # the supervisor's motion set = the specs'
     assert set(EFFECT) <= set(SPECS)
 
 

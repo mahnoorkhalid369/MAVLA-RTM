@@ -11,7 +11,7 @@ authorization, measured verification, safety stops, budgets) and completes only 
 
 Workers (agent/workers.py; logical roles in this process, one shared Gemma / YOLO / ROS bridge):
   perception    observe, describe_scene, answer, locate
-  inspection    inspect, explore (wrist-camera viewpoints, perception/viewpoints.py)
+  inspection    inspect, explore, look (wrist-camera viewpoints, perception/viewpoints.py)
   manipulation  pick, place, pick_place, return_home (the validated PickPlaceWorkflow in three modes)
   planning      decompose (Gemma over the measured objects)
   verification  goal / sub-goal conditions over measured state (agent/goals.py) + the skills' own physical checks
@@ -44,8 +44,8 @@ from agent.task_state import Step, TaskState
 
 STATES = ["INTERPRETING", "DISPATCHING", "DELEGATING", "REVIEWING", "DECIDING", "VERIFYING_GOAL"]
 TERMINAL = ["COMPLETED", "FAILED", "CANCELLED", "UNSUPPORTED"]
-NEEDS_OBSERVATION = {"describe_scene", "answer", "locate", "inspect", "explore", "decompose"}
-MOTION = {"pick", "place", "pick_place", "return_home", "inspect", "explore"}
+NEEDS_OBSERVATION = {"describe_scene", "answer", "locate", "inspect", "explore", "look", "decompose"}  # look: obstacles
+MOTION = {"pick", "place", "pick_place", "return_home", "inspect", "explore", "look"}
 MANIPULATION = {"pick", "place", "pick_place"}
 OBJECTIVES = MANIPULATION | {"locate"}  # what the user asked to move or find: a re-plan cannot drop these conditions
 MAX_STEPS_EXECUTED = 14  # hard bound on worker delegations per instruction
@@ -105,6 +105,7 @@ class GoalSupervisor:
             "locate": ("perception", lambda c, a, r: caps.run_locate(c, a)),
             "inspect": ("inspection", lambda c, a, r: caps.run_inspect(c, a)),
             "explore": ("inspection", lambda c, a, r: caps.run_explore(c, a)),
+            "look": ("inspection", lambda c, a, r: caps.run_look(c, a)),
             "pick": ("manipulation", lambda c, a, r: caps.run_pick(c, a, self.current.index)),
             "place": ("manipulation", lambda c, a, r: caps.run_place(c, a, last_motion(r), self.current.index)),
             "pick_place": ("manipulation", lambda c, a, r: caps.run_pick_place(c, a, last_motion(r), self.current.index)),
