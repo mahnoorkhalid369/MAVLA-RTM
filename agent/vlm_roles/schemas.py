@@ -54,11 +54,47 @@ class Decision(BaseModel):
     reason: str = ""
 
 
+def _notation(text: str):
+    """The predicate notation the prompts use, "name(arg, arg)" -> (name, [args]); None if the text is not in it.
+    A syntax parse (quotes stripped), not an interpretation of words."""
+    import re
+    m = re.fullmatch(r"\s*([A-Za-z_]\w*)\s*\((.*)\)\s*", str(text))
+    if m is None:
+        return None
+    args = [a.strip().strip("'\"").strip() for a in re.split(r",(?=(?:[^\"']*[\"'][^\"']*[\"'])*[^\"']*$)", m.group(2))]
+    return m.group(1), [a for a in args if a]
+
+
 class Condition(BaseModel):
-    """A measurable condition (agent/goals.py predicates); extra keys (e.g. "direction", "frame", "camera") are kept."""
+    """A measurable condition (agent/goals.py predicates); extra keys (e.g. "direction", "frame", "camera") are kept.
+    Given in the prompts' notation ("on(<x>, <y>)", as a string or as "pred"), it is read structurally."""
     model_config = ConfigDict(extra="allow")
     pred: str
     args: list[str] = []
+
+    @model_validator(mode="before")
+    @classmethod
+    def notation(cls, v):
+        if isinstance(v, str):
+            parsed = _notation(v)
+            return {"pred": parsed[0], "args": parsed[1]} if parsed else {"pred": v.strip()}
+        if isinstance(v, dict):
+            v = dict(v)
+            parsed = _notation(v.get("pred", ""))
+            if parsed:
+                v["pred"], v["args"] = parsed[0], v.get("args") or parsed[1]
+            if isinstance(v.get("args"), dict):  # JSON shape: the condition's own keys nested under "args"
+                nested = v.pop("args")
+                v = {**{k: x for k, x in nested.items() if k != "args"}, **v, "args": nested.get("args") or []}
+            if isinstance(v.get("args"), (str, int, float)):
+                v["args"] = [str(v["args"])]
+            args = v.get("args")
+            if (v.get("pred") == "viewing" and v.get("direction") is None and isinstance(args, list) and len(args) == 3
+                    and all(isinstance(x, (int, float)) for x in args)):  # viewing's vector given as its arguments
+                v["direction"], v["args"] = list(args), []
+            elif isinstance(args, list):
+                v["args"] = [x if isinstance(x, str) else str(x) for x in args]
+        return v
     by: Literal["size", "height", "width"] | None = None
     axis: Literal["x", "y"] | None = None
 

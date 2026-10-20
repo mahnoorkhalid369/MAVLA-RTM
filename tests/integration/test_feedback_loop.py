@@ -361,3 +361,17 @@ def test_the_trace_shows_decisions_reviews_plan_updates_and_consultations():
                          confidence="none", tools=["perceive", "gemma:resolve"], uncertainty=["the evidence does not settle it"],
                          needs="explore"))
     assert "tools: perceive, gemma:resolve" in wr.text and "needs: explore" in wr.text and "uncertain:" in wr.text
+
+
+def test_criteria_in_the_prompts_notation_and_nested_shapes_are_read_structurally():
+    """Measured with the real Gemma (2026-10-20): it writes criteria as "on(a, b)" strings or in "pred", and nests a
+    condition's own keys under "args". JSON / notation shape only; free text stays an unknown predicate."""
+    from agent.vlm_roles import GoalPlan
+    p = GoalPlan.model_validate({"success": ["on(red cube, green cube)", {"pred": 'holding("a")'}, "at_home()",
+                                            {"pred": "viewing()", "args": {"direction": [-1, 0, 0], "frame": "robot"}},
+                                            {"pred": "viewing", "args": [0, 0, -1]}, "the robot reports"]})
+    got = [c.model_dump(exclude_none=True) for c in p.success]
+    assert got[:3] == [{"pred": "on", "args": ["red cube", "green cube"]}, {"pred": "holding", "args": ["a"]},
+                       {"pred": "at_home", "args": []}]
+    assert got[3] == {"pred": "viewing", "args": [], "direction": [-1, 0, 0], "frame": "robot"}
+    assert got[4]["direction"] == [0, 0, -1] and got[5]["pred"] == "the robot reports"
