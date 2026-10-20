@@ -111,7 +111,7 @@ class Roles:
                 raise ValueError("state the success criteria (\"success\"): the measurable conditions that are true "
                                  "when the user's goal is reached")
         text = f"{context}\nInstruction: {instruction}" if context else f"Instruction: {instruction}"
-        return self._call("plan", GoalPlan, text, system=PLAN_SYSTEM.format(menu=menu), check=check, max_new_tokens=300)
+        return self._call("plan", GoalPlan, text, system=PLAN_SYSTEM.format(menu=menu), check=check, max_new_tokens=700)
 
     def decide(self, goal: str, progress: str, event: str, menu: str, has_pending: bool, context: str = "") -> Decision:
         """The supervisor's next decision in the closed loop, from the goal, the progress (task ledger) and the latest
@@ -119,7 +119,7 @@ class Roles:
         def check(d: Decision):
             check_decision(d, has_pending)
         text = "\n".join(x for x in (context, f"Goal: {goal}", progress, f"Latest: {event}") if x)
-        return self._call("decide", Decision, text, system=DECIDE_SYSTEM.format(menu=menu), check=check, max_new_tokens=350)
+        return self._call("decide", Decision, text, system=DECIDE_SYSTEM.format(menu=menu), check=check, max_new_tokens=600)
 
     def decompose(self, goal: str, facts: str, ids: list[int], context: str = "", max_steps: int = 8,
                   menu: str = "") -> SubPlan:
@@ -136,7 +136,7 @@ class Roles:
                 raise ValueError(f"unknown references {bad}: use only the listed #ids")
             check_steps(p.steps, max_steps)
         return self._call("decompose", SubPlan, DECOMPOSE_PROMPT.format(goal=goal, facts=facts, context=context, menu=menu),
-                          check=check, max_new_tokens=500)
+                          check=check, max_new_tokens=700)
 
     def answer(self, question: str, facts: str, ids: list[int]) -> SceneAnswer:
         def check(a: SceneAnswer):
