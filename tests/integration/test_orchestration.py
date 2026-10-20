@@ -16,7 +16,7 @@ from agent.vlm_roles import RecordedVLM, Roles, SceneAnswer, SubPlan  # noqa: E4
 from agent.workers import WorkerRegistry  # noqa: E402
 from agent.task_state import TaskState  # noqa: E402
 from tests.support.fakes import GoalTools  # noqa: E402
-from tests.support.runners import plan, run_supervisor as run  # noqa: E402
+from tests.support.runners import plan, problems, run_supervisor as run  # noqa: E402
 
 PICK_A = ("pick", {"object": "a"})
 
@@ -76,8 +76,10 @@ def test_unknown_predicates_and_unbound_objects_are_never_true():
 # ------------------------------------------------------------------------- brown-block regression (CP1)
 def test_planner_rejects_a_placeholder_destination_and_uses_pick():
     """Reproduced failure: 'pick the dark brown block' -> pick_place with target 'null'."""
-    bad = json.dumps({"goal": "g", "steps": [{"do": "pick_place", "object": "dark brown block", "relation": "on", "target": "null"}]})
-    good = json.dumps({"goal": "g", "steps": [{"do": "pick", "object": "dark brown block"}]})
+    bad = json.dumps({"goal": "g", "success": [{"pred": "holding", "args": ["dark brown block"]}],
+                      "steps": [{"worker": "manipulation", "do": "pick_place", "object": "dark brown block", "relation": "on", "target": "null"}]})
+    good = json.dumps({"goal": "g", "success": [{"pred": "holding", "args": ["dark brown block"]}],
+                       "steps": [{"worker": "manipulation", "do": "pick", "object": "dark brown block"}]})
     vlm = RecordedVLM([bad, good])
     p = Roles(vlm).plan_goal("Pick up the dark brown block.", "menu")
     assert [s.capability for s in p.steps] == ["pick"] and "pick_place" in vlm.calls[1]
@@ -89,10 +91,10 @@ def test_pick_only_ends_holding_without_placement_or_home(tmp_path):
     r, ev = run_in(tmp_path, "1", t, instruction="Pick up a.")
     assert r["status"] == "COMPLETED" and r["holding"] == 1 and t.home_calls == 0
     assert "placement" not in [v["check"] for v in r["verifications"]]
-    assert r["goal_check"] == [{"condition": {"pred": "holding", "args": ["a"], "source": "derived"}, "satisfied": True,
+    assert r["goal_check"] == [{"condition": {"pred": "holding", "args": ["a"], "source": "gemma"}, "satisfied": True,
                                 "confidence": "measured", "evidence": r["goal_check"][0]["evidence"], "bound": {"a": 1}}]
-    # the manipulation worker does the pick; the verification worker checks the sub-goal and then the goal
-    assert [e["worker"] for e in ev if e["kind"] == "delegate"] == ["manipulation", "verification", "verification"]
+    # manipulation does the pick; verification checks the subtask, the original goal so far and the final goal
+    assert [e["worker"] for e in ev if e["kind"] == "delegate"] == ["manipulation", "verification", "verification", "verification"]
 
 
 def test_follow_up_names_the_held_object_by_its_id_from_the_context(tmp_path):
@@ -127,10 +129,10 @@ def test_pick_place_of_the_held_object_is_not_substituted_gemma_decides(tmp_path
     n_exec = len(t.executed)
     t.decisions = [{"action": "replan", "steps": [{"do": "place", "object": "#1", "relation": "on", "target": "b"}]}]
     r, ev = run_in(tmp_path, "2", t)
-    assert not any(e["kind"] == "plan_adjusted" for e in ev) and "already in the gripper" in t.decide_calls[0]["event"]
+    assert not any(e["kind"] == "plan_adjusted" for e in ev) and "already in the gripper" in problems(t)[0]["event"]
     assert [s["capability"] for s in r["plan"]] == ["pick_place", "place"] and r["plan"][0]["status"] == "replaced"
     assert r["status"] == "COMPLETED" and len(t.executed) > n_exec
-    assert [g["condition"]["pred"] for g in r["goal_check"]] == ["on", "not_holding"] and all(g["satisfied"] for g in r["goal_check"])
+    assert [g["condition"]["pred"] for g in r["goal_check"]] == ["on"] and all(g["satisfied"] for g in r["goal_check"])
 
 
 # ------------------------------------------------------------------------------------- safety refusals
@@ -173,7 +175,7 @@ def test_nondeterministic_planning_failure_is_still_replanned(tmp_path, monkeypa
     r, ev = run_in(tmp_path, "1", t)
     assert r["status"] == "FAILED" and len(t.plan_calls) == 2 and t.executed == []
     assert [e["accepted"] for e in ev if e["kind"] == "replan"] == [False]  # same step, unchanged situation
-    assert r["replans"] == 2  # the rejected re-plan, then Gemma had nothing more (both count against the budget)
+    assert r["replans"] == 1  # the rejected re-plan counts against the budget; then Gemma had nothing more
 
 
 def test_infeasibility_goes_to_gemma_and_an_identical_retry_is_rejected(tmp_path, monkeypatch):
@@ -187,7 +189,7 @@ def test_infeasibility_goes_to_gemma_and_an_identical_retry_is_rejected(tmp_path
     monkeypatch.setattr(t, "plan_pick", unreachable)
     r, ev = run_in(tmp_path, "1", t)
     assert r["status"] == "FAILED" and r["outcome"] == "infeasible" and t.executed == []
-    assert "out of reach" in t.decide_calls[0]["event"]
+    assert "out of reach" in problems(t)[0]["event"]
     assert [e["accepted"] for e in ev if e["kind"] == "replan"] == [False]
     assert r["holding"] is None
 
@@ -204,24 +206,26 @@ def _decomposer(t, subplan):
 
 
 def test_decomposition_inserts_steps_and_its_conditions_decide_success(tmp_path):
-    t = session([plan(("observe", {}), ("decompose", {"goal": "stack a on b"}))])
-    sp = SubPlan.model_validate({"steps": [{"do": "pick_place", "object": "#1", "relation": "on", "target": "#2"}],
+    t = session([plan(("observe", {}), ("decompose", {"goal": "stack a on b"}), success=[{"pred": "on", "args": ["a", "b"]}])])
+    sp = SubPlan.model_validate({"steps": [{"worker": "manipulation", "do": "pick_place", "object": "#1", "relation": "on", "target": "#2"}],
                                  "goal": [{"pred": "on", "args": ["#1", "#2"]}], "reason": "one move"})
     calls = _decomposer(t, sp)
     r, ev = run_in(tmp_path, "1", t, instruction="stack a on b")
     assert r["status"] == "COMPLETED" and calls and "#1:" in calls[0][1]
     assert [s["capability"] for s in r["plan"]] == ["observe", "decompose", "pick_place"]
-    assert r["plan"][2]["origin"] == "decomposition" and r["conditions"][0]["source"] == "explicit"
-    assert r["goal_check"][0]["satisfied"] is True and t.home_calls == 1
+    assert r["plan"][2]["origin"] == "decomposition"
+    assert [c["source"] for c in r["conditions"]] == ["gemma", "decomposition"]  # added to the original goal, not replacing it
+    assert all(g["satisfied"] is True for g in r["goal_check"]) and t.home_calls == 1
 
 
 def test_decomposition_whose_final_state_is_not_reached_is_not_success(tmp_path):
-    t = session([plan(("observe", {}), ("decompose", {"goal": "g"}))])
-    _decomposer(t, SubPlan.model_validate({"steps": [{"do": "pick_place", "object": "#1", "relation": "on", "target": "#2"}],
+    t = session([plan(("observe", {}), ("decompose", {"goal": "g"}), success=[{"pred": "on", "args": ["c", "b"]}])])
+    _decomposer(t, SubPlan.model_validate({"steps": [{"worker": "manipulation", "do": "pick_place", "object": "#1", "relation": "on", "target": "#2"}],
                                            "goal": [{"pred": "on", "args": ["#3", "#2"]}], "reason": "wrong object"}))
     r, _ = run_in(tmp_path, "1", t)
-    assert r["status"] == "FAILED" and "goal is not shown" in r["message"] and "did not report success" in r["message"]
-    assert "on(#3, #2)" in t.decide_calls[0]["event"]  # the unmet condition is what Gemma decides from
+    assert r["status"] == "FAILED" and "did not report success" in r["message"]
+    last = t.decide_calls[-1]  # the decomposed subtask succeeded on its own terms; the goal is still unmet
+    assert "subtask achieved" in last["event"] and "on(#3, #2)" in last["progress"] and "on(c, b)" in last["progress"]
 
 
 # ------------------------------------------------------------------------------- uncertainty-driven inspection
@@ -241,14 +245,14 @@ def test_uncertain_answer_triggers_a_closer_look_then_answers_again(tmp_path, mo
                                                           {"do": "inspect", "object": "#%d" % t.ids[3]},
                                                           {"do": "answer", "question": "which small one is round?"}]}]
     r, ev = run_in(tmp_path, "1", t)
-    assert "not certain" in t.decide_calls[0]["event"] and "closer look could settle" in t.decide_calls[0]["event"]
+    assert "not certain" in problems(t)[0]["event"] and "closer look could settle" in problems(t)[0]["event"]
     assert r["status"] == "COMPLETED" and inspected == ["#%d" % t.ids[1], "#%d" % t.ids[3]]
     assert [s["capability"] for s in r["plan"]] == ["observe", "answer", "inspect", "inspect", "answer"]
     assert r["plan"][1]["status"] == "replaced" and "object 3" in r["message"] and "not independently verified" in r["message"]
 
 
 def test_gemma_calls_and_tokens_are_counted():
-    vlm = RecordedVLM(['{"goal": "g", "steps": [{"do": "observe"}]}'])
+    vlm = RecordedVLM(['{"goal": "g", "success": [{"pred": "seen"}], "steps": [{"worker": "perception", "do": "observe"}]}'])
     vlm.last_tokens = {"prompt": 10, "answer": 3, "images": 0}
     roles = Roles(vlm)
     roles.plan_goal("look", "menu")

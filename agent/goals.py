@@ -33,6 +33,9 @@ import numpy as np
 PREDICATES = ("holding", "not_holding", "on", "next_to", "left_of", "right_of", "in_front_of", "behind", "located",
               "observed", "ordered", "answered", "reported", "at_home", "viewing", "seen")
 RELATIONS = ("next_to", "left_of", "right_of", "in_front_of", "behind")
+OBJECT_ARGS = ("holding", "on", "located", "observed") + RELATIONS  # predicates whose arguments name objects
+# objects of these may be grounded for the goal check: binding alone never satisfies them (located would be circular)
+GROUNDABLE = ("holding", "on", "observed") + RELATIONS
 # capabilities that move the arm (= agent.capabilities.specs MOTION; kept here so this module needs no pydantic;
 # tests/unit/test_structure.py checks they agree)
 ARM_MOTION = frozenset({"pick", "place", "pick_place", "return_home", "inspect", "explore", "look"})
@@ -185,7 +188,9 @@ class GoalEvaluator:
         return False, "measured", "no answer was produced for this question (a scene report is not an answer)"
 
     def _reported(self, ids, c):
-        return bool(self.s.facts.get("objects")), "measured", "report lists measured objects"
+        n = len(getattr(self.s, "reports", []) or [])
+        return n > 0, "measured", (f"{n} scene report(s) of measured objects given this task" if n
+                                   else "no scene report was given this task")
 
     def _viewing(self, ids, c):
         from agent.directions import view_error

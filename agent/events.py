@@ -301,10 +301,18 @@ def format_trace(e: dict) -> Line | None:  # noqa: C901 (a flat dispatch on the 
     if k == "decomposed":
         steps = "; ".join(f"{s.get('capability')} {_short(s.get('args'), 60)}" for s in e.get("steps") or [])
         return Line(w, "GEMMA", f"decomposed {e.get('goal')!r}: {steps or '(no steps)'}")
+    if k == "binding":
+        return Line(w, "PERCEPTION", f"{e.get('text')!r} -> #{e.get('world_id')} ({e.get('reason')})")
+    if k == "task_memory":
+        return Line(w, "SUPERVISOR", f"task memory: step {e.get('step')} ({e.get('worker')} {e.get('operation')}) tool "
+                                     f"{e.get('tool')}, subtask {e.get('subtask')}; holding {e.get('held')}; "
+                                     f"{e.get('failures')} failure(s) so far")
     if k == "goal_check":
         parts = [f"{_cond(r['condition'])}="
                  f"{ {True: 'yes', False: 'NO', None: 'unknown'}[r.get('satisfied')] } [{r.get('confidence')}]"
                  for r in e.get("results") or []]
-        bad = any(r.get("satisfied") is False for r in e.get("results") or [])
-        return Line(w, "VERIFICATION", "goal check: " + ("; ".join(parts) or "(no conditions)"), "error" if bad else "success")
+        bad = any(r.get("satisfied") is not True and r.get("confidence") != "model" for r in e.get("results") or [])
+        label = "original goal so far" if e.get("scope") == "progress" else "goal check"
+        lvl = ("warn" if e.get("scope") == "progress" else "error") if bad else "success"
+        return Line(w, "VERIFICATION", f"{label}: " + ("; ".join(parts) or "(no conditions)"), lvl)
     return None

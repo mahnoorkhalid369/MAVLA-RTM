@@ -89,16 +89,16 @@ def test_library_scenario_registry_resolves():
 
 
 # --------------------------------------------------------------------------- agent: registry and prompts
-PROMPT_SHA256_16 = {  # deliberate prompt versions; 2026-10-20: no task templates / fixed verbs, open operations;
-    # PARSE_SYSTEM and COMPARE_PROMPT removed with their roles
+PROMPT_SHA256_16 = {  # deliberate prompt versions; 2026-10-20b: original goal (success criteria), worker choice,
+    # task memory in the decision prompt
     "ANSWER_PROMPT": "c10ead90d926c631",
     "CONFIRM_PROMPT": "60d867c0f1984edf",
-    "DECIDE_SYSTEM": "01afdfa8efdc320d",
-    "DECOMPOSE_PROMPT": "828d3e213e83b016",
+    "DECIDE_SYSTEM": "f78d797175d96fac",
+    "DECOMPOSE_PROMPT": "54dcf878452029e6",
     "DESCRIBE_ONE_PROMPT": "30e7f4389ba0ab9c",
     "DESCRIBE_PROMPT": "c76f8ba28b9ad381",
     "IDENTITY_SYSTEM": "a1f6423716b7a05b",
-    "PLAN_SYSTEM": "3d454863e3304414",
+    "PLAN_SYSTEM": "8adf76d69875f553",
     "REQUEST_SYSTEM": "03ac7b84cad87e6b",
     "RESOLVE_PROMPT": "8195f33d0eec2a60",
     "SHORTLIST_PROMPT": "32ae760793cc8575",

@@ -28,14 +28,14 @@ from agent.capabilities.perception import (_ensure_described, _find_in, _locatio
                                            scene_report)
 from agent.capabilities.planning import run_decompose, world_facts
 from agent.capabilities.specs import (EFFECT, INTERNAL, MOTION, SPECS, CapabilitySpec, Context, StepResult, adapt_args,
-                                      available, planner_menu)
+                                      available, check_worker, planner_menu)
 from agent.capabilities.verification import run_verify
 
 __all__ = ["MAX_EXPLORE_VIEWPOINTS", "_wrist_observation", "run_explore", "run_inspect", "run_look", "_failure_outcome", "_skill",
            "run_pick", "run_pick_place", "run_place", "run_return_home", "_ensure_described", "_find_in",
            "_location_check", "_target_mark", "facts_text", "run_answer", "run_describe_scene", "run_locate",
            "run_observe", "scene_report", "run_decompose", "world_facts", "EFFECT", "MOTION", "SPECS", "CapabilitySpec",
-           "Context", "StepResult", "available", "planner_menu", "INTERNAL", "run_verify", "adapt_args", "EXECUTORS"]
+           "Context", "StepResult", "available", "planner_menu", "INTERNAL", "run_verify", "adapt_args", "EXECUTORS", "check_worker"]
 
 _me = _sys.modules[__name__]
 
@@ -58,18 +58,22 @@ def _clear_view(args, req) -> bool:  # an authorized object change follows: park
         s.get("effect") == "object_change" and s.get("authorized") for s in _later(req))
 
 
-EXECUTORS = {  # implemented operation -> (worker, executor(ctx, args, req))
-    "observe": ("perception", lambda c, a, r: _me.run_observe(c, a, clear_view=_clear_view(a, r))),
-    "describe_scene": ("perception", lambda c, a, r: _me.run_describe_scene(c, a)),
-    "answer": ("perception", lambda c, a, r: _me.run_answer(c, a)),
-    "locate": ("perception", lambda c, a, r: _me.run_locate(c, a)),
-    "inspect": ("inspection", lambda c, a, r: _me.run_inspect(c, a)),
-    "explore": ("inspection", lambda c, a, r: _me.run_explore(c, a)),
-    "look": ("inspection", lambda c, a, r: _me.run_look(c, a)),
-    "pick": ("manipulation", lambda c, a, r: _me.run_pick(c, a, _index(r))),
-    "place": ("manipulation", lambda c, a, r: _me.run_place(c, a, _last_motion(r), _index(r))),
-    "pick_place": ("manipulation", lambda c, a, r: _me.run_pick_place(c, a, _last_motion(r), _index(r))),
-    "return_home": ("manipulation", lambda c, a, r: _me.run_return_home(c, a)),
-    "decompose": ("planning", lambda c, a, r: _me.run_decompose(c, a)),
-    "verify": ("verification", lambda c, a, r: _me.run_verify(c, a)),  # internal: not offered to Gemma
+def _worker(name: str) -> str:
+    return (SPECS.get(name) or INTERNAL[name]).worker
+
+
+EXECUTORS = {  # implemented operation -> (worker from its spec, executor(ctx, args, req))
+    "observe": (_worker("observe"), lambda c, a, r: _me.run_observe(c, a, clear_view=_clear_view(a, r))),
+    "describe_scene": (_worker("describe_scene"), lambda c, a, r: _me.run_describe_scene(c, a)),
+    "answer": (_worker("answer"), lambda c, a, r: _me.run_answer(c, a)),
+    "locate": (_worker("locate"), lambda c, a, r: _me.run_locate(c, a)),
+    "inspect": (_worker("inspect"), lambda c, a, r: _me.run_inspect(c, a)),
+    "explore": (_worker("explore"), lambda c, a, r: _me.run_explore(c, a)),
+    "look": (_worker("look"), lambda c, a, r: _me.run_look(c, a)),
+    "pick": (_worker("pick"), lambda c, a, r: _me.run_pick(c, a, _index(r))),
+    "place": (_worker("place"), lambda c, a, r: _me.run_place(c, a, _last_motion(r), _index(r))),
+    "pick_place": (_worker("pick_place"), lambda c, a, r: _me.run_pick_place(c, a, _last_motion(r), _index(r))),
+    "return_home": (_worker("return_home"), lambda c, a, r: _me.run_return_home(c, a)),
+    "decompose": (_worker("decompose"), lambda c, a, r: _me.run_decompose(c, a)),
+    "verify": (_worker("verify"), lambda c, a, r: _me.run_verify(c, a)),  # internal: not offered to Gemma
 }

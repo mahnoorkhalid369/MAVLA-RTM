@@ -146,7 +146,7 @@ def test_disabled_capabilities_show_in_this_supervisors_menu_only(tmp_path):
     plan_goal = t.roles.plan_goal
     t.roles.plan_goal = lambda text, menu, context="": (menus.append(menu), plan_goal(text, menu, context))[1]
     r, _ = run_supervisor(tmp_path, t, ExecutionControls(disabled={"explore"}))
-    explore_line = next(line for line in menus[0].splitlines() if line.startswith("- explore:"))
+    explore_line = next(line.strip() for line in menus[0].splitlines() if line.strip().startswith("- explore:"))
     assert r["status"] == "COMPLETED" and explore_line.endswith("(not available yet)")
     assert all(s.implemented for s in caps.SPECS.values())  # the registry itself is never changed
     assert caps.planner_menu() == caps.planner_menu(caps.available(()))
@@ -160,7 +160,7 @@ def test_disabled_explore_is_not_added_by_the_subtask_policy(tmp_path, monkeypat
     assert "explore" not in [s["capability"] for s in r["plan"]]
 
 
-@pytest.mark.parametrize("limit,planner_calls", [(0, 1), (1, 2)])
+@pytest.mark.parametrize("limit,planner_calls", [(0, 2), (1, 2)])  # Gemma is asked either way; the budget limits changes
 def test_replanning_limit_comes_from_the_controls(tmp_path, monkeypatch, limit, planner_calls):
     from agent import capabilities as caps
     monkeypatch.setattr(caps, "run_answer", lambda ctx, args: caps.StepResult("failed", "could not answer"))

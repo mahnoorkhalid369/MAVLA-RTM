@@ -15,10 +15,11 @@ import json  # noqa: E402
 
 from agent.ask import ScriptedResponder  # noqa: E402
 from agent.controls import ExecutionControls  # noqa: E402
+from agent import capabilities as caps  # noqa: E402
 from agent.events import format_event, format_trace  # noqa: E402
 from agent.vlm_roles import RecordedVLM, Roles, SceneAnswer, VLMFailure  # noqa: E402
 from tests.support.fakes import GoalTools  # noqa: E402
-from tests.support.runners import plan, run_supervisor as run  # noqa: E402
+from tests.support.runners import plan, problems, run_supervisor as run  # noqa: E402
 
 
 def run_with(tmp_path, t, controls, instruction="do it"):
@@ -64,25 +65,27 @@ def test_every_delegation_and_result_carries_the_structured_contract(tmp_path):
 def test_workers_report_and_only_the_supervisor_concludes(tmp_path):
     t = tools([plan(PICK_A)])
     r, ev = run(tmp_path, t, instruction="Pick up a.")
-    assert [e["worker"] for e in of(ev, "delegate")] == ["manipulation", "verification", "verification"]
+    # manipulation does the pick; verification checks the subtask, the original goal so far, and the final goal
+    assert [e["worker"] for e in of(ev, "delegate")] == ["manipulation", "verification", "verification", "verification"]
     assert all(res["status"] in ("completed", "failed", "blocked", "insufficient_info", "cancelled") for res in of(ev, "worker_result"))
     assert [e["status"] for e in of(ev, "report")] == ["COMPLETED"]  # the supervisor's own conclusion, once
     assert r["subgoal_checks"][0]["outcome"] == "completed" and r["goal_check"][0]["satisfied"] is True
 
 
 # ------------------------------------------------------------------------------------- feedback loop
-def test_routine_success_uses_one_gemma_plan_and_no_extra_reasoning(tmp_path):
+def test_a_subtask_that_verifies_the_whole_goal_completes_without_extra_reasoning(tmp_path):
     t = tools([plan(PICK_A)])
     r, ev = run(tmp_path, t, instruction="Pick up a.")
-    assert r["status"] == "COMPLETED" and len(t.plan_calls) == 1 and not of(ev, "consult") and r["consults"] == []
-    assert t.decide_calls == []
-    assert [e["decision"] for e in of(ev, "review")] == ["continue"]
+    assert r["status"] == "COMPLETED" and len(t.plan_calls) == 1 and t.decide_calls == [] and r["consults"] == []
+    assert [e["decision"] for e in of(ev, "review")] == ["original goal verified", "task verified"]
 
 
-def test_a_failed_subgoal_returns_to_gemma_with_the_evidence_and_progress(tmp_path):
+def test_a_failed_subgoal_returns_to_gemma_with_the_evidence_and_the_task_memory(tmp_path):
     """The worker says done; the verification worker measures the opposite; Gemma decides again from that."""
     # the re-plan places whatever is held (no object named: the fake world re-measures the moved object as a new id)
-    t = tools([plan(PICK_A, PLACE_IT), plan(PICK_A, ("place", {"relation": "next_to", "target": "c"}))], misplace=True)
+    goal = [{"pred": "next_to", "args": ["a", "c"]}, {"pred": "not_holding"}]  # the user's words, as Gemma states them
+    t = tools([plan(PICK_A, PLACE_IT, success=goal), plan(PICK_A, ("place", {"relation": "next_to", "target": "c"}))],
+              misplace=True)
     plan_goal = t.roles.plan_goal
 
     def planner(text, menu, context=""):  # after the first plan, placements land where they are asked to
@@ -93,11 +96,11 @@ def test_a_failed_subgoal_returns_to_gemma_with_the_evidence_and_progress(tmp_pa
     r, ev = run(tmp_path, t, instruction="Put a beside c.")
     first_place = next(s for s in r["plan"] if s["capability"] == "place")
     assert first_place["status"] == "replaced" and first_place["outcome"] == "failed"
-    assert "sub-goal is not met" in r["subgoal_checks"][1]["summary"] or r["subgoal_checks"][1]["outcome"] == "failed"
-    first = t.decide_calls[0]  # what Gemma decided from: the measured evidence and the progress
+    assert r["subgoal_checks"][1]["outcome"] == "failed"
+    first = problems(t)[0]  # what Gemma decided from: the measured evidence and the task memory
     assert "sub-goal is not met" in first["event"] and "centres 680 mm apart" in first["event"]
-    assert "Progress so far" in first["progress"] and "sub-goal is not met" in first["progress"]
-    assert r["consults"][0]["action"] == "replan" and r["consults"][0]["accepted"]
+    assert "Original goal (fixed)" in first["progress"] and "Still to achieve: next_to(a, c)" in first["progress"]
+    assert [c["action"] for c in r["consults"]] == ["continue", "replan", "continue"] and r["consults"][1]["accepted"]
     assert r["status"] == "COMPLETED" and any(c["condition"]["pred"] == "next_to" and c["satisfied"] for c in r["goal_check"])
     assert of(ev, "consult") and any("re-planned" in e["reason"] for e in of(ev, "plan_update"))
 
@@ -110,10 +113,10 @@ def test_a_goal_not_shown_after_every_step_asks_gemma_for_the_remaining_steps(tm
     t.request_kind = "question"
     t.roles.answer = lambda q, f, ids: answers.pop(0)
     r, ev = run(tmp_path, t, instruction="How many objects are there?")
-    # the uncertain answer goes to Gemma first (it re-plans the answer); the goal check then passes
-    assert len(t.plan_calls) == 2 and "not certain" in t.decide_calls[0]["event"]
-    assert "Progress so far" in t.decide_calls[0]["progress"]
-    assert [c["action"] for c in r["consults"]] == ["replan"] and r["consults"][0]["steps"] == ["answer"]
+    # observe went as planned (continue); the uncertain answer leaves answered(...) unmet: Gemma re-plans the answer
+    assert len(t.plan_calls) == 2 and "not certain" in problems(t)[0]["event"]
+    assert "answered(How many objects are there?)=NOT met" in problems(t)[0]["progress"]
+    assert [c["action"] for c in r["consults"]] == ["continue", "replan"] and r["consults"][1]["steps"] == ["answer"]
     assert r["status"] == "COMPLETED" and r["replans"] == 1 and "not independently verified" in r["message"]
     assert any(e["decision"] == "ask Gemma" for e in of(ev, "review"))
 
@@ -125,14 +128,15 @@ def test_the_loop_stops_when_the_budget_is_used(tmp_path):
     t.roles.answer = lambda q, f, ids: answers.pop(0)
     t.decisions = [{"action": "replan", "steps": [{"do": "answer", "question": "q again?"}]}] * 3
     r, _ = run_with(tmp_path, t, ExecutionControls(max_replans=1), instruction="Which one?")
-    assert r["status"] == "FAILED" and r["replans"] == 1 and len(t.decide_calls) == 1  # one decision, then stop
+    assert r["status"] == "FAILED" and r["replans"] == 1 and len(problems(t)) == 2  # one change accepted, the next refused
     assert "budget 1 used" in r["message"] and "did not report success" in r["message"]
 
 
-def test_a_zero_budget_never_asks_gemma_again(tmp_path):
+def test_a_zero_budget_allows_no_change_of_course(tmp_path):
     t = tools([plan(PICK_A)], placement=(False,), contact=(False,))
+    t.decisions = [{"action": "replan", "steps": [{"do": "observe"}, {"do": "pick", "object": "a"}]}]
     r, _ = run_with(tmp_path, t, ExecutionControls(max_replans=0), instruction="Pick up a.")
-    assert r["status"] == "FAILED" and t.decide_calls == [] and r["replans"] == 0
+    assert r["status"] == "FAILED" and r["replans"] == 0 and "budget 0 used" in r["message"]
 
 
 def test_unsupported_goals_are_reported_as_such(tmp_path):
@@ -159,7 +163,7 @@ def test_gemma_continue_keeps_the_remaining_plan(tmp_path):
     t.decisions = [{"action": "continue", "reason": "the next step settles it"}]
     r, ev = run(tmp_path, t, instruction="Which one?")
     assert [s["capability"] for s in r["plan"]] == ["observe", "answer", "answer"] and r["status"] == "COMPLETED"
-    assert [e["action"] for e in of(ev, "gemma_decision")] == ["continue"] and len(t.plan_calls) == 1
+    assert [e["action"] for e in of(ev, "gemma_decision")] == ["continue", "continue"] and len(t.plan_calls) == 1
 
 
 def test_gemma_can_ask_the_user_and_decides_again_from_the_answer(tmp_path):
@@ -168,8 +172,8 @@ def test_gemma_can_ask_the_user_and_decides_again_from_the_answer(tmp_path):
                    {"action": "replan", "steps": [{"do": "answer", "question": "q, the left one?"}]}]
     r, ev = run(tmp_path, t, ScriptedResponder(["yes, the left one"]), instruction="Which one?")
     assert r["questions"] == [{"question": "Do you mean the left one?", "answer": "yes, the left one", "asked_by": "gemma"}]
-    assert "'yes, the left one'" in t.decide_calls[1]["event"] and r["status"] == "COMPLETED"
-    line = format_event({"wall": "t", **of(ev, "gemma_decision")[0]})
+    assert any("'yes, the left one'" in c["event"] for c in t.decide_calls) and r["status"] == "COMPLETED"
+    line = format_event({"wall": "t", **[e for e in of(ev, "gemma_decision") if e["action"] == "ask_user"][0]})
     assert line.component == "GEMMA" and "ASK_USER" in line.text
 
 
@@ -177,7 +181,7 @@ def test_no_answer_to_gemmas_question_cancels(tmp_path):
     t = uncertain_then()
     t.decisions = [{"action": "ask_user", "question": "Which one do you mean?"}]
     r, _ = run(tmp_path, t, ScriptedResponder(["cancel"]), instruction="Which one?")
-    assert r["status"] == "CANCELLED" and "No answer" in r["message"] and len(t.decide_calls) == 1
+    assert r["status"] == "CANCELLED" and "No answer" in r["message"] and len(problems(t)) == 1
 
 
 def test_gemma_finish_skips_the_rest_and_the_goal_is_still_measured(tmp_path):
@@ -210,24 +214,120 @@ def test_continue_without_remaining_steps_is_rejected_by_validation(tmp_path):
     assert r["status"] == "FAILED" and "no steps remain" in r["message"]
 
 
-def test_safety_and_authorization_stops_do_not_ask_gemma(tmp_path):
+def test_safety_stops_do_not_ask_gemma_and_refusals_are_reported_to_it(tmp_path):
     t = tools([plan(("pick_place", {"object": "a", "relation": "on", "target": "b"}))], exec_fail="approach")
     r, _ = run(tmp_path, t, instruction="Put a on b.")
     assert r["status"] == "FAILED" and r["outcome"] == "unsafe" and t.decide_calls == []
     t = tools([plan(PICK_A, ("observe", {}))])
     t.request_kind = "description"  # a description request does not authorize picking
+    t.decisions = [{"action": "continue", "reason": "go on without the refused step"}]
     (tmp_path / "q").mkdir()
     r, _ = run(tmp_path / "q", t, instruction="Describe a.")
-    assert r["plan"][0]["status"] == "refused" and t.executed == [] and t.decide_calls == []
+    assert r["plan"][0]["status"] == "refused" and t.executed == [] and "not authorized" in problems(t)[0]["event"]
 
 
 def test_roles_decide_validates_and_retries_with_the_error():
     vlm = RecordedVLM([json.dumps({"action": "replan", "steps": []}),
-                       json.dumps({"action": "replan", "steps": [{"do": "locate", "object": "a"}], "reason": "r"})])
-    d = Roles(vlm).decide("find a", "Progress so far:", "locate failed", "menu", has_pending=False)
+                       json.dumps({"action": "replan", "steps": [{"worker": "perception", "do": "locate", "object": "a"}],
+                                   "reason": "r"})])
+    d = Roles(vlm).decide("find a", "Original goal (fixed): find a", "locate failed", "menu", has_pending=False)
     assert d.action == "replan" and d.steps[0].capability == "locate" and "replan needs the remaining steps" in vlm.calls[1]
     with pytest.raises(VLMFailure):
         Roles(RecordedVLM([json.dumps({"action": "dance"})] * 2)).decide("g", "", "e", "menu", has_pending=True)
+
+
+# ------------------------------------------------------------------- task memory and ownership of the goal
+def test_1_a_worker_succeeds_and_gemma_moves_on_to_the_next_needed_worker(tmp_path):
+    """Perception finds the object (subtask achieved), the original goal is not reached yet, and Gemma hands the next
+    subtask to the manipulation worker."""
+    t = tools([plan(("locate", {"object": "a"}), success=[{"pred": "on", "args": ["a", "b"]}])])
+    t.decisions = [{"action": "replan", "steps": [{"worker": "manipulation", "do": "pick_place", "object": "a",
+                                                   "relation": "on", "target": "b"}], "reason": "a is found: move it"}]
+    r, ev = run(tmp_path, t, instruction="Put a on b.")
+    first = t.decide_calls[0]
+    assert "perception worker: locate" in first["event"] and "subtask achieved" in first["event"]
+    assert "Still to achieve: on(a, b)" in first["progress"]
+    assert [s["worker"] for s in r["plan"]] == ["perception", "manipulation"]
+    assert r["status"] == "COMPLETED" and r["goal_check"][0]["condition"]["pred"] == "on" and r["goal_check"][0]["satisfied"]
+
+
+def test_2_uncertainty_makes_gemma_ask_for_useful_new_evidence(tmp_path, monkeypatch):
+    inspected = []
+
+    def inspect(ctx, args):  # a stand-in inspection: records the wrist observation a real one adds to the world model
+        inspected.append(args["target"])
+        ctx.tools.world.objects[int(args["target"][1:])].observations.append({"camera": "wrist", "frame_id": "w", "mark": 1})
+        return caps.StepResult("completed", "close look from the wrist camera")
+    monkeypatch.setattr(caps, "run_inspect", inspect)
+    answers = [SceneAnswer(answer="maybe #1", object_ids=[1], certain=False, check_closer=[1]),
+               SceneAnswer(answer="#1", object_ids=[1])]
+    t = tools([plan(("observe", {}), ("answer", {"question": "which is round?"}))])
+    t.request_kind = "question"
+    t.roles.answer = lambda q, f, ids: answers.pop(0)
+    t.decisions = [lambda: {"action": "replan", "steps": [{"worker": "inspection", "do": "inspect", "object": "#1"},
+                                                          {"worker": "perception", "do": "answer", "question": "which is round?"}]}]
+    r, _ = run(tmp_path, t, instruction="Which is round?")
+    asked = problems(t)[0]
+    assert "uncertain" in asked["event"] and "closer look could settle" in asked["event"]
+    assert inspected == ["#1"] and r["status"] == "COMPLETED"
+    assert [x["worker"] for x in r["exchanges"]] == ["perception", "perception", "inspection", "perception"]
+
+
+def test_3_a_failed_worker_is_not_repeated_with_unchanged_evidence(tmp_path):
+    t = tools([plan(PICK_A)], contact=(False,))
+    t.decisions = [{"action": "replan", "steps": [{"do": "pick", "object": "a"}]},  # identical, nothing changed
+                   {"action": "replan", "steps": [{"do": "observe"}, {"do": "pick", "object": "a"}]},  # new evidence first
+                   {"action": "stop", "reason": "still no grasp"}]
+    r, ev = run(tmp_path, t, instruction="Pick up a.")
+    assert [e["accepted"] for e in of(ev, "replan")] == [False, True]
+    assert "repeated a failed subtask although nothing changed" in problems(t)[1]["event"]
+    assert r["failures"] and "Failed before: manipulation pick" in problems(t)[1]["progress"]
+
+
+def test_4_a_successful_worker_does_not_complete_an_unfinished_task(tmp_path):
+    """'pick the second block' planned as an observation only: the observation succeeds (tool and subtask), the
+    original goal (holding the block) is not met, so the task is not completed."""
+    t = tools([plan(("observe", {}), success=[{"pred": "holding", "args": ["the second block"]}])])
+    t.decisions = [{"action": "stop", "reason": "I only looked"}]
+    r, ev = run(tmp_path, t, instruction="Pick the second block.")
+    obs = r["exchanges"][0]
+    assert (obs["tool"], obs["subtask"]) == ("completed", "done (no measurable effect)")
+    assert r["status"] != "COMPLETED" and any("holding(the second block)" in u for u in r["unmet"])
+    assert r["conditions"] == [{"pred": "holding", "args": ["the second block"], "source": "gemma"}]
+
+
+def test_5_replanning_keeps_the_original_goal(tmp_path):
+    t = tools([plan(PICK_A, success=[{"pred": "on", "args": ["a", "b"]}])], contact=(False,))
+    t.decisions = [{"action": "replan", "steps": [{"do": "observe"}], "reason": "look again"},
+                   {"action": "finish", "reason": "done"}, {"action": "stop", "reason": "cannot"}]
+    r, ev = run(tmp_path, t, instruction="Put a on b.")
+    assert r["conditions"] == r["original_goal"]["criteria"] == [{"pred": "on", "args": ["a", "b"], "source": "gemma"}]
+    assert r["status"] != "COMPLETED"  # a re-plan to an observation and a "finish" do not change or drop the goal
+    assert [s["capability"] for s in r["plan"]] == ["pick", "observe"]
+
+
+def test_6_completed_only_with_measured_evidence_for_the_original_goal(tmp_path):
+    bad = tools([plan(("pick_place", {"object": "a", "relation": "next_to", "target": "c"}))], misplace=True)
+    bad.decisions = [{"action": "finish", "reason": "the worker said done"}, {"action": "stop", "reason": "-"}]
+    r, _ = run(tmp_path, bad, instruction="Put a beside c.")  # the skill reports done; the placement is measured wrong
+    assert (r["exchanges"][0]["tool"], r["exchanges"][0]["subtask"]) == ("completed", "not achieved")
+    assert r["status"] != "COMPLETED"  # tool success is not task success
+    good = tools([plan(("pick_place", {"object": "a", "relation": "on", "target": "b"}))])
+    (tmp_path / "g").mkdir()
+    r, _ = run(tmp_path / "g", good, instruction="Put a on b.")
+    assert r["status"] == "COMPLETED" and all(g["satisfied"] and g["confidence"] == "measured" for g in r["goal_check"])
+
+
+def test_each_instruction_gets_a_fresh_task_memory(tmp_path):
+    t = tools([plan(PICK_A), plan(("place", {"object": "#1", "relation": "next_to", "target": "c"}))])
+    (tmp_path / "1").mkdir()
+    (tmp_path / "2").mkdir()
+    r1, _ = run(tmp_path / "1", t, instruction="Pick up a.")
+    r2, _ = run(tmp_path / "2", t, instruction="Put it beside c.")
+    import json as _json
+    st2 = _json.loads((tmp_path / "2" / "task_state.json").read_text())
+    assert st2["finalized"] and st2["instruction"] == "Put it beside c." and [x["operation"] for x in st2["exchanges"]] == ["place"]
+    assert r1["original_goal"]["instruction"] == "Pick up a." and r2["original_goal"]["instruction"] == "Put it beside c."
 
 
 # ---------------------------------------------------------------------------------------- shared state

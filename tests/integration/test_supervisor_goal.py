@@ -8,9 +8,9 @@ pytest.importorskip("pydantic")
 pytest.importorskip("langgraph")
 
 from tests.support.fakes import GoalTools  # noqa: E402,F401
-from tests.support.runners import plan, run_supervisor as run  # noqa: E402,F401
+from tests.support.runners import plan, problems, run_supervisor as run  # noqa: E402,F401
 
-from agent.vlm_roles import RecordedVLM, Roles, VLMFailure  # noqa: E402
+from agent.vlm_roles import RecordedVLM, Roles, SceneAnswer, VLMFailure  # noqa: E402
 
 PP = {"object": "a", "relation": "on", "target": "b"}
 PP2 = {**PP, "object": "c"}
@@ -83,10 +83,10 @@ def test_not_visible_target_goes_to_gemma_which_decides_to_explore(tmp_path, exp
     r, ev = run(tmp_path, t)
     assert [s["capability"] for s in r["plan"]] == ["observe", "locate", "explore", "locate"]
     assert [s["status"] for s in r["plan"]][:3] == ["done", "replaced", "done"]
-    assert len(explore_stub) == 1 and "insufficient_info" in t.decide_calls[0]["event"]
-    assert "suggests" not in t.decide_calls[0]["event"]  # Python names no next operation (removed 2026-10-20)
+    assert len(explore_stub) == 1 and "insufficient_info" in problems(t)[0]["event"]
+    assert "suggests" not in problems(t)[0]["event"]  # Python names no next operation (removed 2026-10-20)
     assert r["status"] == "FAILED" and r["outcome"] == "insufficient_info"  # exploring is not finding
-    assert [e["action"] for e in ev if e["kind"] == "gemma_decision"] == ["replan", "stop"]
+    assert [e["action"] for e in ev if e["kind"] == "gemma_decision" and e["action"] != "continue"] == ["replan", "stop"]
 
 
 def test_found_after_exploration_completes_the_goal(tmp_path, monkeypatch):
@@ -143,13 +143,26 @@ def test_a_repeated_failed_step_is_sent_back_to_gemma(tmp_path):
     r, ev = run(tmp_path, t)
     assert r["status"] == "FAILED" and r["replans"] == 2 and "Gemma stopped: cannot place it" in r["message"]
     assert [e["accepted"] for e in ev if e["kind"] == "replan"] == [False]
-    assert "repeated a failed step" in t.decide_calls[1]["event"]
+    assert "repeated a failed subtask" in problems(t)[1]["event"]
 
 
-def test_replanned_alternative_can_complete_the_goal(tmp_path):
+def test_a_replanned_alternative_must_still_satisfy_the_original_goal(tmp_path):
+    """The goal is answered(q): a re-plan to a scene report does not complete it; a re-plan that answers does."""
     t = GoalTools([plan(("answer", {"question": "q"})), plan(("observe", {}), ("describe_scene", {}))])
-    t.roles.answer = lambda q, f, ids: (_ for _ in ()).throw(VLMFailure("bad"))  # first plan fails
+    t.roles.answer = lambda q, f, ids: (_ for _ in ()).throw(VLMFailure("bad"))  # the first answer fails
     r, _ = run(tmp_path, t)
+    assert r["status"] != "COMPLETED" and r["conditions"][0]["pred"] == "answered"
+    calls = []
+
+    def answer(q, f, ids):
+        calls.append(q)
+        if len(calls) == 1:
+            raise VLMFailure("bad")
+        return SceneAnswer(answer="two", object_ids=[1])
+    t = GoalTools([plan(("answer", {"question": "q"})), plan(("observe", {}), ("answer", {"question": "q"}))])
+    t.roles.answer = answer
+    (tmp_path / "2").mkdir()
+    r, _ = run(tmp_path / "2", t)
     assert r["status"] == "COMPLETED" and r["replans"] == 1
     assert [s["status"] for s in r["plan"]] == ["replaced", "done", "done"]
 
@@ -164,7 +177,8 @@ def test_planner_failure_is_a_clear_failure(tmp_path):
 def test_planner_keeps_unknown_operations_and_checks_known_operations_arguments():
     """The operation name is open: an operation nobody implements is kept (reported unavailable when reached, never
     replaced); an implemented operation's arguments are checked by its own interface (one retry with the error)."""
-    good = json.dumps({"goal": "g", "steps": [{"do": "pick_place", "object": "a", "relation": "on", "target": "b"}]})
+    good = json.dumps({"goal": "g", "success": [{"pred": "on", "args": ["a", "b"]}],
+                       "steps": [{"worker": "manipulation", "do": "pick_place", "object": "a", "relation": "on", "target": "b"}]})
     for bad in ('{"steps": [{"do": "pick_place", "object": "a"}]}',
                 '{"steps": [{"do": "answer"}]}',
                 '{"steps": [{"do": "locate"}]}',
@@ -176,7 +190,8 @@ def test_planner_keeps_unknown_operations_and_checks_known_operations_arguments(
         assert p.steps[0].capability == "pick_place" and len(vlm.calls) == 2  # one retry with the error
         assert p.steps[0].args == {"object": {"text": "a", "relation": None, "anchor": None}, "relation": "on",
                                    "reference": {"text": "b", "relation": None, "anchor": None}, "frame": "robot"}
-    p = Roles(RecordedVLM(['{"goal": "g", "steps": [{"do": "move_hand", "offset": [-0.1, 0, 0], "frame": "robot"}]}'])).plan_goal("x", "m")
+    p = Roles(RecordedVLM(['{"goal": "g", "success": [{"pred": "moved"}], "steps": [{"do": "move_hand", "offset": [-0.1, 0, 0], '
+                           '"frame": "robot"}]}'])).plan_goal("x", "m")
     assert p.steps[0].capability == "move_hand" and p.steps[0].args == {"offset": [-0.1, 0, 0], "frame": "robot"}
 
 
@@ -186,7 +201,7 @@ def test_an_operation_nobody_implements_is_reported_unavailable_and_never_replac
     r, ev = run(tmp_path, t, instruction="Move your hand to the left.")
     assert r["status"] == "UNSUPPORTED" and t.executed == [] and "'move_hand' is not implemented" in r["message"]
     assert [s["capability"] for s in r["plan"]] == ["move_hand"]  # nothing substituted
-    assert "not implemented" in t.decide_calls[0]["event"]
+    assert "not implemented" in problems(t)[0]["event"]
 
 
 def test_locate_finds_confirms(tmp_path):
@@ -213,7 +228,7 @@ def test_gemma_plan_is_executed_as_written_and_a_missing_answer_goes_back_to_gem
     (tmp_path / "q").mkdir()
     r, _ = run(tmp_path / "q", t, instruction="How many cubes are there?")
     assert [s["capability"] for s in r["plan"]] == ["observe", "answer"] and "not verified" in r["message"]
-    assert "goal is not shown" in t.decide_calls[0]["event"] and r["status"] == "COMPLETED"
+    assert "answered(How many cubes are there?)=NOT met" in t.decide_calls[0]["progress"] and r["status"] == "COMPLETED"
 
 
 def test_gemma_listing_several_candidates_is_ambiguous_not_inferred_invisible(tmp_path, explore_stub):
@@ -223,7 +238,7 @@ def test_gemma_listing_several_candidates_is_ambiguous_not_inferred_invisible(tm
     t.decisions = [{"action": "stop", "reason": "none of them looks like a banana"}]
     r, _ = run(tmp_path, t)
     assert r["status"] == "CANCELLED" and r["outcome"] == "ambiguous" and "several objects could be 'banana'" in r["message"]
-    assert "ambiguous" in t.decide_calls[0]["event"]
+    assert "several objects could be 'banana'" in problems(t)[0]["event"]
 
 
 def test_locate_with_no_candidate_from_gemma_reports_not_seen(tmp_path):
@@ -236,18 +251,16 @@ def test_locate_with_no_candidate_from_gemma_reports_not_seen(tmp_path):
 def test_result_comes_before_the_observation_summary(tmp_path):
     t = GoalTools([plan(("observe", {}), ("describe_scene", {}))])
     r, _ = run(tmp_path, t)
-    assert r["message"].startswith("I see 3 objects") and r["message"].rstrip().endswith("workspace points from the camera)")
+    assert r["message"].startswith("I see 3 objects") and "workspace points from the camera)" in r["message"]
 
 
-@pytest.mark.xfail(strict=True, reason="awaiting the next phase: the objective guard was a Python rule by capability "
-                   "group (removed 2026-10-20); goal conditions owned by Gemma for the whole task are not designed yet")
 def test_replan_that_drops_the_objective_cannot_complete_the_goal(tmp_path, explore_stub):
     """Regression (live 18:48): 'find the banana' -> locate failed -> a replan [observe] must not complete the goal:
-    the located(banana) condition stays part of the goal, so the final check fails and the loop stops."""
+    located(banana) is part of the ORIGINAL goal (fixed at interpretation), so the check fails and the loop stops."""
     t = GoalTools([plan(("observe", {}), ("locate", {"object": "banana"})), plan(("observe", {}))],
                   ambiguous={"banana": [1, 2, 3]})
     r, ev = run(tmp_path, t)
-    assert r["status"] == "FAILED" and "banana" in r["message"]
+    assert r["status"] == "FAILED" and any("located(banana)" in u for u in r["unmet"])
     assert any(c["condition"]["pred"] == "located" and not c["satisfied"] for c in r["goal_check"])
 
 

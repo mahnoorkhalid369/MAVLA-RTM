@@ -13,15 +13,22 @@ settle the frame or what is meant, say what is missing instead of guessing."""
 
 
 PLAN_SYSTEM = """Plan your own actions for the user's request.
-Work out what the user wants to be TRUE at the end, then list the steps that get there.
-Operations your software implements now (name: what it does; its arguments):
+First state the goal: what must be TRUE at the end, as measurable success criteria. They are the user's goal for the
+whole task: a plan is only a way to get there, and an observation or a look is not the goal unless the user asked only
+for that. Then list the first steps; each step is one subtask for one of your workers.
+Your workers and the operations each one implements now (name: what it does; its arguments):
 {menu}
-Plan what the request actually needs. If it needs an operation that is not listed, still name that operation with
-its arguments: it will be reported as not available. Never put a different operation in its place and never claim
-something you cannot do. Refer to objects with the user's own words, or "#<id>" for objects named in the context.
-Answer with ONE JSON object only. Each step has "do" (the operation) and that operation's arguments, written exactly
-as in its list entry above:
-{{"goal": "<one line>", "steps": [{{"do": "<operation>", "<argument>": "<value>"}}], "reason": "<short>"}}"""
+Measurable conditions (how success is checked): holding(<x>), not_holding(), on(<x>, <y>), next_to / left_of /
+right_of / in_front_of / behind(<x>, <y>), located(<x>), observed(<x>) (seen with the wrist camera), seen() (a fresh
+view; "camera": "table" | "wrist"), viewing() (the wrist camera points along "direction": [x, y, z] in "frame"),
+reported() (the user was told what is seen), answered(<question>), at_home(). <x>, <y> are the user's words for an
+object (the same words as in the steps) or "#<id>".
+Plan what the request actually needs. If it needs an operation that is not listed, still name it with its arguments:
+it will be reported as not available. Never put a different operation in its place and never claim something you
+cannot do. Refer to objects with the user's own words, or "#<id>" for objects named in the context.
+Answer with ONE JSON object only. Each step has "worker", "do" (the operation) and that operation's arguments,
+written exactly as in its list entry above:
+{{"goal": "<one line>", "success": [{{"pred": "<condition>", "args": ["<object>"]}}], "steps": [{{"worker": "<worker>", "do": "<operation>", "<argument>": "<value>"}}], "reason": "<short>"}}"""
 
 
 DECOMPOSE_PROMPT = """Goal: {goal}
@@ -29,13 +36,14 @@ You measured these objects (#id: description; position in mm, x = robot's right,
 footprint and height in mm). Descriptions are a vision model's words (may be imperfect); sizes and positions are measured.
 {facts}
 {context}
-Plan the steps that make the goal true, referring to objects ONLY as "#<id>". Operations your software implements now:
+Plan the steps that make the goal true, referring to objects ONLY as "#<id>". Your workers and the operations each one
+implements now:
 {menu}
 Also list the final conditions to check. Conditions your software can measure: holding, on, next_to, left_of,
 right_of, in_front_of, behind (args ["#a", "#b"]), located, observed, or ordered (args = all the "#ids" in order,
 with "by": size | height | width and "axis": x | y); any other condition is reported as not verifiable.
 Answer with ONE JSON object only:
-{{"steps": [{{"do": "<operation>", "<argument>": "<value>"}}], "goal": [{{"pred": "<condition>", "args": ["#<id>"]}}], "reason": "<short>"}}"""
+{{"steps": [{{"worker": "<worker>", "do": "<operation>", "<argument>": "<value>"}}], "goal": [{{"pred": "<condition>", "args": ["#<id>"]}}], "reason": "<short>"}}"""
 
 
 ANSWER_PROMPT = """You measured these objects with your camera (number: description, position):
@@ -86,18 +94,20 @@ to change, so use only the user's words.
 "evidence": copy, word for word, the part of the request that shows the kind.
 Answer with ONE JSON object only: {"kind": "question" | "description" | "action", "evidence": "<words copied from the request>"}"""
 
-DECIDE_SYSTEM = """You supervise your own work for the user. Your workers do the work and report back; you decide what
-happens next. You see the user's goal, the progress so far (steps, their results, the robot's state) and the latest
-event: a worker's result, a check that did not confirm a sub-goal, or the goal not yet shown by measurement.
+DECIDE_SYSTEM = """You supervise your own work for the user. Your workers do one subtask at a time and report back; after
+every report you decide what happens next. You get the task memory: the user's original goal and its success
+criteria (fixed: a new plan cannot change them), what is still unmet, every subtask so far (which worker, what it
+attempted, what happened, evidence, uncertainty, failures), the robot's state and the steps still planned.
 Choose ONE action:
-  "continue"  keep the remaining plan as it is
-  "replan"    give the remaining steps (they replace the pending ones)
+  "continue"  the next planned step is still the right subtask
+  "replan"    give new remaining steps (they replace the planned ones): another worker, the same worker with changed
+              information, or a different approach
   "ask_user"  ask the user one short question, when only the user can settle it
-  "finish"    the goal is reached (it will still be checked by measurement)
-  "stop"      the goal cannot be achieved, or not safely; say why in "reason"
-Operations your software implements now (an operation that is not listed is reported as not available; never put a
-different one in its place):
+  "finish"    the original goal is reached (it is checked by measurement before anything is reported)
+  "stop"      the original goal cannot be reached, or not safely; say why in "reason"
+Your workers and the operations each one implements now (an operation that is not listed is reported as not
+available; never put a different one in its place):
 {menu}
-Decide from the evidence in the progress and the event. A step that failed will fail again unless something changed.
+A subtask that failed fails again unless something changed (new evidence, motion, the user's answer).
 Answer with ONE JSON object only:
-{{"action": "...", "steps": [{{"do": "<operation>", "<argument>": "<value>"}}], "question": "...", "reason": "<short>"}}"""
+{{"action": "...", "steps": [{{"worker": "<worker>", "do": "<operation>", "<argument>": "<value>"}}], "question": "...", "reason": "<short>"}}"""

@@ -13,6 +13,7 @@ class PlanStep(BaseModel):
     reported unavailable when reached."""
     model_config = ConfigDict(extra="allow")
     do: str
+    worker: str | None = None  # the worker Gemma chooses for this subtask (checked against what each worker implements)
 
     @model_validator(mode="before")
     @classmethod
@@ -54,6 +55,8 @@ class Decision(BaseModel):
 
 
 class Condition(BaseModel):
+    """A measurable condition (agent/goals.py predicates); extra keys (e.g. "direction", "frame", "camera") are kept."""
+    model_config = ConfigDict(extra="allow")
     pred: str
     args: list[str] = []
     by: Literal["size", "height", "width"] | None = None
@@ -67,10 +70,19 @@ class SubPlan(BaseModel):
 
 
 class GoalPlan(BaseModel):
+    """Gemma's reading of the request: the goal in words, its measurable success criteria (the original goal, fixed for
+    the whole task; a plan is only a strategy) and the first steps."""
     goal: str = ""
+    success: list[Condition] = []
     steps: list[PlanStep] = []
-    success: str = ""
     reason: str = ""
+
+    @field_validator("success", mode="before")
+    @classmethod
+    def criteria(cls, v):  # JSON shape only: one condition object or none written as text
+        if isinstance(v, dict):
+            return [v]
+        return v if isinstance(v, list) else []
 
 
 class SceneAnswer(BaseModel):

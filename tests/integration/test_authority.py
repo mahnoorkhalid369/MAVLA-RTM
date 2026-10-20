@@ -68,6 +68,7 @@ def test_question_decomposed_into_pick_and_place_moves_nothing(tmp_path):
 
 def test_planner_naming_a_manipulation_for_a_question_is_refused_before_execution(tmp_path):
     t = question_tools([plan(("pick_place", {"object": "a", "relation": "on", "target": "b"}), ("answer", {"question": QUESTION}))])
+    t.decisions = [{"action": "continue", "reason": "answer without moving anything"}]  # Gemma is told about the refusal
     r, ev = run(tmp_path, t, instruction=QUESTION)
     assert t.executed == [] and r["plan"][0]["status"] == "refused" and r["plan"][1]["status"] == "done"
     blocked = [e for e in ev if e["kind"] == "worker_result" and e.get("outcome") == "unauthorized"]

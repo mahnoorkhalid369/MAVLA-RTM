@@ -63,6 +63,7 @@ def run_describe_scene(ctx: Context, args: dict) -> StepResult:
     _ensure_described(ctx)
     report = scene_report(ctx.obs, ctx.state.facts.get("view_blocked"))
     ctx.log("scene_report", frame_id=ctx.obs.frame_id, objects=len(ctx.obs.marks), text=report)
+    ctx.state.reports.append({"frame_id": ctx.obs.frame_id, "objects": len(ctx.obs.marks)})  # what the user was told
     return StepResult("completed", report)
 
 

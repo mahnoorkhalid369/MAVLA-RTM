@@ -1,5 +1,12 @@
-"""Shared task state of the goal supervisor: one inspectable object per instruction, written to
-<run_dir>/task_state.json after every step.
+"""Task-scoped memory of the goal supervisor: one inspectable object per instruction (created fresh for every
+instruction, finalized when it ends, never reused), written to <run_dir>/task_state.json after every step.
+
+It holds the ORIGINAL goal (the user's words + Gemma's measurable success criteria, fixed for the whole task) apart
+from the plan (only a strategy, which Gemma may change), every worker exchange (request + structured result + the
+verification of its subtask), the remaining objective (the original criteria not yet shown: unmet), failures,
+uncertainties, Gemma's decisions and the robot / world state. memory_text() is what Gemma reads before each decision.
+Three levels of success are kept apart: tool (the operation executed), subtask (its own effect measured), task (the
+original goal verified).
 
 It keeps the kinds of information apart:
   facts        what sensors measured (object geometry from depth, detector scores)
@@ -40,7 +47,8 @@ class Step:
     task_id: str = ""  # WorkerRequest.task_id once delegated
     depends_on: list = field(default_factory=list)  # indices of steps that must be done first
     result: dict = field(default_factory=dict)  # WorkerResult (without bulky data)
-    origin: str = "planner"  # planner | completion rule | subtask policy | decomposition | replan
+    origin: str = "planner"  # planner | decomposition | replan
+    subtask: str = ""  # achieved | not achieved | not measurable | unknown (the step's own effect, measured)
 
 
 @dataclass
@@ -51,13 +59,19 @@ class TaskState:
     plan: list[Step] = field(default_factory=list)
     facts: dict = field(default_factory=dict)  # {"objects": [...], "frame_id", "taken_at", "view_blocked", ...}
     frames: list = field(default_factory=list)  # every observation of this task: {"camera", "frame_id", "objects"}
+    reports: list = field(default_factory=list)  # scene reports given to the user this task: {"frame_id", "objects"}
     hypotheses: dict = field(default_factory=dict)  # {"descriptions": {world_id: {...}}, "answers": [...]}
     verified: list[dict] = field(default_factory=list)  # independent verification records
     actions: list[dict] = field(default_factory=list)  # capability calls with outcome and duration
     questions: list[dict] = field(default_factory=list)
     replans: int = 0
     bindings: dict = field(default_factory=dict)  # reference text / "#id" -> world object id (from worker results)
-    conditions: list = field(default_factory=list)  # desired final state (agent.goals predicates)
+    conditions: list = field(default_factory=list)  # the ORIGINAL goal's success criteria (fixed; agent.goals predicates)
+    original_goal: dict = field(default_factory=dict)  # {"instruction", "statement", "criteria", "source"}: never replanned
+    unmet: list = field(default_factory=list)  # original criteria not yet shown (after the latest goal evaluation)
+    exchanges: list = field(default_factory=list)  # every worker exchange: request, result, verification, memory update
+    failures: list = field(default_factory=list)  # failed subtasks with the evidence and the state signature
+    finalized: bool = False  # True once the instruction ended (COMPLETED / FAILED / CANCELLED / UNSUPPORTED)
     goal_check: list = field(default_factory=list)  # evaluation of the conditions (satisfied, confidence, evidence)
     attempted: list = field(default_factory=list)  # (capability, args) already tried and failed (no identical retry)
     authority: dict = field(default_factory=dict)  # RequestAuthority of this instruction (from the user's words only)
@@ -96,25 +110,39 @@ class TaskState:
         for k, d in obs.descriptions.items():
             self.hypotheses["descriptions"][str(obs.object_ids.get(k, f"mark{k}"))] = {**d, "source": "gemma", "frame_id": obs.frame_id}
 
-    def progress_text(self, limit: int = 900) -> str:
-        """Where the task stands, for Gemma's next decision: done / failed / remaining steps with their results,
-        the held object and the last goal check. Built from this ledger only."""
-        lines = []
-        for s in self.plan:
-            if s.status in ("done", "failed", "replaced", "refused"):
-                said = s.summary.split(" | verification: ")  # the measured evidence matters more than the worker's words
-                text = f"verification: {said[1]}" if len(said) > 1 else said[0]
-                lines.append(f"{s.index}. {s.capability} {_args_text(s.args)} -> {s.outcome or s.status}: {text[:160]}")
-            elif s.status == "pending":
-                lines.append(f"{s.index}. {s.capability} {_args_text(s.args)} -> not started")
+    def memory_text(self, limit: int = 1800) -> str:
+        """The task memory as Gemma reads it before each decision: original goal and criteria (met / unmet), every
+        subtask (worker, what it attempted, what happened, evidence, uncertainty), failures, the robot's state and the
+        steps still planned. Built from this ledger only."""
+        status = {True: "met", False: "NOT met", None: "unknown"}
+        check = {_cond_text(r["condition"]): r for r in self.goal_check}
+        lines = [f"Original goal (fixed): {self.instruction}" + (f" — {self.goal}" if self.goal else "")]
+        lines.append("Success criteria: " + ("; ".join(
+            f"{_cond_text(c)}={status[check[_cond_text(c)]['satisfied']] if _cond_text(c) in check else 'not checked yet'}"
+            for c in self.conditions) or "(none stated)"))
+        if self.unmet:
+            lines.append("Still to achieve: " + "; ".join(self.unmet))
+        lines.append("Subtasks so far:")
+        for e in self.exchanges:
+            lines.append(f"  {e['step']}. {e['worker']} worker, {e['operation']} {e['args']}: tool {e['tool']}, "
+                         f"subtask {e['subtask']} - {e['happened'][:150]}"
+                         + (f" | evidence: {e['evidence'][:120]}" if e.get("evidence") else "")
+                         + (f" | uncertain: {'; '.join(e['uncertainty'])[:120]}" if e.get("uncertainty") else ""))
+        if not self.exchanges:
+            lines.append("  (none yet)")
+        for f in self.failures[-3:]:
+            lines.append(f"Failed before: {f['worker']} {f['operation']} {f['args']} -> {f['outcome']}"
+                         + (" (nothing has changed since)" if f.get("unchanged") else ""))
+        pending = [s for s in self.plan if s.status == "pending"]
+        lines.append("Planned next: " + ("; ".join(f"{s.index}. {s.worker or '?'}: {s.capability} {_args_text(s.args)}"
+                                                    for s in pending) or "(nothing)"))
         held = self.robot.get("held_object")
-        lines.append(f"Robot: {'holding #' + str(held) if held is not None else 'gripper empty'}.")
-        if self.goal_check:
-            lines.append("Goal check: " + "; ".join(
-                f"{c['condition'].get('pred')}({', '.join(map(str, c['condition'].get('args', [])))})="
-                f"{ {True: 'met', False: 'NOT met', None: 'unknown'}[c['satisfied']] }" for c in self.goal_check))
-        text = "Progress so far:\n" + "\n".join(lines)
+        lines.append(f"Robot: {'holding #' + str(held) if held is not None else 'gripper empty'}; "
+                     f"{len(self.frames)} camera frame(s) this task.")
+        text = "\n".join(lines)
         return text if len(text) <= limit else text[:limit - 3] + "..."
+
+    progress_text = memory_text  # the name used before the task memory existed
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -122,6 +150,11 @@ class TaskState:
     def save(self, run_dir) -> None:
         p = Path(run_dir) / "task_state.json"
         p.write_text(json.dumps(self.to_dict(), indent=1, default=str))
+
+
+def _cond_text(c: dict) -> str:
+    tail = f" along {c['direction']} ({c.get('frame', 'robot')})" if c.get("direction") is not None else ""
+    return f"{c.get('pred')}({', '.join(map(str, c.get('args', [])))}){tail}"
 
 
 def _args_text(args: dict) -> str:

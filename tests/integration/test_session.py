@@ -16,10 +16,18 @@ from agent.session import Session  # noqa: E402
 from agent.vlm_roles import RecordedVLM  # noqa: E402
 from tests.support.fakes import GoalTools  # noqa: E402
 
-PICK = '{"goal": "hold it", "steps": [{"do": "pick", "object": "%s"}]}'
-# Gemma names the held object by the #id given in its context (no pronoun binding in Python since 2026-10-20)
-PLACE = '{"goal": "placed", "steps": [{"do": "place", "object": "#1", "relation": "%s", "target": "%s"}]}'
-LOOK = '{"goal": "report", "steps": [{"do": "observe"}, {"do": "describe_scene"}]}'
+# Gemma's answers as the real model writes them: the goal's success criteria, and each step with its worker
+PICK = '{"goal": "hold it", "success": [{"pred": "holding", "args": ["%s"]}], "steps": [{"worker": "manipulation", "do": "pick", "object": "%s"}]}'
+
+
+def place(rel, target):  # Gemma names the held object by the #id given in its context (no pronoun binding in Python)
+    return json.dumps({"goal": "placed", "success": [{"pred": rel, "args": ["#1", target]}, {"pred": "not_holding"}],
+                       "steps": [{"worker": "manipulation", "do": "place", "object": "#1", "relation": rel, "target": target}]})
+
+
+LOOK = ('{"goal": "report", "success": [{"pred": "seen"}, {"pred": "reported"}], "steps": [{"worker": "perception", '
+        '"do": "observe"}, {"worker": "perception", "do": "describe_scene"}]}')
+CONTINUE = '{"action": "continue", "reason": "the next planned subtask is still right"}'
 # each instruction first gets the request classification (agent/authority.py), then the plan
 REQ_PICK = '{"kind": "action", "evidence": "Pick up"}'
 REQ_PUT = '{"kind": "action", "evidence": "Put it"}'
@@ -71,7 +79,7 @@ def new_session(monkeypatch, tmp_path):
 
 def test_two_instructions_in_one_session_share_the_referent(new_session):
     make, run = new_session
-    s = make([REQ_PICK, PICK % "a", REQ_PUT, PLACE % ("next_to", "c")])
+    s = make([REQ_PICK, PICK % ("a", "a"), REQ_PUT, place("next_to", "c")])
     r1, _ = run(s, "Pick up a.")
     r2, ev = run(s, "Put it beside c.")
     assert (r1["status"], r1["holding"]) == ("COMPLETED", 1)
@@ -85,7 +93,7 @@ def test_two_instructions_in_one_session_share_the_referent(new_session):
 
 def test_pick_sample_a1_then_put_it_in_the_processing_rack(new_session):
     make, run = new_session
-    s = make([REQ_PICK, PICK % "sample A1", REQ_PUT, PLACE % ("on", "processing rack")])
+    s = make([REQ_PICK, PICK % ("sample A1", "sample A1"), REQ_PUT, place("on", "processing rack")])
     run(s, "Pick up sample A1.")
     r, ev = run(s, "Put it in the processing rack.")
     assert r["status"] == "COMPLETED" and r["plan"][0]["capability"] == "place"
@@ -95,8 +103,8 @@ def test_pick_sample_a1_then_put_it_in_the_processing_rack(new_session):
 
 def test_a_new_session_does_not_inherit_held_state(new_session):
     make, run = new_session
-    run(make([REQ_PICK, PICK % "a"]), "Pick up a.")
-    fresh = make([REQ_PUT, PLACE % ("next_to", "c"), STOP])
+    run(make([REQ_PICK, PICK % ("a", "a")]), "Pick up a.")
+    fresh = make([REQ_PUT, place("next_to", "c"), STOP])
     r, ev = run(fresh, "Put it beside c.")
     assert len(SessionTools.instances) == 2 and SessionTools.instances[1].held_object is None
     assert r["status"] == "UNSUPPORTED" and "nothing is held" in r["message"] and SessionTools.instances[1].executed == []
@@ -105,8 +113,8 @@ def test_a_new_session_does_not_inherit_held_state(new_session):
 
 def test_failed_and_cancelled_instructions_do_not_corrupt_the_session(new_session):
     make, run = new_session
-    dance = '{"steps": [{"do": "dance"}]}'  # an operation nobody implements: reported unavailable, then Gemma stops
-    s = make([REQ_PICK, PICK % "a", REQ_DANCE, dance, STOP, REQ_PUT, PLACE % ("next_to", "zz"), REQ_PUT, PLACE % ("next_to", "c")])
+    dance = '{"success": [{"pred": "danced"}], "steps": [{"do": "dance"}]}'  # nobody implements it: reported, then Gemma stops
+    s = make([REQ_PICK, PICK % ("a", "a"), REQ_DANCE, dance, STOP, REQ_PUT, place("next_to", "zz"), REQ_PUT, place("next_to", "c")])
     run(s, "Pick up a.")
     r_fail, _ = run(s, "Do a dance.")
     t = SessionTools.instances[0]
@@ -122,7 +130,7 @@ def test_failed_and_cancelled_instructions_do_not_corrupt_the_session(new_sessio
 
 def test_goal_conditions_do_not_leak_into_the_next_instruction(new_session):
     make, run = new_session
-    s = make([REQ_PICK, PICK % "a", REQ_LOOK, LOOK])
+    s = make([REQ_PICK, PICK % ("a", "a"), REQ_LOOK, LOOK, CONTINUE])
     r1, _ = run(s, "Pick up a.")
     r2, _ = run(s, "Take a look at the table.")
     assert [c["pred"] for c in r1["conditions"]] == ["holding"]
@@ -134,7 +142,7 @@ def test_a_dropped_object_is_not_trusted_as_held(new_session):
     """Remembered 'held' but the fingers are open at the next instruction: the claim is dropped, the object's pose
     is unknown, and no place motion runs."""
     make, run = new_session
-    s = make([REQ_PICK, PICK % "a", REQ_PUT, PLACE % ("next_to", "c"), STOP])
+    s = make([REQ_PICK, PICK % ("a", "a"), REQ_PUT, place("next_to", "c"), STOP])
     run(s, "Pick up a.")
     t = SessionTools.instances[0]
     t.contact, n = [False], len(t.executed)
@@ -147,7 +155,7 @@ def test_a_dropped_object_is_not_trusted_as_held(new_session):
 
 def test_losing_the_object_during_the_instruction_blocks_the_place(new_session):
     make, run = new_session
-    s = make([REQ_PICK, PICK % "a", REQ_PUT, PLACE % ("next_to", "c"), STOP])
+    s = make([REQ_PICK, PICK % ("a", "a"), REQ_PUT, place("next_to", "c"), STOP])
     run(s, "Pick up a.")
     t = SessionTools.instances[0]
     t.contact, n = [True, False], len(t.executed)  # verified at the start, gone by the place step

@@ -37,9 +37,11 @@ def check_steps(steps: list[PlanStep], max_steps: int = 6) -> None:
     interpretation of the user's words."""
     if len(steps) > max_steps:
         raise ValueError(f"at most {max_steps} steps")
+    from agent.capabilities.specs import check_worker  # the operations' interfaces (lazy: no import cycle)
     for i, st in enumerate(steps, 1):
         try:
             st.args
+            check_worker(st.do, st.worker)
         except ValueError as exc:
             raise ValueError(f"step {i}: {exc}") from None
 
@@ -105,6 +107,9 @@ class Roles:
         each capability needs (placeholder strings like "null" count as missing), step count, consistency rules."""
         def check(p: GoalPlan):
             check_steps(p.steps, max_steps)
+            if p.steps and not p.success:
+                raise ValueError("state the success criteria (\"success\"): the measurable conditions that are true "
+                                 "when the user's goal is reached")
         text = f"{context}\nInstruction: {instruction}" if context else f"Instruction: {instruction}"
         return self._call("plan", GoalPlan, text, system=PLAN_SYSTEM.format(menu=menu), check=check, max_new_tokens=300)
 

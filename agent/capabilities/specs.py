@@ -28,6 +28,7 @@ class CapabilitySpec:
     implemented: bool = True
     effect: str = "none"  # none | sensing | object_change (agent/authority.py): what running it may change
     adapt: Callable | None = None  # Gemma's flat step fields -> the executor's arguments; ValueError = invalid
+    worker: str = ""  # the worker that implements it
     needs_view: bool = False  # needs a fresh measured observation first (the supervisor takes one)
     verify_after: bool = False  # its effect is measurable: the verification worker checks it right after the step
 
@@ -153,7 +154,7 @@ _SPECS = [
                    "not found / ambiguous / too wide / out of reach / no contact / lost while lifting",
                    "finger contact at the grasp and retention after the lift (finger stall)"),
     CapabilitySpec("place", "put the object the robot is HOLDING onto or next to another object",
-                   '{"do": "place", "object": "it", "relation": "on" | "next_to" | "left_of" | "right_of" | "in_front_of" | '
+                   '{"do": "place", "object": "#<held id>", "relation": "on" | "next_to" | "left_of" | "right_of" | "in_front_of" | '
                    '"behind", "target": "<destination object>"}', "motion",
                    "an object is held; destination resolvable", "the held object stands at the destination; arm at HOME",
                    "nothing held / destination not found / no free reachable spot / collision / placement out of tolerance",
@@ -195,10 +196,13 @@ EFFECT = {"pick": "object_change", "place": "object_change", "pick_place": "obje
 ADAPT = {"observe": _none("observe"), "describe_scene": _none("describe_scene"), "answer": _answer,
          "locate": _target("locate"), "pick": _pick, "place": _place, "decompose": _decompose, "pick_place": _pick_place,
          "return_home": _none("return_home"), "inspect": _target("inspect"), "look": _look, "explore": _explore}
+WORKER = {"observe": "perception", "describe_scene": "perception", "answer": "perception", "locate": "perception",
+          "inspect": "inspection", "explore": "inspection", "look": "inspection", "pick": "manipulation",
+          "place": "manipulation", "pick_place": "manipulation", "return_home": "manipulation", "decompose": "planning"}
 NEEDS_VIEW = {"describe_scene", "answer", "locate", "inspect", "explore", "look", "decompose"}  # measured view first
 VERIFY_AFTER = {"pick", "place", "pick_place", "return_home", "locate", "inspect", "look"}  # measurable effect
 
-SPECS: dict[str, CapabilitySpec] = {s.name: replace(s, effect=EFFECT.get(s.name, "none"), adapt=ADAPT[s.name],
+SPECS: dict[str, CapabilitySpec] = {s.name: replace(s, effect=EFFECT.get(s.name, "none"), adapt=ADAPT[s.name], worker=WORKER[s.name],
                                                     needs_view=s.name in NEEDS_VIEW, verify_after=s.name in VERIFY_AFTER)
                                     for s in _SPECS}
 
@@ -210,7 +214,7 @@ INTERNAL: dict[str, CapabilitySpec] = {
     "verify": CapabilitySpec("verify", "compare measured state with a goal or sub-goal's conditions", '{"conditions": [...]}',
                              "read_only", "conditions bound to world objects", "evidence: satisfied / not / undecidable",
                              "no evidence for a condition", "goal predicates over measured state (agent/goals.py)",
-                             effect="none"),
+                             effect="none", worker="verification"),
 }
 
 
@@ -224,9 +228,27 @@ def adapt_args(name: str, raw: dict) -> dict:
 
 
 def planner_menu(specs: dict[str, CapabilitySpec] | None = None) -> str:
-    """The capability list as the planner sees it (default: SPECS)."""
-    return "\n".join(f"- {s.name}: {s.summary}. args {s.args}" + ("" if s.implemented else " (not available yet)")
-                     for s in (SPECS if specs is None else specs).values())
+    """The workers, their responsibilities and the operations each one implements now, as Gemma sees them."""
+    from agent.workers import RESPONSIBILITY
+    specs = SPECS if specs is None else specs
+    out = []
+    for w in dict.fromkeys(s.worker for s in specs.values()):
+        out.append(f"{w} worker: {RESPONSIBILITY.get(w, '')}")
+        out += [f"  - {s.name}: {s.summary}. args {s.args}" + ("" if s.implemented else " (not available yet)")
+                for s in specs.values() if s.worker == w]
+    return "\n".join(out)
+
+
+def check_worker(name: str, worker: str | None) -> None:
+    """Interface check of Gemma's worker choice: the named worker must implement the operation. An operation nobody
+    implements is not an error here (it is reported unavailable when reached)."""
+    spec = SPECS.get(name)
+    if spec is None:
+        return
+    if not worker:
+        raise ValueError(f"{name}: name the worker for this subtask (\"worker\")")
+    if worker.strip().lower() != spec.worker:
+        raise ValueError(f"{name}: the {worker} worker does not implement {name}; it is an operation of the {spec.worker} worker")
 
 
 def available(disabled=()) -> dict[str, CapabilitySpec]:

@@ -26,7 +26,8 @@ class SystemRecorder:
 # ------------------------------------------------------------------------------------------ shared identity
 def test_the_identity_is_put_in_front_of_every_embodied_role_once():
     vlm = SystemRecorder([json.dumps({"kind": "description", "evidence": "look"}),
-                          json.dumps({"goal": "g", "steps": [{"do": "observe"}], "reason": "r"}),
+                          json.dumps({"goal": "g", "success": [{"pred": "seen"}], "steps": [{"worker": "perception", "do": "observe"}],
+                                      "reason": "r"}),
                           json.dumps({"action": "stop", "reason": "r"}),
                           json.dumps({"answer": "two", "object_ids": [1]})])
     r = Roles(vlm)
@@ -105,12 +106,14 @@ def test_look_is_a_sensing_motion_of_the_inspection_worker_in_the_menu():
 
 def test_look_steps_carry_an_explicit_direction_and_frame():
     from agent.vlm_roles import Roles
-    vlm = RecordedVLM([json.dumps({"goal": "g", "steps": [{"do": "look", "direction": "left"}]}),
-                       json.dumps({"goal": "g", "steps": [{"do": "look", "direction": [-1, 0, 0], "frame": "robot"}]})])
+    ok = {"goal": "g", "success": [{"pred": "viewing", "direction": [-1, 0, 0], "frame": "robot"}]}
+    vlm = RecordedVLM([json.dumps({**ok, "steps": [{"worker": "inspection", "do": "look", "direction": "left"}]}),
+                       json.dumps({**ok, "steps": [{"worker": "inspection", "do": "look", "direction": [-1, 0, 0], "frame": "robot"}]})])
     p = Roles(vlm).plan_goal("look at your left side", "menu")
     assert p.steps[0].args == {"direction": [-1.0, 0.0, 0.0], "frame": "robot"} and "three numbers" in vlm.calls[1]
     with pytest.raises(VLMFailure):  # a word is not turned into a vector by Python; an unknown frame is not guessed
-        Roles(RecordedVLM([json.dumps({"goal": "g", "steps": [{"do": "look", "direction": [1, 0, 0], "frame": "mine"}]})] * 2)).plan_goal("x", "m")
+        Roles(RecordedVLM([json.dumps({**ok, "steps": [{"worker": "inspection", "do": "look", "direction": [1, 0, 0],
+                                                       "frame": "mine"}]})] * 2)).plan_goal("x", "m")
 
 
 def test_frames_are_explicit_and_differ():
@@ -160,7 +163,7 @@ def test_no_looking_around_while_holding_an_object():
 
 # ------------------------------------------------------------------------------- measured goal verification
 from agent.goals import GoalEvaluator, derive_conditions  # noqa: E402
-from tests.support.runners import plan, run_supervisor as run  # noqa: E402
+from tests.support.runners import plan, problems, run_supervisor as run  # noqa: E402
 
 LOOK_LEFT = ("look", {"direction": [-1, 0, 0], "frame": "robot"})
 
@@ -222,13 +225,13 @@ def test_a_camera_that_ends_up_pointing_elsewhere_fails_the_goal(tmp_path, monke
 
 
 def test_a_plan_with_nothing_verifiable_is_never_completed(tmp_path, monkeypatch):
-    """E.g. Gemma answers "look left" with an explore that finds nothing: no step sets a checkable effect, so the
-    goal is not shown; Gemma is asked, and without a better plan the task fails instead of completing."""
+    """A goal with no measurable success criteria is never COMPLETED: the worker's success is not the user's goal."""
     monkeypatch.setattr(caps, "run_explore", lambda ctx, args: caps.StepResult("completed", "looked around"))
-    t = ArmTools([plan(("explore", {"object": "thing"}))])
-    t.decisions = [{"action": "stop", "reason": "nothing to check"}]
+    t = ArmTools([plan(("explore", {"object": "thing"}), success=[])])
+    t.decisions = [{"action": "finish", "reason": "looked"}, {"action": "stop", "reason": "nothing to check"}]
     r, _ = run(tmp_path, t, instruction="Look around.")
-    assert r["status"] == "FAILED" and r["conditions"] == [] and "no step of the plan sets an effect" in t.decide_calls[0]["event"]
+    assert r["status"] == "FAILED" and r["conditions"] == [] and "(none stated)" in t.decide_calls[0]["progress"]
+    assert r["exchanges"][0]["tool"] == "completed"  # tool success, yet no task success
 
 
 def test_moving_the_hand_is_not_turned_into_looking(tmp_path):

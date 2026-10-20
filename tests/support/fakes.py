@@ -168,17 +168,26 @@ class GoalTools(StubTools):
             return p
         self.decisions: list = []  # scripted Gemma decisions (Decision / dict / Exception / callable) for the closed loop
         self.decide_calls: list = []  # what Gemma was given at each decision: {"event", "progress", "context"}
+        self.continue_on_success = True  # scripted Gemma: "continue" after a subtask that went as planned
 
         def decide(goal, progress, event, menu, has_pending, context=""):
-            """Scripted Gemma decision, validated like Roles.decide. Without scripted decisions the next scripted plan
-            is Gemma's re-plan (an empty plan = stop); with neither left, Gemma fails (VLMFailure)."""
+            """Scripted Gemma decision, validated like Roles.decide: "continue" when the last subtask went as planned
+            and steps remain (continue_on_success); otherwise the scripted decisions in order (steps without a worker
+            get the implementing one, as Gemma would name it); otherwise the next scripted plan is Gemma's re-plan (an empty plan = stop);
+            with nothing left, Gemma fails (VLMFailure)."""
             from agent.vlm_roles import Decision, VLMFailure, check_decision
+            from tests.support.runners import scripted_step
             tools.decide_calls.append({"event": event, "progress": progress, "context": context})
-            if tools.decisions:
+            ok = ", subtask achieved" in event or ", subtask done" in event
+            if has_pending and ok and tools.continue_on_success:
+                d = Decision(action="continue", reason="the next planned subtask is still right")
+            elif tools.decisions:
                 d = tools.decisions.pop(0)
                 d = d() if callable(d) else d  # built at decision time (e.g. from ids measured during the run)
                 if isinstance(d, Exception):
                     raise d
+                if isinstance(d, dict):
+                    d = {**d, "steps": [scripted_step(x.pop("do"), x) for x in (dict(y) for y in d.get("steps", []))]}
                 d = d if isinstance(d, Decision) else Decision.model_validate(d)
             elif tools.plans:
                 p = tools.roles.plan_goal(event, menu, context="\n".join(x for x in (context, progress) if x))
