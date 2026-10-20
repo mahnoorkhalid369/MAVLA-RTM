@@ -95,12 +95,14 @@ def test_pick_only_ends_holding_without_placement_or_home(tmp_path):
     assert [e["worker"] for e in ev if e["kind"] == "delegate"] == ["manipulation", "verification", "verification"]
 
 
-def test_follow_up_pronoun_binds_to_the_held_object_and_places_it(tmp_path):
-    t = session([plan(PICK_A), plan(("place", {"object": "it", "relation": "next_to", "target": "c"}))])
+def test_follow_up_names_the_held_object_by_its_id_from_the_context(tmp_path):
+    """No pronoun binding in Python (removed 2026-10-20): Gemma gets the held object's #id in its context and uses it."""
+    t = session([plan(PICK_A), plan(("place", {"object": "#1", "relation": "next_to", "target": "c"}))])
     run_in(tmp_path, "1", t, instruction="Pick up a.")
     r, ev = run_in(tmp_path, "2", t, instruction="Put it beside c.")
+    assert "HOLDING object #1" in t.plan_contexts[1]
     assert r["status"] == "COMPLETED" and r["holding"] is None and t.home_calls == 1
-    assert [(e["text"], e["world_id"]) for e in ev if e["kind"] == "binding"] == [("it", 1)]
+    assert not [e for e in ev if e["kind"] == "binding"]
     assert len(t.planned) == 2  # one grasp plan, one place-held plan: the object was not regrasped
     assert {c["pred"] for c in r["conditions"]} == {"next_to", "not_holding"}
     assert all(g["satisfied"] for g in r["goal_check"])
@@ -108,21 +110,26 @@ def test_follow_up_pronoun_binds_to_the_held_object_and_places_it(tmp_path):
 
 def test_placing_far_from_the_reference_is_not_success(tmp_path):
     """Negative: the held object ends 680 mm from c (wrong spot): measured goal check says no."""
-    t = session([plan(PICK_A), plan(("place", {"object": "it", "relation": "next_to", "target": "c"}))], misplace=True)
+    t = session([plan(PICK_A), plan(("place", {"object": "#1", "relation": "next_to", "target": "c"}))], misplace=True)
     run_in(tmp_path, "1", t, instruction="Pick up a.")
     r, _ = run_in(tmp_path, "2", t, instruction="Put it beside c.")
-    assert r["status"] == "FAILED" and "goal is not met" in r["message"] and "did not report success" in r["message"]
+    assert r["status"] == "FAILED" and "sub-goal is not met" in r["message"] and "did not report success" in r["message"]
     # caught by the verification worker right after the place step (the sub-goal check), before the final check
     nt = next(g for c in r["subgoal_checks"] for g in c["results"] if g["condition"]["pred"] == "next_to")
     assert nt["satisfied"] is False and nt["confidence"] == "measured" and "680 mm apart" in nt["evidence"]
 
 
-def test_pick_place_of_the_held_object_becomes_place(tmp_path):
-    t = session([plan(PICK_A), plan(("pick_place", {"object": "it", "relation": "on", "target": "b"}))])
+def test_pick_place_of_the_held_object_is_not_substituted_gemma_decides(tmp_path):
+    """The supervisor no longer turns pick_place of the held object into place (removed 2026-10-20): the worker reports
+    the fact without moving, and Gemma re-plans."""
+    t = session([plan(PICK_A), plan(("pick_place", {"object": "#1", "relation": "on", "target": "b"}))])
     run_in(tmp_path, "1", t)
+    n_exec = len(t.executed)
+    t.decisions = [{"action": "replan", "steps": [{"do": "place", "object": "#1", "relation": "on", "target": "b"}]}]
     r, ev = run_in(tmp_path, "2", t)
-    assert r["status"] == "COMPLETED" and r["plan"][-1]["capability"] == "place"
-    assert any(e["kind"] == "plan_adjusted" for e in ev)
+    assert not any(e["kind"] == "plan_adjusted" for e in ev) and "already in the gripper" in t.decide_calls[0]["event"]
+    assert [s["capability"] for s in r["plan"]] == ["pick_place", "place"] and r["plan"][0]["status"] == "replaced"
+    assert r["status"] == "COMPLETED" and len(t.executed) > n_exec
     assert [g["condition"]["pred"] for g in r["goal_check"]] == ["on", "not_holding"] and all(g["satisfied"] for g in r["goal_check"])
 
 
@@ -139,12 +146,6 @@ def test_place_with_an_empty_gripper_is_unsupported(tmp_path):
     t = session([plan(("place", {"object": "a", "relation": "on", "target": "b"}))])
     r, _ = run_in(tmp_path, "1", t)
     assert r["status"] == "UNSUPPORTED" and t.executed == []
-
-
-def test_pronoun_with_nothing_to_refer_to_asks_for_the_object(tmp_path):
-    t = session([plan(("place", {"object": "it", "relation": "on", "target": "b"}))])
-    r, _ = run_in(tmp_path, "1", t)
-    assert r["status"] == "CANCELLED" and r["outcome"] == "insufficient_info" and t.executed == []
 
 
 def test_failure_classes_map_to_replannable_or_final_outcomes():
@@ -195,7 +196,7 @@ def test_infeasibility_goes_to_gemma_and_an_identical_retry_is_rejected(tmp_path
 def _decomposer(t, subplan):
     calls = []
 
-    def decompose(goal, facts, ids, context=""):
+    def decompose(goal, facts, ids, context="", menu=""):
         calls.append((goal, facts, ids))
         return subplan
     t.roles.decompose = decompose
@@ -240,7 +241,7 @@ def test_uncertain_answer_triggers_a_closer_look_then_answers_again(tmp_path, mo
                                                           {"do": "inspect", "object": "#%d" % t.ids[3]},
                                                           {"do": "answer", "question": "which small one is round?"}]}]
     r, ev = run_in(tmp_path, "1", t)
-    assert "not certain" in t.decide_calls[0]["event"] and "suggests: closer_look" in t.decide_calls[0]["event"]
+    assert "not certain" in t.decide_calls[0]["event"] and "closer look could settle" in t.decide_calls[0]["event"]
     assert r["status"] == "COMPLETED" and inspected == ["#%d" % t.ids[1], "#%d" % t.ids[3]]
     assert [s["capability"] for s in r["plan"]] == ["observe", "answer", "inspect", "inspect", "answer"]
     assert r["plan"][1]["status"] == "replaced" and "object 3" in r["message"] and "not independently verified" in r["message"]

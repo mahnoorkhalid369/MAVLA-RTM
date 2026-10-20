@@ -43,9 +43,7 @@ class StubTools:
         self.bridge = SimpleNamespace(q=lambda: np.zeros(6))
         self.held_box = None
         self.executed = []
-        from agent.vlm_roles import TaskSpec
-        self.roles = SimpleNamespace(parse=lambda s: TaskSpec.model_validate(
-            {"task": self.task, "object": {"text": "a"}, "relation": "on", "reference": {"text": "b"}}))
+        self.roles = SimpleNamespace()
 
     def park_for_view(self, xy):
         return {"ok": True}

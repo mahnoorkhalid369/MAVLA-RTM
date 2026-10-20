@@ -4,7 +4,7 @@ final conditions (Gemma; the supervisor filters the steps by the request's autho
 from __future__ import annotations
 
 from agent.capabilities.perception import _ensure_described
-from agent.capabilities.specs import Context, StepResult
+from agent.capabilities.specs import Context, StepResult, planner_menu
 from agent.vlm_roles import VLMFailure
 
 
@@ -30,11 +30,11 @@ def run_decompose(ctx: Context, args: dict) -> StepResult:
     facts, ids = world_facts(ctx)
     held = f"The gripper holds #{ctx.tools.held_object}." if ctx.tools.held_object else "The gripper is empty."
     try:
-        sp = ctx.tools.roles.decompose(args["goal"], facts, ids, context=held)
+        sp = ctx.tools.roles.decompose(args["goal"], facts, ids, context=held, menu=planner_menu())
     except VLMFailure as exc:
         return StepResult("failed", f"could not plan the goal over the measured objects: {exc}")
     if not sp.steps:
-        return StepResult("infeasible", f"the goal cannot be planned with the available skills: {sp.reason}")
+        return StepResult("infeasible", f"the goal cannot be planned over the measured objects: {sp.reason}")
     steps = [(st.capability, st.args) for st in sp.steps]
     conds = [c.model_dump(exclude_none=True) for c in sp.goal]
     ctx.log("decomposed", goal=args["goal"], steps=[{"capability": c, "args": a} for c, a in steps], conditions=conds,

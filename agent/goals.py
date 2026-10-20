@@ -18,8 +18,8 @@ Predicates (reusable building blocks, not a list of supported sentences):
   answered(question)      an answer was produced (confidence: model)
   reported()              a scene report was produced
   at_home()               HOME joint check passed
-  viewing(direction)      the wrist camera points that way now ("frame": robot | camera): forward kinematics of the
-                          measured joint state, within agent/directions.VIEW_TOLERANCE_DEG
+  viewing()               the wrist camera points along "direction" ([x, y, z] in "frame": robot | camera) now:
+                          forward kinematics of the measured joint state (agent/directions.py tolerances)
   seen()                  a frame from that "camera" (table | wrist) was taken and measured in this task
 Anything else -> satisfied None, "no evaluator for <pred>" (reported as unverifiable, never as done).
 """
@@ -80,7 +80,7 @@ def derive_conditions(steps) -> list[dict]:
         elif cap == "return_home":
             out.append({"pred": "at_home", "args": []})
         elif cap == "look":
-            out.append({"pred": "viewing", "args": [a.get("direction")], "frame": a.get("frame") or "robot"})
+            out.append({"pred": "viewing", "args": [], "direction": a.get("direction"), "frame": a.get("frame") or "robot"})
         elif cap == "observe":
             out.append({"pred": "seen", "args": [], "camera": "table"})
     # a later pick of the same object supersedes nothing; a later place supersedes an earlier holding(x)
@@ -189,7 +189,7 @@ class GoalEvaluator:
 
     def _viewing(self, ids, c):
         from agent.directions import view_error
-        direction, frame = (c.get("args") or [None])[0], c.get("frame", "robot")
+        direction, frame = c.get("direction"), c.get("frame", "robot")
         if direction is None:
             return None, "none", "no direction given"
         v = view_error(self.t.bridge.q(), direction, frame)  # measured joint state -> forward kinematics

@@ -6,7 +6,7 @@ The supervisor and the capabilities use one object, `Tools`, built from these pa
     held.py          HeldObjectState     session / held-object state; re-verified from finger feedback
     perception.py    PerceptionTools     perceive, describe, update_world, is_fresh   (+ Observation)
     memory.py        DescriptionMemory   Gemma descriptions reused within a session
-    resolution.py    ResolutionTools     resolve, lexical check, compare, confirm, relation_holds
+    resolution.py    ResolutionTools     resolve (Gemma), confirm (Gemma, crop), relation_holds (measured)
     manipulation.py  ManipulationTools   plan_pick / plan_place_held / plan_pick_place, park_for_view,
                                          return_home, obstacles   (+ PickPlan)
     execution.py     ExecutionTools      execute: the only path to robot motion (gated by Tools.controls)

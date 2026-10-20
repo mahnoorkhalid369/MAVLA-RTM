@@ -1,4 +1,4 @@
-"""Roles: one method per question asked of Gemma (classify, plan, decompose, answer, describe, resolve, compare,
+"""Roles: one method per question asked of Gemma (classify, plan, decompose, answer, describe, resolve,
 confirm), each with a strict schema, a deterministic check and one retry with the validation error."""
 
 from __future__ import annotations
@@ -11,11 +11,12 @@ import numpy as np
 from pydantic import ValidationError
 
 from agent.vlm_roles.gemma import VLM
-from agent.vlm_roles.prompts import (ANSWER_PROMPT, COMPARE_PROMPT, CONFIRM_PROMPT, DECIDE_SYSTEM, DECOMPOSE_PROMPT,
-                                     DESCRIBE_ONE_PROMPT, DESCRIBE_PROMPT, IDENTITY_SYSTEM, PARSE_SYSTEM, PLAN_SYSTEM,
-                                     REQUEST_SYSTEM, RESOLVE_PROMPT, SHORTLIST_PROMPT)
+from agent.vlm_roles.prompts import (ANSWER_PROMPT, CONFIRM_PROMPT, DECIDE_SYSTEM, DECOMPOSE_PROMPT, DESCRIBE_ONE_PROMPT,
+                                     DESCRIBE_PROMPT, IDENTITY_SYSTEM, PLAN_SYSTEM, REQUEST_SYSTEM, RESOLVE_PROMPT,
+                                     SHORTLIST_PROMPT)
 from agent.vlm_roles.schemas import (Confirmation, Decision, Descriptions, GoalPlan, ObjectDescription, PlanStep, RequestKind,
-                                     Resolution, SceneAnswer, Shortlist, SubPlan, TaskSpec, VLMFailure)
+                                     Resolution, SceneAnswer, Shortlist, SubPlan, VLMFailure)
+
 
 def check_decision(d: Decision, has_pending: bool) -> None:
     """Structural validation of a closed-loop decision (no language rules): raises ValueError with the reason."""
@@ -30,37 +31,21 @@ def check_decision(d: Decision, has_pending: bool) -> None:
 
 
 def check_steps(steps: list[PlanStep], max_steps: int = 6) -> None:
-    """Structural validation of planned steps (schema-level: each capability gets the arguments it needs); raises
-    ValueError with what to fix, which Gemma sees on its one retry. No interpretation of the user's words."""
+    """Structural validation of planned steps: a bounded plan, and each implemented operation's arguments through
+    its own interface (a ValueError says what to fix; Gemma sees it on its one retry). An operation that is not
+    implemented is not an error here: it stays in the plan and is reported unavailable when reached. No
+    interpretation of the user's words."""
     if len(steps) > max_steps:
         raise ValueError(f"at most {max_steps} steps")
     for i, st in enumerate(steps, 1):
-        if st.do == "pick_place":
-            if not (st.object and st.relation and st.target):
-                raise ValueError(f"step {i}: pick_place needs object, relation and a real target object; with no "
-                                 "destination use pick")
-            if st.object_anchor and st.object_anchor.strip().lower() == st.target.strip().lower() \
-                    and st.object_relation == st.relation:
-                raise ValueError(f"step {i}: object_relation / object_anchor repeat the destination; leave them "
-                                 "out unless the user describes where the object to move is now")
-            if bool(st.object_anchor) != bool(st.object_relation):
-                raise ValueError(f"step {i}: object_relation and object_anchor go together")
-        elif st.do == "pick" and not st.object:
-            raise ValueError(f"step {i}: pick needs object")
-        elif st.do == "place" and not (st.relation and st.target):
-            raise ValueError(f"step {i}: place needs relation and a real target object")
-        elif st.do == "decompose" and not st.goal:
-            raise ValueError(f"step {i}: decompose needs goal")
-        elif st.do in ("locate", "inspect", "explore") and not st.object:
-            raise ValueError(f"step {i}: {st.do} needs object")
-        elif st.do == "answer" and not (st.question or "").strip():
-            raise ValueError(f"step {i}: answer needs question")
-        elif st.do == "look" and not st.direction:
-            raise ValueError(f"step {i}: look needs direction (left, right, forward, backward or down) and frame")
+        try:
+            st.args
+        except ValueError as exc:
+            raise ValueError(f"step {i}: {exc}") from None
 
 
 # Roles that reason as the robot (what it is, what it can do, its directions) get IDENTITY_SYSTEM in front of their
-# system prompt. The perception roles (describe, shortlist, resolve, compare, confirm) judge images only: no identity.
+# system prompt. The perception roles (describe, shortlist, resolve, confirm) judge images only: no identity.
 EMBODIED_ROLES = {"request", "plan", "decide", "decompose", "answer"}
 
 
@@ -108,18 +93,6 @@ class Roles:
                     self.log("vlm", role=role, attempt=attempt, prompt=prompt, answer=raw, valid=False, error=error, seconds=round(dt, 2), tokens=tk)
         raise VLMFailure(f"{role}: invalid answer after one retry ({error})")
 
-    def parse(self, instruction: str) -> TaskSpec:
-        def check(t: TaskSpec):  # structural consistency only (no object knowledge)
-            if t.task == "pick" and t.relation is not None and t.reference is not None:
-                raise ValueError('a destination is given, so task must be "pick_place"')
-            if t.task == "pick_place" and (t.object is None or t.relation is None or t.reference is None):
-                raise ValueError('"pick_place" needs object, relation and reference')
-            if t.object is not None and t.reference is not None and t.object.anchor and \
-                    t.object.anchor.strip().lower() == t.reference.text.strip().lower() and t.object.relation == t.relation:
-                raise ValueError("object.relation / object.anchor repeat the destination; keep them null "
-                                 "unless the user describes where the object to move is now")
-        return self._call("parse", TaskSpec, f"Instruction: {instruction}", system=PARSE_SYSTEM, check=check)
-
     def classify_request(self, instruction: str) -> RequestKind:
         """What the request asks for (agent/authority.py turns it into permissions). Sees only the user's words."""
         def check(r: RequestKind):
@@ -143,7 +116,8 @@ class Roles:
         text = "\n".join(x for x in (context, f"Goal: {goal}", progress, f"Latest: {event}") if x)
         return self._call("decide", Decision, text, system=DECIDE_SYSTEM.format(menu=menu), check=check, max_new_tokens=350)
 
-    def decompose(self, goal: str, facts: str, ids: list[int], context: str = "", max_steps: int = 8) -> SubPlan:
+    def decompose(self, goal: str, facts: str, ids: list[int], context: str = "", max_steps: int = 8,
+                  menu: str = "") -> SubPlan:
         """Planning over the measured scene: steps and final conditions referring to world objects as #id."""
         import re as _re
         valid = {f"#{i}" for i in ids}
@@ -151,16 +125,12 @@ class Roles:
         def check(p: SubPlan):
             if len(p.steps) > max_steps:
                 raise ValueError(f"at most {max_steps} steps")
-            refs = [x for st in p.steps for x in (st.object, st.target) if x] + [a for c in p.goal for a in c.args]
-            bad = sorted({r for r in refs if not _re.fullmatch(r"#\d+", r) or r not in valid})
+            refs = [str(st.raw.get(k)) for st in p.steps for k in ("object", "target") if st.raw.get(k)]
+            bad = sorted({r for r in refs + [a for c in p.goal for a in c.args] if not _re.fullmatch(r"#\d+", r) or r not in valid})
             if bad:
                 raise ValueError(f"unknown references {bad}: use only the listed #ids")
-            for st in p.steps:
-                if st.do not in ("pick_place", "pick", "place", "locate", "inspect"):
-                    raise ValueError(f"step '{st.do}' is not available here")
-                if st.do == "pick_place" and not (st.object and st.relation and st.target):
-                    raise ValueError("pick_place needs object, relation, target")
-        return self._call("decompose", SubPlan, DECOMPOSE_PROMPT.format(goal=goal, facts=facts, context=context),
+            check_steps(p.steps, max_steps)
+        return self._call("decompose", SubPlan, DECOMPOSE_PROMPT.format(goal=goal, facts=facts, context=context, menu=menu),
                           check=check, max_new_tokens=500)
 
     def answer(self, question: str, facts: str, ids: list[int]) -> SceneAnswer:
@@ -168,10 +138,6 @@ class Roles:
             bad = sorted(set(a.object_ids) - set(ids))
             if bad:
                 raise ValueError(f"object_ids {bad} are not in the list")
-            num = re.fullmatch(r"\s*(\d+)\b.*", a.answer)  # a count must agree with the objects it cites
-            if num and a.object_ids and int(num.group(1)) != len(set(a.object_ids)):
-                raise ValueError(f"the answer says {num.group(1)} but lists {len(set(a.object_ids))} objects; "
-                                 "count again and list exactly the objects you counted")
         return self._call("answer", SceneAnswer, ANSWER_PROMPT.format(facts=facts, question=question), check=check,
                           max_new_tokens=200)
 
@@ -248,14 +214,6 @@ class Roles:
         desc = "\n".join(f"{d['id']}: {d.get('name', '')} ({d.get('colour', '')}, {d.get('shape', '')}, {d.get('material', '')})"
                          for d in descriptions)
         return self._call("resolve", Resolution, RESOLVE_PROMPT.format(descriptions=desc, text=text), image=som_image, check=check)
-
-    def compare(self, montage_image: np.ndarray, text: str, ids: list[int]) -> Resolution:
-        def check(r: Resolution):
-            if r.id is not None and r.id not in ids:
-                raise ValueError(f"id {r.id} is not one of the shown numbers {ids}")
-            if r.id is None and not r.ambiguous:
-                raise ValueError("id is null but ambiguous is false")
-        return self._call("compare", Resolution, COMPARE_PROMPT.format(n=len(ids), text=text), image=montage_image, check=check)
 
     def confirm(self, crop_image: np.ndarray, text: str) -> Confirmation:
         return self._call("confirm", Confirmation, CONFIRM_PROMPT.format(text=text), image=crop_image)

@@ -31,10 +31,6 @@ STATUS_OF = {"completed": "completed", "insufficient_info": "insufficient_info",
              "unsupported": "blocked", "infeasible": "failed", "unsafe": "failed", "failed": "failed",
              "cancelled": "cancelled", "unauthorized": "blocked"}
 
-# what a worker would need next (advisory; the supervisor decides)
-NEEDS = ("", "observation", "closer_look", "explore", "clarification", "replan", "stop")
-
-
 @dataclass
 class WorkerRequest:
     task_id: str
@@ -76,7 +72,7 @@ class WorkerResult:
     receiver: str = "supervisor"
     tools: list = field(default_factory=list)  # tools and Gemma roles the worker invoked, in order
     uncertainty: list = field(default_factory=list)  # what the worker is not sure about
-    needs: str = ""  # NEEDS: what the worker would need next (advisory)
+    needs: str = ""  # what the worker itself says it needs (advisory; the supervisor / Gemma decides)
 
 
 @dataclass
@@ -91,26 +87,22 @@ class WorkerSpec:
 
 
 def assess(capability: str, outcome: str, data: dict, confidence: str) -> tuple[list, str]:
-    """Uncertainty and the advisory next need of a worker result, from its outcome and outputs (deterministic)."""
-    unc, need = [], ""
+    """Uncertainty of a worker result, stated as facts from its outcome and outputs, and what the worker itself
+    says it needs (data["needs"], if any). Python does not suggest which operation should come next: Gemma decides."""
+    unc = []
     if confidence == "model":
         unc.append("model-generated output (Gemma), not measured")
     if data.get("certain") is False:
         unc.append("the answer is not certain from the current view")
-        need = "closer_look" if data.get("check_closer_world") else need
+    if data.get("check_closer_world"):
+        unc.append(f"Gemma named objects a closer look could settle: {data['check_closer_world']}")
     if outcome == "ambiguous":
         unc.append("several objects match")
-        need = "clarification"
     elif outcome == "insufficient_info":
         unc.append("the evidence does not settle the sub-goal")
-        need = "explore" if capability == "locate" else "observation"
-    elif outcome == "failed":
-        need = "replan"
-    elif outcome in ("unsafe", "unauthorized"):
-        need = "stop"
     if data.get("unknown_conditions"):
         unc.append("not decidable from the evidence: " + ", ".join(data["unknown_conditions"]))
-    return unc, need
+    return unc, str(data.get("needs") or "")
 
 
 class WorkerRegistry:
@@ -126,8 +118,9 @@ class WorkerRegistry:
             w.can_move_robot |= getattr(specs.get(cap), "safety", "read_only") == "motion"
         self._ids = itertools.count(1)
 
-    def worker_of(self, capability: str) -> str:
-        return next(n for n, w in self.workers.items() if capability in w.operations)
+    def worker_of(self, capability: str) -> str | None:
+        """The worker that implements an operation; None if no worker does (the operation is unavailable)."""
+        return next((n for n, w in self.workers.items() if capability in w.operations), None)
 
     def request(self, goal_id: str, capability: str, args: dict, objective: str = "", object_refs=None,
                 state_refs=None, depends_on=None, goal: str = "", context: dict | None = None,
@@ -155,7 +148,7 @@ class WorkerRegistry:
             self.log("authorization", task_id=req.task_id, capability=req.capability, effect=effect, grants=list(grants),
                      allowed=False, reason=why)
             res = WorkerResult(req.task_id, req.worker, "blocked", "unauthorized", why, {}, confidence="none", failure_reason=why,
-                               sender=req.worker, needs="stop")
+                               sender=req.worker)
             self.log("worker_result", **{k: v for k, v in asdict(res).items() if k != "data"}, data_keys=[])
             return res
         w.status, w.current_task = "running", req.task_id

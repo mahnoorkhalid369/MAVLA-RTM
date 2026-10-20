@@ -131,15 +131,10 @@ def format_event(e: dict) -> Line | None:  # noqa: C901 (a flat dispatch on the 
             ex = len(e.get("excluded") or [])
             return Line(w, "PERCEPTION", f"{e.get('camera')} camera, frame {e.get('frame_id')}: YOLO {e.get('detections')} masks, "
                                          f"{e.get('objects')} objects measured" + (f", {ex} excluded (robot/fixtures/too small)" if ex else ""))
-        if t == "lexical_check":
-            if not e.get("compare"):
-                return None
-            return Line(w, "GEMMA", f"{e.get('text')!r}: resolver chose {e.get('resolver_id')}, descriptions fit {e.get('lexical')}: comparing")
-        if t == "compare":
-            ok = e.get("agree")
-            return Line(w, "GEMMA", f"compare {e.get('ids')}: visual choice {e.get('id')}, most specific description "
-                                    f"{e.get('most_specific')} -> " + ("accepted" if ok else "cues disagree: ask the user"),
-                        "info" if ok else "warn")
+        if t == "resolve":
+            return Line(w, "GEMMA", f"{e.get('text')!r} -> object {e.get('id')}" if e.get("id") is not None
+                        else f"{e.get('text')!r}: no single object (candidates {e.get('candidates')})",
+                        "info" if e.get("id") is not None else "warn")
         if t == "execute_start":
             return Line(w, "EXECUTION", f"{e.get('label')}: " + " -> ".join(e.get("steps") or []))
         if t == "execute":
@@ -230,6 +225,12 @@ def format_event(e: dict) -> Line | None:  # noqa: C901 (a flat dispatch on the 
     return None
 
 
+def _cond(c: dict) -> str:
+    """A goal condition as text: pred(args), plus the direction of a viewing condition."""
+    tail = f" along {c['direction']} ({c.get('frame', 'robot')} frame)" if c.get("direction") is not None else ""
+    return f"{c.get('pred')}({', '.join(map(str, c.get('args', [])))}){tail}"
+
+
 def _short(v, n: int = 160) -> str:
     s = v if isinstance(v, str) else json.dumps(v, default=str)
     return s if len(s) <= n else s[:n - 3] + "..."
@@ -250,7 +251,7 @@ def format_trace(e: dict) -> Line | None:  # noqa: C901 (a flat dispatch on the 
         return Line(w, "AUTHORITY", f"request is a {e.get('request_kind')} -> may: {', '.join(e.get('grants') or [])} "
                                     f"(evidence {_short(e.get('evidence'), 80)!s}; {e.get('source')})")
     if k == "goal_conditions":
-        conds = "; ".join(f"{c.get('pred')}({', '.join(map(str, c.get('args', [])))})" for c in e.get("conditions") or [])
+        conds = "; ".join(_cond(c) for c in e.get("conditions") or [])
         return Line(w, "SUPERVISOR", f"goal conditions{' (' + e['origin'] + ')' if e.get('origin') else ''}: {conds or '(none)'}")
     if k == "decision":
         return Line(w, "SUPERVISOR", f"decide: step {e.get('index')} {e.get('capability')} -> {str(e.get('worker', '')).upper()} "
@@ -258,7 +259,7 @@ def format_trace(e: dict) -> Line | None:  # noqa: C901 (a flat dispatch on the 
     if k == "delegate":
         c = e.get("constraints") or {}
         cons = ", ".join(f"{k2}={v}" for k2, v in c.items() if v not in (None, [], ""))
-        exp = "; ".join(f"{x.get('pred')}({', '.join(map(str, x.get('args', [])))})" for x in e.get("expected") or [])
+        exp = "; ".join(_cond(x) for x in e.get("expected") or [])
         ctx = e.get("context") or {}
         held = ctx.get("held_object")
         return Line(w, "SUPERVISOR", f"-> {str(e.get('worker', '')).upper()} [{e.get('task_id')}] {e.get('capability')}: "
@@ -293,10 +294,6 @@ def format_trace(e: dict) -> Line | None:  # noqa: C901 (a flat dispatch on the 
             return None
         what = e.get("capability") or ", ".join(e.get("refused") or [])
         return Line(w, "AUTHORITY", f"refused {what}: {e.get('reason')}", "warn")
-    if k == "binding":
-        return Line(w, "SUPERVISOR", f"{e.get('text')!r} -> #{e.get('world_id')} ({e.get('reason')})")
-    if k == "plan_adjusted":
-        return Line(w, "SUPERVISOR", f"step {e.get('index')}: {e.get('change')} ({e.get('reason')})", "warn")
     if k == "location_check":
         return Line(w, "PERCEPTION", f"{e.get('text')!r} (object {e.get('mark')}) {e.get('relation')} {e.get('anchor')!r} "
                                     f"(object {e.get('anchor_mark')}): {'holds' if e.get('holds') else 'does NOT hold'}",
@@ -305,7 +302,7 @@ def format_trace(e: dict) -> Line | None:  # noqa: C901 (a flat dispatch on the 
         steps = "; ".join(f"{s.get('capability')} {_short(s.get('args'), 60)}" for s in e.get("steps") or [])
         return Line(w, "GEMMA", f"decomposed {e.get('goal')!r}: {steps or '(no steps)'}")
     if k == "goal_check":
-        parts = [f"{r['condition'].get('pred')}({', '.join(map(str, r['condition'].get('args', [])))})="
+        parts = [f"{_cond(r['condition'])}="
                  f"{ {True: 'yes', False: 'NO', None: 'unknown'}[r.get('satisfied')] } [{r.get('confidence')}]"
                  for r in e.get("results") or []]
         bad = any(r.get("satisfied") is False for r in e.get("results") or [])

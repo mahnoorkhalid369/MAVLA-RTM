@@ -214,16 +214,10 @@ class PickPlaceWorkflow:
             return None, self._fail(state, "perception", f"confirm_object said no for {ref['text']!r} (mark {mark})", role=role)
         if c.match == "unsure":
             question = f"Is object {mark} the {ref['text']!r}? I am not sure."
-            others = [k for k in (self.tools.lexical_candidates(obs, ref["text"]) if hasattr(self.tools, "lexical_candidates") else [])
-                      if k != mark]
+            others = [k for k in r.candidates if k != mark]  # Gemma's own other candidates, if it gave any
             a = self._question("confirm", question, role, obs, [mark] + others)
-            if a.kind == "yes":
-                return mark, None
-            if a.kind == "choice":
+            if a.kind == "choice":  # the asked object's number confirms it; another number chooses that one
                 return a.mark, None
-            if a.kind == "no":
-                return None, {"next": "FAILED", "failure": {"cls": "asked", "reason": f"you said object {mark} is not "
-                              f"{ref['text']!r} and chose no other object"}}
             return None, self._cancelled(a, question)
         return mark, None
 

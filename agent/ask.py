@@ -1,16 +1,17 @@
 """Asking the user (ask_user): questions, answers and the two responders.
 
 Only a person (TerminalResponder) or an explicitly configured script (ScriptedResponder, for unattended
-rehearsals) answers. Model output is never an answer. Answers are parsed deterministically:
+rehearsals) answers. Model output is never an answer. A "which object?" question has an explicit protocol, with no
+interpretation of words in Python:
 
-    "7", "#7", "object 7"     -> candidate 7 (must be one of the listed candidates)
-    "the gold one"            -> the only candidate whose description contains every word given
-    "nearest" / "farthest"    -> the candidate closest to / farthest from the robot base
-    "cancel" (stop, abort, quit) -> cancel
-    anything else / several matches -> explained, and the question is asked again
+    "7" or "#7"      -> candidate 7 (must be one of the listed candidates; for "is it object 7?", 7 confirms it)
+    an empty line    -> no choice: the step is cancelled (Gemma then decides what to do)
+    anything else    -> explained, and the question is asked again
 
-Cancellation policy (documented): explicit "cancel"; end of input (EOF: nobody can answer); or no
-answer within the timeout (default Budgets.question_timeout_s = 120 s; 0 = wait indefinitely).
+Gemma's own free-text questions (ask) return the typed text as it is; Gemma interprets it.
+Cancellation policy (documented): an empty line; end of input (EOF: nobody can answer); or no answer within the
+timeout (default Budgets.question_timeout_s = 120 s; 0 = wait indefinitely). A ScriptedResponder answer that is not a
+candidate number (e.g. "cancel") is no choice.
 """
 
 from __future__ import annotations
@@ -22,18 +23,10 @@ import threading
 import time
 from dataclasses import dataclass, field
 
-CANCEL_WORDS = {"cancel", "stop", "abort", "quit"}
-NEAR_WORDS = {"nearest", "closest", "near", "close"}
-FAR_WORDS = {"farthest", "furthest", "far"}
-YES_WORDS = {"yes", "y", "yeah", "correct"}
-NO_WORDS = {"no", "n", "nope"}
-FILLER = {"the", "a", "an", "one", "object", "number", "id", "it", "is", "that", "this", "i", "mean", "please", "#"}
-
-
 @dataclass
 class Candidate:
     mark: int
-    description: str  # the VLM's own words (shown to the user; also matched against their answer)
+    description: str  # the VLM's own words (shown to the user)
     centre_mm: tuple[float, float]  # robot base frame: +x = robot's right, +y = forward
     distance_m: float  # from the robot base axis
     size_mm: tuple[float, float, float]  # footprint long, short, height
@@ -41,7 +34,7 @@ class Candidate:
 
 @dataclass
 class Question:
-    kind: str  # "choose": pick one candidate | "confirm": yes / no / another number
+    kind: str  # "choose": pick one candidate | "confirm": the asked object's number, another number, or none
     text: str
     role: str  # "object" (to move) | "reference" (destination)
     candidates: list[Candidate]
@@ -50,52 +43,27 @@ class Question:
 
 @dataclass
 class Answer:
-    kind: str  # "choice" | "yes" | "no" | "cancel" | "eof" | "timeout"
+    kind: str  # "choice" | "cancel" | "eof" | "timeout"
     mark: int | None = None
     raw: str = ""
     source: str = "terminal"  # "terminal" (a person) | "scripted" (configured rehearsal answer)
     attempts: list = field(default_factory=list)  # rejected inputs before this answer, with the reason
 
 
-def _words(text: str) -> list[str]:
-    return [w for w in re.split(r"[^a-z0-9#]+", text.lower()) if w]
-
-
 def parse_answer(text: str, q: Question) -> tuple[Answer | None, str]:
-    """(Answer, "") for a valid answer, or (None, why it is not valid)."""
-    words = _words(text)
-    if not words:
-        return None, "empty answer"
-    if set(words) & CANCEL_WORDS:
+    """(Answer, "") for a valid answer, or (None, why it is not valid). Only the protocol above: a listed number,
+    or an empty line (no choice)."""
+    t = text.strip()
+    if not t:
         return Answer("cancel", raw=text), ""
+    m = re.fullmatch(r"#?\s*(\d+)", t)
     marks = {c.mark for c in q.candidates}
-    numbers = [int(n) for n in re.findall(r"\d+", text)]
-    if q.kind == "confirm" and not numbers:
-        if set(words) & YES_WORDS:
-            return Answer("yes", raw=text), ""
-        if set(words) & NO_WORDS:
-            return Answer("no", raw=text), ""
-    if len(numbers) > 1:
-        return None, f"several numbers given ({numbers}); give one of {sorted(marks)}"
-    if numbers:
-        if numbers[0] in marks:
-            return Answer("choice", numbers[0], raw=text), ""
-        return None, f"{numbers[0]} is not one of the candidates {sorted(marks)}"
-    pool = list(q.candidates)
-    content = [w for w in words if w not in FILLER | NEAR_WORDS | FAR_WORDS]
-    if content:  # description words: keep candidates whose description contains all of them
-        pool = [c for c in pool if set(content) <= set(_words(c.description))]
-        if not pool:
-            return None, f"no candidate is described with {' '.join(content)!r}"
-    if set(words) & NEAR_WORDS:
-        pool = [min(pool, key=lambda c: c.distance_m)]
-    elif set(words) & FAR_WORDS:
-        pool = [max(pool, key=lambda c: c.distance_m)]
-    if len(pool) == 1 and (content or set(words) & (NEAR_WORDS | FAR_WORDS)):
-        return Answer("choice", pool[0].mark, raw=text), ""
-    if len(pool) > 1 and content:
-        return None, f"{' '.join(content)!r} fits several candidates {[c.mark for c in pool]}; give a number"
-    return None, "not understood"
+    if m is None:
+        return None, f"answer with one of the numbers {sorted(marks)}, or an empty line for none"
+    n = int(m.group(1))
+    if n in marks:
+        return Answer("choice", n, raw=text), ""
+    return None, f"{n} is not one of the candidates {sorted(marks)}"
 
 
 def format_question(q: Question) -> str:
@@ -107,9 +75,9 @@ def format_question(q: Question) -> str:
         lines.append(f"  picture of the candidates: {q.image}")
     lines.append("  (x = robot's right, y = forward from the robot base)")
     if q.kind == "confirm":
-        lines.append("  Answer yes, no, another object's number, or cancel.")
+        lines.append(f"  Type {q.candidates[0].mark} to confirm it, another object's number, or an empty line for none.")
     else:
-        lines.append("  Answer with a number, a description that fits one of them (e.g. 'nearest'), or cancel.")
+        lines.append("  Type one of the numbers, or an empty line for none.")
     return "\n".join(lines)
 
 

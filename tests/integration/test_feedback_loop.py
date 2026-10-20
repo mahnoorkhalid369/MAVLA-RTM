@@ -31,7 +31,7 @@ def run_with(tmp_path, t, controls, instruction="do it"):
     return r, [json.loads(x) for x in (tmp_path / "events.jsonl").read_text().splitlines()]
 
 PICK_A = ("pick", {"object": "a"})
-PLACE_IT = ("place", {"object": "it", "relation": "next_to", "target": "c"})
+PLACE_IT = ("place", {"object": "#1", "relation": "next_to", "target": "c"})  # the held object, by its id
 
 
 def tools(plans, **kw):
@@ -81,7 +81,8 @@ def test_routine_success_uses_one_gemma_plan_and_no_extra_reasoning(tmp_path):
 
 def test_a_failed_subgoal_returns_to_gemma_with_the_evidence_and_progress(tmp_path):
     """The worker says done; the verification worker measures the opposite; Gemma decides again from that."""
-    t = tools([plan(PICK_A, PLACE_IT), plan(PICK_A, PLACE_IT)], misplace=True)
+    # the re-plan places whatever is held (no object named: the fake world re-measures the moved object as a new id)
+    t = tools([plan(PICK_A, PLACE_IT), plan(PICK_A, ("place", {"relation": "next_to", "target": "c"}))], misplace=True)
     plan_goal = t.roles.plan_goal
 
     def planner(text, menu, context=""):  # after the first plan, placements land where they are asked to
@@ -241,14 +242,6 @@ def test_the_ledger_records_robot_state_sensors_capabilities_and_uncertainty(tmp
     assert {"held_object", "motion_count"} <= set(st["robot"]) and "answer" in st["capabilities"]
     assert any("model-generated" in " ".join(u["items"]) or "not certain" in " ".join(u["items"]) for u in st["uncertainties"])
     assert st["consults"] and st["plan"] and st["hypotheses"].get("answers")
-
-
-def test_assumptions_are_kept_apart_from_measurements(tmp_path):
-    t = tools([plan(PICK_A), plan(PLACE_IT)])
-    run(tmp_path / "1" if (tmp_path / "1").mkdir() is None else tmp_path, t, instruction="Pick up a.")
-    (tmp_path / "2").mkdir()
-    r, _ = run(tmp_path / "2", t, instruction="Put it beside c.")
-    assert r["assumptions"] and "'it' means #" in r["assumptions"][0]["assumed"]
 
 
 # --------------------------------------------------------------------------------------------- trace

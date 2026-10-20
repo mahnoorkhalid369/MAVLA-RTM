@@ -9,7 +9,7 @@ from agent.capabilities.specs import Context, StepResult
 from agent.vlm_roles import VLMFailure
 
 
-GENERIC_WORDS = {"object", "thing", "something", "item", "anything", "stuff"}  # English: no category meaning
+MAX_WRIST_CONFIRMS = 4  # newly seen wrist objects checked against a reference (one Gemma crop check each)
 
 
 def run_observe(ctx: Context, args: dict, clear_view: bool) -> StepResult:
@@ -94,8 +94,8 @@ def run_answer(ctx: Context, args: dict) -> StepResult:
 
 
 def run_locate(ctx: Context, args: dict) -> StepResult:
-    """Find one described object in the current observation: the pick-and-place resolution path (Gemma
-    resolution, lexical cross-check, comparison) plus confirm_object on its crop. Read-only."""
+    """Find one described object in the current observation: Gemma's resolution over the descriptions, then
+    Gemma's check on the object's crop. Read-only. Not resolved: Gemma's candidates (ambiguous) or none (not seen)."""
     text = (args or {}).get("target", "").strip()
     _ensure_described(ctx)
     for w in ctx.extra_obs:  # wrist observations from this instruction (exploration / inspection)
@@ -107,16 +107,13 @@ def run_locate(ctx: Context, args: dict) -> StepResult:
     except VLMFailure as exc:
         return StepResult("failed", f"could not search for {text!r}: {exc}")
     if r.id is None:
-        # Gemma lists every object when nothing fits: if no description contains the words either, it is not visible
-        if not ctx.tools.lexical_candidates(ctx.obs, text):
-            seen = f" or in {len(ctx.extra_obs)} wrist-camera view(s) of hidden regions" if ctx.extra_obs else ""
-            return StepResult("insufficient_info", f"I do not see {text!r} in the table camera's view{seen} (no measured "
-                                                   "object is described that way or confirmed on its crop)")
         if r.candidates:
             lst = ", ".join(f"{k} at x {ctx.obs.measured[k]['centre'][0] * 1000:+.0f}, y {ctx.obs.measured[k]['centre'][1] * 1000:+.0f} mm"
                             for k in r.candidates)
             return StepResult("ambiguous", f"several objects could be {text!r}: {lst}")
-        return StepResult("insufficient_info", f"I do not see {text!r} from the current view")
+        seen = f" or in {len(ctx.extra_obs)} wrist-camera view(s)" if ctx.extra_obs else ""
+        return StepResult("insufficient_info", f"I do not see {text!r} in the table camera's view{seen} (Gemma matched "
+                                               f"no measured object{': ' + r.reason if r.reason else ''})")
     where = _location_check(ctx, r.id, args)  # measured location constraint first: appearance cannot override it
     if where is not None:
         return where
@@ -161,33 +158,13 @@ def _location_check(ctx: Context, mark: int, args: dict) -> StepResult | None:
 
 
 def _find_in(ctx: Context, wobs, text: str) -> StepResult | None:
-    """A described object among a wrist observation's NEW objects (not seen by the table camera), confirmed on
-    its crop; None if not there."""
+    """A described object among a wrist observation's NEW objects (not seen by the table camera): Gemma checks each
+    one's crop against the user's words (at most MAX_WRIST_CONFIRMS); None if none is confirmed."""
     new = [k for k in wobs.marks if getattr(wobs, "assoc", {}).get(k, {}).get("status") == "new"]
     if not new:
         return None
     ctx.tools.describe(wobs, new)
-    words = ctx.tools.words(text) - GENERIC_WORDS
-    if not words:  # "the object / something behind ...": the single newly seen COMPLETE object answers it
-        whole = [k for k in new if wobs.measured[k].get("tilt_deg") is not None]  # top face measured (not a side face)
-        if len(whole) != 1:
-            return None
-        k = whole[0]
-        g, d = wobs.measured[k], wobs.descriptions.get(k) or {}
-        ctx.log("located", text=text, mark=k, confirm="generic reference", centre=g["centre"], camera="wrist")
-        return StepResult("completed", f"Behind it, the wrist camera found an object the table camera cannot see (frame {wobs.frame_id}): "
-                                       f"at x {g['centre'][0] * 1000:+.0f} mm, y {g['centre'][1] * 1000:+.0f} mm, {g['height'] * 1000:.0f} mm "
-                                       f"tall, described as {d.get('colour', '')} {d.get('name', '')} [position measured; description Gemma's]",
-                          {"mark": k, "camera": "wrist", "bindings": {text: wobs.assoc.get(k, {}).get("world_id")},
-                           "evidence": [{"kind": "frame", "id": wobs.frame_id, "mark": k}]})
-    else:
-        cands = [k for k in ctx.tools.lexical_candidates(wobs, text) if k in new]
-        if not cands:  # descriptions use other words (e.g. "green shape" for a cylinder): check the crops of
-            # newly seen objects sharing at least one word with the reference, at most 3
-            def overlap(k):
-                d = wobs.descriptions.get(k) or {}
-                return len(words & ctx.tools.words(" ".join(str(d.get(f, "")) for f in ("name", "colour", "shape"))))
-            cands = [k for k in sorted(new, key=overlap, reverse=True) if overlap(k) > 0][:3]
+    cands = new[:MAX_WRIST_CONFIRMS]  # Gemma checks each newly seen object's crop against the user's words
     k, c = None, None
     for cand in cands:
         c = ctx.tools.confirm(wobs, cand, text)

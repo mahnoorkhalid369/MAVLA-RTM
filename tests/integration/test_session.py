@@ -17,7 +17,8 @@ from agent.vlm_roles import RecordedVLM  # noqa: E402
 from tests.support.fakes import GoalTools  # noqa: E402
 
 PICK = '{"goal": "hold it", "steps": [{"do": "pick", "object": "%s"}]}'
-PLACE = '{"goal": "placed", "steps": [{"do": "place", "object": "it", "relation": "%s", "target": "%s"}]}'
+# Gemma names the held object by the #id given in its context (no pronoun binding in Python since 2026-10-20)
+PLACE = '{"goal": "placed", "steps": [{"do": "place", "object": "#1", "relation": "%s", "target": "%s"}]}'
 LOOK = '{"goal": "report", "steps": [{"do": "observe"}, {"do": "describe_scene"}]}'
 # each instruction first gets the request classification (agent/authority.py), then the plan
 REQ_PICK = '{"kind": "action", "evidence": "Pick up"}'
@@ -76,7 +77,7 @@ def test_two_instructions_in_one_session_share_the_referent(new_session):
     assert (r1["status"], r1["holding"]) == ("COMPLETED", 1)
     assert r2["status"] == "COMPLETED" and r2["holding"] is None
     assert len(SessionTools.instances) == 1  # one Tools for the session
-    assert [(e["text"], e["world_id"]) for e in ev if e["kind"] == "binding"] == [("it", 1)]
+    assert "HOLDING object #1" in s.tools.roles.vlm.calls[-1]  # the plan call's context names the held object
     # re-checked, not assumed: at the start of the instruction and again right before the place motion
     assert [e["held"] for e in ev if e["kind"] == "session_state"] == ["verified", "verified"]
     assert r2["session"] == {"id": s.id, "instruction_index": 2}
@@ -88,7 +89,6 @@ def test_pick_sample_a1_then_put_it_in_the_processing_rack(new_session):
     run(s, "Pick up sample A1.")
     r, ev = run(s, "Put it in the processing rack.")
     assert r["status"] == "COMPLETED" and r["plan"][0]["capability"] == "place"
-    assert [(e["text"], e["world_id"]) for e in ev if e["kind"] == "binding"] == [("it", 1)]
     assert {g["condition"]["pred"]: g["satisfied"] for g in r["goal_check"]} == {"on": True, "not_holding": True}
     assert r["goal_check"][0]["bound"] == {"#1": 1, "processing rack": 2}
 
@@ -96,27 +96,28 @@ def test_pick_sample_a1_then_put_it_in_the_processing_rack(new_session):
 def test_a_new_session_does_not_inherit_held_state(new_session):
     make, run = new_session
     run(make([REQ_PICK, PICK % "a"]), "Pick up a.")
-    fresh = make([REQ_PUT, PLACE % ("next_to", "c")])
+    fresh = make([REQ_PUT, PLACE % ("next_to", "c"), STOP])
     r, ev = run(fresh, "Put it beside c.")
     assert len(SessionTools.instances) == 2 and SessionTools.instances[1].held_object is None
-    assert r["status"] == "CANCELLED" and r["outcome"] == "insufficient_info" and SessionTools.instances[1].executed == []
+    assert r["status"] == "UNSUPPORTED" and "nothing is held" in r["message"] and SessionTools.instances[1].executed == []
     assert [e["held"] for e in ev if e["kind"] == "session_state"] == ["none"]
 
 
 def test_failed_and_cancelled_instructions_do_not_corrupt_the_session(new_session):
     make, run = new_session
-    bad = '{"steps": [{"do": "dance"}]}'  # rejected twice -> the instruction fails at interpretation
-    s = make([REQ_PICK, PICK % "a", REQ_DANCE, bad, bad, REQ_PUT, PLACE % ("next_to", "zz"), REQ_PUT, PLACE % ("next_to", "c")])
+    dance = '{"steps": [{"do": "dance"}]}'  # an operation nobody implements: reported unavailable, then Gemma stops
+    s = make([REQ_PICK, PICK % "a", REQ_DANCE, dance, STOP, REQ_PUT, PLACE % ("next_to", "zz"), REQ_PUT, PLACE % ("next_to", "c")])
     run(s, "Pick up a.")
     r_fail, _ = run(s, "Do a dance.")
     t = SessionTools.instances[0]
     t.ambiguous = {"zz": [2, 3]}
     n = len(t.executed)
     r_cancel, _ = run(s, "Put it beside zz.")  # clarification answered "cancel"
-    assert r_fail["status"] == "FAILED" and r_cancel["status"] == "CANCELLED" and len(t.executed) == n
+    assert r_fail["status"] == "UNSUPPORTED" and "'dance' is not implemented" in r_fail["message"]
+    assert r_cancel["status"] == "CANCELLED" and len(t.executed) == n
     assert t.held_object == 1  # still held, still the referent
     r, ev = run(s, "Put it beside c.")
-    assert r["status"] == "COMPLETED" and [(e["text"], e["world_id"]) for e in ev if e["kind"] == "binding"] == [("it", 1)]
+    assert r["status"] == "COMPLETED"
 
 
 def test_goal_conditions_do_not_leak_into_the_next_instruction(new_session):

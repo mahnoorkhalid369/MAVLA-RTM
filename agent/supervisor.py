@@ -44,13 +44,8 @@ from agent.task_state import Step, TaskState
 
 STATES = ["INTERPRETING", "DISPATCHING", "DELEGATING", "REVIEWING", "DECIDING", "VERIFYING_GOAL"]
 TERMINAL = ["COMPLETED", "FAILED", "CANCELLED", "UNSUPPORTED"]
-NEEDS_OBSERVATION = {"describe_scene", "answer", "locate", "inspect", "explore", "look", "decompose"}  # look: obstacles
-MOTION = {"pick", "place", "pick_place", "return_home", "inspect", "explore", "look"}
-MANIPULATION = {"pick", "place", "pick_place"}
-OBJECTIVES = MANIPULATION | {"locate"}  # what the user asked to move or find: a re-plan cannot drop these conditions
 MAX_STEPS_EXECUTED = 14  # hard bound on worker delegations per instruction
 STOP_STATUS = {"unsupported": "UNSUPPORTED", "cancelled": "CANCELLED", "ambiguous": "CANCELLED"}  # else FAILED
-PRONOUNS = {"it", "that", "this", "this one", "that one", "the object", "the held object", "#held"}
 
 
 class GoalState(TypedDict, total=False):
@@ -91,28 +86,8 @@ class GoalSupervisor:
 
     # ----------------------------------------------------------------------------------- workers
     def _executors(self) -> dict:
-        def later_manip(req):  # only manipulation this request authorizes counts (no parking for refused steps)
-            return any(s.capability in MANIPULATION and self.authority.allows(self.specs[s.capability].effect)
-                       for s in self.ts.remaining(self.current))
-
-        def last_motion(req):
-            return not any(s.capability in MOTION for s in self.ts.remaining(self.current))
-        executors = {
-            "observe": ("perception", lambda c, a, r: caps.run_observe(c, a, clear_view=a["clear_view"] if "clear_view" in a
-                                                                   else later_manip(r))),
-            "describe_scene": ("perception", lambda c, a, r: caps.run_describe_scene(c, a)),
-            "answer": ("perception", lambda c, a, r: caps.run_answer(c, a)),
-            "locate": ("perception", lambda c, a, r: caps.run_locate(c, a)),
-            "inspect": ("inspection", lambda c, a, r: caps.run_inspect(c, a)),
-            "explore": ("inspection", lambda c, a, r: caps.run_explore(c, a)),
-            "look": ("inspection", lambda c, a, r: caps.run_look(c, a)),
-            "pick": ("manipulation", lambda c, a, r: caps.run_pick(c, a, self.current.index)),
-            "place": ("manipulation", lambda c, a, r: caps.run_place(c, a, last_motion(r), self.current.index)),
-            "pick_place": ("manipulation", lambda c, a, r: caps.run_pick_place(c, a, last_motion(r), self.current.index)),
-            "return_home": ("manipulation", lambda c, a, r: caps.run_return_home(c, a)),
-            "decompose": ("planning", lambda c, a, r: caps.run_decompose(c, a)),
-            "verify": ("verification", lambda c, a, r: caps.run_verify(c, a)),  # internal: never in the planner's menu
-        }
+        """The implemented operations (agent/capabilities EXECUTORS); a disabled one is refused as unsupported."""
+        executors = dict(caps.EXECUTORS)
         for name in self.controls.disabled & set(executors):  # disabled: refused as unsupported, never run
             executors[name] = (executors[name][0], self._refuse_disabled(name))
         return executors
@@ -149,7 +124,7 @@ class GoalSupervisor:
                                                     "origin": s.origin} for s in self.ts.plan])
 
     def _delegate(self, capability: str, args: dict, objective: str, expected: list | None = None,
-                  depends_on: list | None = None):
+                  depends_on: list | None = None, step: Step | None = None):
         """One structured delegation: request (goal, sub-goal, context, constraints, expected result) -> registry
         (authorization first) -> worker -> structured result. The supervisor processes the result itself."""
         refs = _ref_texts(args)
@@ -158,6 +133,14 @@ class GoalSupervisor:
         context = {"held_object": held, "last_referent": self.tools.last_referent,
                    "bindings": dict(self.ts.bindings), "frame": self.ctx.obs.frame_id if self.ctx.obs is not None else None,
                    "done": [f"{s.index}. {s.capability}" for s in self.ts.plan if s.status == "done"]}
+        if step is not None:  # where the step stands in the plan: executors use the later steps' declared classes
+            later = []
+            for s in self.ts.remaining(step):
+                sp = self.specs.get(s.capability)
+                later.append({"capability": s.capability, "safety": getattr(sp, "safety", None),
+                              "effect": getattr(sp, "effect", None),
+                              "authorized": sp is not None and self.authority.allows(sp.effect)})
+            context.update(step_index=step.index, later_steps=later)
         constraints = {"allowed_effects": list(self.authority.grants), "effect": getattr(spec, "effect", None),
                        "safety": getattr(spec, "safety", None),
                        "motion": getattr(getattr(self.tools, "controls", None), "motion", None)}
@@ -169,11 +152,11 @@ class GoalSupervisor:
                                constraints=constraints, expected=expected or [])
         return req, self.reg.dispatch(req, self.ctx, self.authority)
 
-    @staticmethod
-    def _measured_subgoal(step: Step) -> list[dict]:
-        """The conditions a completed step should have made true, when they are measurable (physical or located /
-        observed objects). Answers and reports are model / text outputs: checked only in the final goal check."""
-        if step.capability not in ("pick", "place", "pick_place", "return_home", "locate", "inspect", "look"):
+    def _measured_subgoal(self, step: Step) -> list[dict]:
+        """The conditions a completed step should have made true, when its operation declares a measurable effect
+        (spec.verify_after). Answers and reports are model / text outputs: checked only in the final goal check."""
+        spec = self.specs.get(step.capability)
+        if spec is None or not spec.verify_after:
             return []
         return derive_conditions([(step.capability, step.args)])
 
@@ -192,14 +175,13 @@ class GoalSupervisor:
             d = (o.description or {}) if o is not None else {}
             return f"The robot is HOLDING object #{t.held_object} ({d.get('colour', '')} {d.get('name', '')})."
         if t.last_referent is not None:
-            return (f"The robot's gripper is empty. The last instruction handled object #{t.last_referent} "
-                    "(\"it\" may mean it).")
+            return f"The robot's gripper is empty. The last instruction handled object #{t.last_referent}."
         return ""
 
     def _add_steps(self, steps, origin: str, after: Step | None = None) -> list[Step]:
         """steps: [(capability, args)] -> ledger Steps inserted after `after` (or appended)."""
         nxt = max([s.index for s in self.ts.plan], default=0) + 1
-        new = [Step(nxt + i, c, copy.deepcopy(a), worker=self.reg.worker_of(c), origin=origin) for i, (c, a) in enumerate(steps)]
+        new = [Step(nxt + i, c, copy.deepcopy(a), worker=self.reg.worker_of(c) or "", origin=origin) for i, (c, a) in enumerate(steps)]
         for i, st in enumerate(new):  # sequential dependency: each step needs the previous one
             st.depends_on = [new[i - 1].index] if i else []
         if after is None:
@@ -215,47 +197,14 @@ class GoalSupervisor:
     def _refresh_conditions(self) -> None:
         request = [c for c in self.ts.conditions if c.get("source") == "request"]  # from the user's request: always kept
         explicit = [c for c in self.ts.conditions if c.get("source") == "explicit"]
-        # the goal = the conditions of the steps still in the plan + those of a dropped step whose kind of objective
-        # (moving / finding) no later step pursues any more: a re-plan may change how, not drop what (structural, by
-        # capability); refused steps were never authorized
-        plan = sorted(self.ts.plan, key=lambda x: x.index)
-        current = [s for s in plan if s.status not in ("skipped", "replaced", "refused")]
-
-        def pursued_later(st):
-            group = MANIPULATION if st.capability in MANIPULATION else {st.capability}
-            return any(o.capability in group and o.index > st.index for o in current)
-        live = [(s.capability, s.args) for s in plan
-                if s.status != "refused" and s.capability != "decompose"
-                and (s in current or (s.capability in OBJECTIVES and not pursued_later(s)))]
+        # the goal = the conditions of the steps in the current plan (Gemma's latest plan); refused steps were never
+        # authorized; replaced / skipped steps are no longer part of it
+        live = [(s.capability, s.args) for s in sorted(self.ts.plan, key=lambda x: x.index)
+                if s.status not in ("skipped", "replaced", "refused")]
         derived = [{**c, "source": "derived"} for c in derive_conditions(live)]
         if any(c["pred"] == "answered" for c in request):  # the request's own question already stands for the answer
             derived = [c for c in derived if c["pred"] != "answered"]
         self.ts.conditions = request + (explicit or derived)
-
-    # ------------------------------------------------------------------------- state-aware binding
-    def _bind_refs(self, step: Step) -> str | None:
-        """Pronouns -> the held / last-handled object (#id); returns a reason if a reference cannot be bound."""
-        t = self.tools
-        for k in ("object", "reference"):
-            v = step.args.get(k)
-            if isinstance(v, dict) and (v.get("text") or "").strip().lower() in PRONOUNS:
-                who = t.held_object if t.held_object is not None else t.last_referent
-                if who is None:
-                    return f"it is unclear what {v['text']!r} refers to (nothing held, nothing handled before)"
-                why = "held object" if t.held_object is not None else "last handled object"
-                self.log("binding", text=v["text"], world_id=who, reason=why)
-                self.ts.assumptions.append({"step": step.index, "assumed": f"{v['text']!r} means #{who}", "because": why})
-                v["text"] = f"#{who}"
-        return None
-
-    def _adapt_to_robot_state(self, step: Step) -> None:
-        """Deterministic, logged adjustment from the measured robot state: never regrasp a held object."""
-        held = self.tools.held_object
-        obj = (step.args.get("object") or {}).get("text") if isinstance(step.args.get("object"), dict) else None
-        if held is not None and obj == f"#{held}" and step.capability == "pick_place":
-            step.capability, step.worker = "place", "manipulation"
-            self.log("plan_adjusted", index=step.index, change="pick_place -> place", reason=f"#{held} is already held")
-            self._refresh_conditions()
 
     # ----------------------------------------------------------------------------------- states
     def _interpreting(self, state) -> dict:
@@ -267,12 +216,12 @@ class GoalSupervisor:
         try:
             plan = self.tools.roles.plan_goal(state["instruction"], caps.planner_menu(self.specs), context=self._context())
         except VLMFailure as exc:
-            return self._finish("FAILED", "failed", f"I could not turn the instruction into steps I can do ({exc}). "
+            return self._finish("FAILED", "failed", f"I could not turn the instruction into steps ({exc}). "
                                 + self._capabilities_line())
         self.ts.goal, self.ts.success_condition = plan.goal, plan.success
         if not plan.steps:
-            return self._finish("UNSUPPORTED", "unsupported", f"I cannot do that with my current capabilities: "
-                                f"{plan.reason or 'no matching capability'}. " + self._capabilities_line())
+            return self._finish("UNSUPPORTED", "unsupported", f"I cannot do that: {plan.reason or 'no steps planned'}. "
+                                + self._capabilities_line())
         self._add_steps([(st.capability, st.args) for st in plan.steps], "planner")
         if self.authority.kind == "question":  # the goal of a question is its answer (a report alone is not one)
             self.ts.conditions = [{"pred": "answered", "args": [state["instruction"]], "source": "request"}]
@@ -280,11 +229,8 @@ class GoalSupervisor:
         self.log("goal_conditions", goal=plan.goal, conditions=self.ts.conditions)
         return {"next": "DISPATCHING"}
 
-    @staticmethod
-    def _capabilities_line() -> str:
-        return ("I can observe and describe the table, answer questions about it, find or inspect a described object "
-                "(also behind others), pick up an object and hold it, place a held object, move one object onto / next to "
-                "another, plan multi-object moves over the measured objects, and return HOME.")
+    def _capabilities_line(self) -> str:
+        return "Operations implemented now: " + ", ".join(n for n, sp in self.specs.items() if sp.implemented) + "."
 
     def _dispatching(self, state) -> dict:
         step = self.ts.current()
@@ -292,15 +238,15 @@ class GoalSupervisor:
             return {"next": "VERIFYING_GOAL"}
         if self.executed >= MAX_STEPS_EXECUTED:
             return self._finish("FAILED", "failed", f"stopped after {MAX_STEPS_EXECUTED} subtasks without reaching the goal")
-        before = copy.deepcopy(step.args)
-        why = self._bind_refs(step)
-        if step.args != before:
-            self._refresh_conditions()  # derived conditions now name the bound object (#id), not the pronoun
-        if why:
-            step.status, step.outcome, step.summary = "failed", "insufficient_info", why
-            return self._finish("CANCELLED", "insufficient_info", why + " — please name the object.")
-        self._adapt_to_robot_state(step)
-        if step.capability in NEEDS_OBSERVATION and not self.tools.is_fresh(self.ctx.obs):
+        spec = self.specs.get(step.capability)
+        if spec is None or not self.reg.worker_of(step.capability):  # Gemma named an operation nobody implements
+            step.status, step.outcome = "failed", "unsupported"
+            step.summary = (f"{step.capability!r} is not implemented: no worker can run it, so nothing was executed "
+                            f"({self._capabilities_line()})")
+            self.log("decision", index=step.index, capability=step.capability, worker=None, reason="not implemented")
+            self.last_result = None
+            return {"next": "REVIEWING"}
+        if spec.needs_view and not self.tools.is_fresh(self.ctx.obs):
             self.log("step", event="auto_observe", index=step.index, reason="no fresh observation")
             _, r = self._delegate("observe", {"clear_view": False}, f"fresh observation for step {step.index} ({step.capability})")
             if r.outcome != "completed":
@@ -324,7 +270,7 @@ class GoalSupervisor:
         t0 = time.monotonic()
         req, res = self._delegate(step.capability, step.args, f"{step.capability} {', '.join(refs)}".strip(),
                                   expected=[c for c in derive_conditions([(step.capability, step.args)])],
-                                  depends_on=[f"step{d}" for d in step.depends_on])
+                                  depends_on=[f"step{d}" for d in step.depends_on], step=step)
         step.task_id, step.worker = req.task_id, req.worker
         if res.uncertainty:
             self.ts.uncertainties.append({"task_id": res.task_id, "capability": step.capability, "items": res.uncertainty})
@@ -353,7 +299,8 @@ class GoalSupervisor:
         res = self.last_result
         data = res.data if res is not None else {}
         unsettled = list(getattr(res, "uncertainty", []) or [])
-        doubtful = bool(getattr(res, "needs", "")) or data.get("certain") is False  # the worker itself is not sure
+        doubtful = (bool(getattr(res, "needs", "")) or data.get("certain") is False  # the worker itself is not sure
+                    or bool(data.get("unknown_conditions")))
         if step.outcome == "completed" and (conds := self._measured_subgoal(step)):
             _, v = self._delegate("verify", {"conditions": conds, "scope": "subgoal"},
                                   f"verify step {step.index} ({step.capability})", expected=conds)
@@ -384,7 +331,7 @@ class GoalSupervisor:
         if step.outcome == "cancelled":  # the user decided
             self._review(step, "stop (cancelled by the user)", step.summary)
             return self._finish("CANCELLED", "cancelled", step.summary + self._done_so_far())
-        if step.outcome == "completed" and step.capability == "decompose":  # the planning worker's (Gemma's) steps
+        if step.outcome == "completed" and data.get("steps"):  # a worker (decompose: Gemma) returned steps to insert
             steps = data.get("steps", [])
             allowed = [(c, a) for c, a in steps if self.authority.allows(self.specs[c].effect)]
             refused = [(c, a) for c, a in steps if (c, a) not in allowed]
@@ -532,12 +479,13 @@ class GoalSupervisor:
 
     @staticmethod
     def _result_message(steps) -> str:
-        supporting = {"observe", "explore", "decompose"}
-        result = [s for s in steps if s.capability not in supporting and s.summary]
-        support = [s for s in steps if s.capability in supporting and s.summary]
-        msg = "\n".join(s.summary for s in result) or "\n".join(s.summary for s in support)
-        if result and support:
-            msg += "\n(" + "; ".join(s.summary for s in support[-2:]) + ")"
+        """The last completed step's result first, then (in brackets) up to two earlier ones."""
+        done = [s for s in steps if s.summary and s.status == "done"] or [s for s in steps if s.summary]
+        if not done:
+            return ""
+        msg = done[-1].summary
+        if len(done) > 1:
+            msg += "\n(" + "; ".join(s.summary for s in done[-3:-1]) + ")"
         return msg
 
     def _done_so_far(self) -> str:

@@ -179,27 +179,33 @@ LOOK_OFFSETS_DEG = (0.0, 10.0, -10.0, 20.0, -20.0)  # camera azimuth offsets, cl
 DOWN_RADIUS = (0.35, 0.60)  # m: 'down' looks at the floor below the camera, kept inside this ring
 
 
-def look_target(direction: str, frame: str, q_now) -> tuple[np.ndarray, list, tuple, tuple]:
-    """Look-at point, camera azimuth tries (closest first), elevations and distances for the viewpoint planner. The
-    camera sits between the base and the look point, so its optical axis points the named way (agent/directions.py)."""
-    from agent.directions import camera_pose, direction_vector
-    if direction == "down":
-        xy = camera_pose(q_now)[:2, 3]
+def look_target(direction, frame: str, q_now) -> tuple[np.ndarray, list, tuple, tuple]:
+    """Look-at point, camera azimuth tries (closest first), elevations and distances for the viewpoint planner, for a
+    direction vector in a frame. Sideways: the camera sits between the base and a floor point that way, so its optical
+    axis points that way. Down: the floor below the camera. Up: a point above the camera (pure geometry,
+    agent/directions.py; the planner decides whether any of it is reachable)."""
+    from agent.directions import camera_pose, direction_vector, is_vertical
+    u = direction_vector(direction, frame)
+    if is_vertical(u):
+        cam = camera_pose(q_now)[:3, 3]
+        if u[2] > 0:
+            return cam + u * 1.0, [None], (85.0,), (0.35, 0.45)
+        xy = cam[:2]
         r = float(np.hypot(*xy))
         xy = (xy / r if r > 1e-3 else np.array([0.0, 1.0])) * float(np.clip(r, *DOWN_RADIUS))
         return np.array([xy[0], xy[1], 0.0]), [None], (85.0,), (0.35, 0.45)
-    u = direction_vector(direction, frame)
-    target = np.array([u[0], u[1], 0.0]) * LOOK_RADIUS
-    back = float(np.degrees(np.arctan2(-u[1], -u[0])))  # from the look point back towards the base
+    h = u[:2] / np.linalg.norm(u[:2])
+    target = np.array([h[0], h[1], 0.0]) * LOOK_RADIUS
+    back = float(np.degrees(np.arctan2(-h[1], -h[0])))  # from the look point back towards the base
     return target, [(back + d) % 360.0 for d in LOOK_OFFSETS_DEG], LOOK_ELEVATIONS, LOOK_DISTANCES
 
 
 def run_look(ctx: Context, args: dict) -> StepResult:
-    """Point the wrist camera in a named direction of an explicit frame and observe there. Gemma names the direction;
+    """Point the wrist camera along a direction vector of an explicit frame and observe there. Gemma gives the vector;
     the viewpoint is chosen and checked by the existing planner (look-at IK, joint limits, clear view, collision-free
     path) and executed through Tools.execute (motion gate, frozen executor, simulator safety layer). The arm stays at
     the viewpoint; the measured camera direction is reported (and verified by the verification worker)."""
-    from agent.directions import DIRECTIONS, FRAMES, view_error
+    from agent.directions import FRAMES, direction_vector, view_error
     from control.kinematics import Kinematics
     from control.motion import joint_move
     from control.robot import ARM_SPEED
@@ -208,9 +214,10 @@ def run_look(ctx: Context, args: dict) -> StepResult:
     from agent.vlm_roles import VLMFailure
     direction, frame = (args or {}).get("direction"), (args or {}).get("frame") or "robot"
     t, t0 = ctx.tools, time.monotonic()
-    if direction not in DIRECTIONS or frame not in FRAMES:
-        return StepResult("ambiguous", f"which direction? got {direction!r} in frame {frame!r}; I can look "
-                          f"{', '.join(DIRECTIONS)} in the {' or '.join(FRAMES)} frame")
+    try:
+        direction_vector(direction, frame)
+    except ValueError as exc:
+        return StepResult("ambiguous", f"which direction? {exc}; frames: {', '.join(FRAMES)}")
     if t.world.holding is not None:
         return StepResult("infeasible", "not moving the camera around while holding an object (place it first)")
     q0 = np.asarray(t.bridge.q(), float)
@@ -228,12 +235,12 @@ def run_look(ctx: Context, args: dict) -> StepResult:
     data = {"direction": direction, "frame": frame, "look_point": [round(float(v), 3) for v in target],
             "plan": plan.summary(), "plan_seconds": plan_s}
     if not plan.ok:
-        return StepResult("infeasible", f"no safe viewpoint to look {direction} ({frame} frame): {plan.reason}", data)
+        return StepResult("infeasible", f"no safe viewpoint to look along {direction} ({frame} frame): {plan.reason}", data)
     b = plan.best
-    res = t.execute([MoveStep(joint_move(Kinematics(), q0, b.q, ARM_SPEED), f"point the wrist camera {direction}")], "look view")
+    res = t.execute([MoveStep(joint_move(Kinematics(), q0, b.q, ARM_SPEED), f"point the wrist camera along {direction}")], "look view")
     if not res.ok:
         return StepResult("unsafe" if "safety" in (res.reason or "").lower() else "failed",
-                          f"camera move to look {direction} was not executed or failed: {res.reason}", data)
+                          f"camera move to look along {direction} was not executed or failed: {res.reason}", data)
     t.bridge.wait_still()
     q = np.asarray(t.bridge.q(), float)
     reach = vp.reached(q, b)
@@ -260,6 +267,6 @@ def run_look(ctx: Context, args: dict) -> StepResult:
                  "evidence": [{"kind": "frame", "id": wobs.frame_id, "camera": "wrist"}]})
     cam = view["camera_position_mm"]
     return StepResult("completed",
-                      f"Pointed the wrist camera {direction} ({frame} frame): its axis is {view['error_deg']:.0f} deg from "
-                      f"that direction (measured from the joint state; camera at x {cam[0]:+d}, y {cam[1]:+d}, z {cam[2]} mm). "
+                      f"Pointed the wrist camera along {direction} ({frame} frame): its view is {view['error_deg']:.0f} deg "
+                      f"from that direction (measured from the joint state; camera at x {cam[0]:+d}, y {cam[1]:+d}, z {cam[2]} mm). "
                       f"It sees {n} object(s), {new} not measured before. The arm stays here.", data)

@@ -95,17 +95,6 @@ def test_world_model_keeps_ids_by_geometry_only():
 
 
 # ------------------------------------------------------------------------------------- VLM roles
-def test_parse_valid_and_retry_then_fail():
-    good = json.dumps({"task": "pick_place", "object": {"text": "a"}, "relation": "on", "reference": {"text": "b"}})
-    events = []
-    roles = Roles(RecordedVLM(["not json", good]), log=lambda k, **f: events.append(f))
-    t = roles.parse("put a on b")
-    assert t.relation == "on" and t.object.text == "a"
-    assert [e["valid"] for e in events] == [False, True]
-    with pytest.raises(VLMFailure):
-        Roles(RecordedVLM(["{}", "nope"])).parse("x")
-
-
 def test_describe_requires_exactly_the_drawn_ids():
     img = np.zeros((32, 32, 3), np.uint8)
     bad = json.dumps({"objects": [{"id": 1, "name": "x"}]})
@@ -218,16 +207,6 @@ def test_supervisor_unattended_ambiguity_is_scripted_cancel(tmp_path):
     assert len(asks) == 1 and asks[0]["answer"] == "cancel" and asks[0]["source"] == "scripted"
 
 
-def test_parse_inconsistent_task_gets_one_retry():
-    bad = json.dumps({"task": "pick", "object": {"text": "a", "relation": "on", "anchor": "b"}, "relation": "on",
-                      "reference": {"text": "b"}})
-    good = json.dumps({"task": "pick_place", "object": {"text": "a"}, "relation": "on", "reference": {"text": "b"}})
-    vlm = RecordedVLM([bad, good])
-    t = Roles(vlm).parse("put a on b")
-    assert t.task == "pick_place" and t.object.anchor is None
-    assert "pick_place" in vlm.calls[1]  # the retry carries the validation error
-
-
 def test_park_pose_choice_counts_blocked_camera_rays():
     t, _ = tools_with([])
     from control.robot import ARM_HOME
@@ -264,28 +243,6 @@ def test_resolve_retry_names_the_wrong_field():
     vlm = RecordedVLM(['{"id": [1, 2], "ambiguous": true, "candidates": [1, 2]}', '{"id": null, "ambiguous": true, "candidates": [1, 2]}'])
     r = Roles(vlm).resolve(img, [], "x", [1, 2])
     assert r.ambiguous and "id" in vlm.calls[1].split("not valid")[1]
-
-
-def test_lexical_cross_check_triggers_comparison():
-    """The resolver picks a partial match (as in rehearsal cycle 3, i3 run 2): the comparison decides."""
-    from agent.tools import Observation
-    t, _ = tools_with([])
-    t.run_dir = Path(__file__).parent  # images are written next to the test only if it fails before cleanup
-    rgb = np.zeros((60, 60, 3), np.uint8)
-    m = np.zeros((60, 60), bool)
-    m[20:30, 20:30] = True
-    obs = Observation("t", "table", rgb, rgb, {1: m, 19: m}, {}, descriptions={
-        1: {"name": "Cube", "colour": "brown/orange-brown", "shape": "cube"},
-        19: {"name": "Cube", "colour": "Orange", "shape": "Cube"}})
-    assert t.lexical_candidates(obs, "the orange cube") == [1, 19]
-    import tempfile
-    with tempfile.TemporaryDirectory() as d:
-        t.run_dir = Path(d)
-        t.roles = Roles(RecordedVLM(['{"id": 1}', '{"id": 19, "ambiguous": false, "candidates": [19]}']))
-        assert t.resolve(obs, "orange cube").id == 19  # visual choice = most specific description: accepted
-        t.roles = Roles(RecordedVLM(['{"id": 1}', '{"id": 1, "ambiguous": false, "candidates": [1]}']))
-        r = t.resolve(obs, "orange cube")  # visual choice disagrees with the descriptions: ask, never guess
-        assert r.id is None and r.ambiguous and r.candidates == [1, 19]
 
 
 def test_square_footprint_width_is_the_mean_of_both_extents():

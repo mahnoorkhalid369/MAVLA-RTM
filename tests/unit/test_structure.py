@@ -89,18 +89,17 @@ def test_library_scenario_registry_resolves():
 
 
 # --------------------------------------------------------------------------- agent: registry and prompts
-PROMPT_SHA256_16 = {  # deliberate prompt versions; 2026-10-18: shared robot identity (IDENTITY_SYSTEM) and first-person wording
+PROMPT_SHA256_16 = {  # deliberate prompt versions; 2026-10-20: no task templates / fixed verbs, open operations;
+    # PARSE_SYSTEM and COMPARE_PROMPT removed with their roles
     "ANSWER_PROMPT": "c10ead90d926c631",
-    "COMPARE_PROMPT": "d9c0c00cf26b401e",
     "CONFIRM_PROMPT": "60d867c0f1984edf",
-    "DECIDE_SYSTEM": "04bb04f3a9c0ecaf",
-    "DECOMPOSE_PROMPT": "96bdb7d34f3530ff",
+    "DECIDE_SYSTEM": "01afdfa8efdc320d",
+    "DECOMPOSE_PROMPT": "828d3e213e83b016",
     "DESCRIBE_ONE_PROMPT": "30e7f4389ba0ab9c",
     "DESCRIBE_PROMPT": "c76f8ba28b9ad381",
-    "IDENTITY_SYSTEM": "3ebcae62cf2ad72a",
-    "PARSE_SYSTEM": "35cb5a94bc3508a9",
-    "PLAN_SYSTEM": "43a9ff363d542f38",
-    "REQUEST_SYSTEM": "812fa5277d18fc2a",
+    "IDENTITY_SYSTEM": "a1f6423716b7a05b",
+    "PLAN_SYSTEM": "3d454863e3304414",
+    "REQUEST_SYSTEM": "03ac7b84cad87e6b",
     "RESOLVE_PROMPT": "8195f33d0eec2a60",
     "SHORTLIST_PROMPT": "32ae760793cc8575",
 }
@@ -115,28 +114,27 @@ def test_prompts_are_unchanged():
     assert {n: hashlib.sha256(getattr(v, n).encode()).hexdigest()[:16] for n in names} == PROMPT_SHA256_16
 
 
-def test_capability_registry_planner_schema_and_supervisor_agree(tmp_path):
+def test_operations_are_open_and_every_implemented_one_is_complete(tmp_path):
+    """Gemma may name any operation (PlanStep.do is a string, not a list of allowed tasks). Every implemented
+    operation has a spec (effect, safety, argument interface), an executor and a worker; internal operations
+    (verify) are delegated but not offered to Gemma."""
     pytest.importorskip("pydantic")
     pytest.importorskip("langgraph")
-    from typing import get_args
-
-    from agent.capabilities import EFFECT, INTERNAL, SPECS
+    from agent.capabilities import EFFECT, EXECUTORS, INTERNAL, MOTION, SPECS
+    from agent.goals import ARM_MOTION
     from agent.supervisor import GoalSupervisor
     from agent.vlm_roles import PlanStep
     from tests.support.fakes import GoalTools
-    assert set(get_args(PlanStep.model_fields["do"].annotation)) == set(SPECS)  # the planner can name exactly these
+    assert PlanStep.model_fields["do"].annotation is str  # an open name: no enumeration of tasks
+    assert PlanStep.model_validate({"do": "anything_new", "x": 1}).args == {"x": 1}  # unimplemented: kept as given
+    assert set(EXECUTORS) == set(SPECS) | set(INTERNAL)
+    assert all(s.adapt is not None for s in SPECS.values())  # every implemented operation checks its own arguments
     sup = GoalSupervisor(GoalTools([]), lambda *a, **k: None, tmp_path, None)
-    # every capability has an executor; internal operations (verify) are delegated but never plannable
     assert {c for w in sup.reg.workers.values() for c in w.operations} == set(SPECS) | set(INTERNAL)
-    assert not set(INTERNAL) & set(get_args(PlanStep.model_fields["do"].annotation))
+    assert sup.reg.worker_of("not_implemented") is None
     assert sup.reg.worker_of("verify") == "verification" and INTERNAL["verify"].effect == "none"
     assert {n for n, s in SPECS.items() if s.effect == "object_change"} == {"pick", "place", "pick_place"}
-    assert {n for n, s in SPECS.items() if s.safety == "motion"} == {"pick", "place", "pick_place", "return_home",
-                                                                     "inspect", "explore", "look"}
-    from agent.supervisor import MOTION
-    assert MOTION == {n for n, s in SPECS.items() if s.safety == "motion"}  # the supervisor's motion set = the specs
-    from agent.goals import ARM_MOTION
-    assert ARM_MOTION == MOTION  # the goal conditions' motion set too'
+    assert MOTION == {n for n, s in SPECS.items() if s.safety == "motion"} == set(ARM_MOTION)
     assert set(EFFECT) <= set(SPECS)
 
 

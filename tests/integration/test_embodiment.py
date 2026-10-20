@@ -46,10 +46,10 @@ def test_perception_roles_judge_images_without_the_identity():
 
 
 def test_the_identity_defines_the_robot_frame_and_separates_looking_from_moving_the_hand():
-    text = IDENTITY_SYSTEM.lower()
+    text = " ".join(IDENTITY_SYSTEM.lower().split())
     assert '"you" means the robot' in text and "gripper" in text and "wrist" in text
     assert '"robot" frame' in text and "x = your right, y = forward" in text and '"camera" frame' in text
-    assert "not moving your hand" in text and "never guess a frame" in text
+    assert "not moving your hand" in text and "instead of guessing" in text
 
 
 # ---------------------------------------------------------------------------------------- look (direction)
@@ -59,7 +59,7 @@ from types import SimpleNamespace  # noqa: E402
 
 from agent import capabilities as caps  # noqa: E402
 from agent.capabilities.specs import SPECS, planner_menu  # noqa: E402
-from agent.directions import DIRECTIONS, direction_vector, view_error  # noqa: E402
+from agent.directions import direction_vector, view_error  # noqa: E402
 from agent.vlm_roles import RecordedVLM, VLMFailure  # noqa: E402
 from control.robot import ARM_HOME  # noqa: E402
 from tests.support.fakes import GoalTools  # noqa: E402
@@ -100,25 +100,27 @@ def context(t):
 def test_look_is_a_sensing_motion_of_the_inspection_worker_in_the_menu():
     s = SPECS["look"]
     assert (s.safety, s.effect) == ("motion", "sensing") and "- look:" in planner_menu()
-    assert '"frame": "robot"' in s.args and '"camera" only when' in s.summary and all(d in s.args for d in DIRECTIONS)
+    assert '"frame": "robot"' in s.args and '"camera" only when' in s.summary and '[<x>, <y>, <z>]' in s.args
 
 
 def test_look_steps_carry_an_explicit_direction_and_frame():
     from agent.vlm_roles import Roles
-    vlm = RecordedVLM([json.dumps({"goal": "g", "steps": [{"do": "look"}]}),
-                       json.dumps({"goal": "g", "steps": [{"do": "look", "direction": "Left", "frame": "robot"}]})])
+    vlm = RecordedVLM([json.dumps({"goal": "g", "steps": [{"do": "look", "direction": "left"}]}),
+                       json.dumps({"goal": "g", "steps": [{"do": "look", "direction": [-1, 0, 0], "frame": "robot"}]})])
     p = Roles(vlm).plan_goal("look at your left side", "menu")
-    assert p.steps[0].args == {"direction": "left", "frame": "robot"} and "look needs direction" in vlm.calls[1]
-    with pytest.raises(VLMFailure):  # a direction outside the vocabulary is not guessed: schema error, then failure
-        Roles(RecordedVLM([json.dumps({"goal": "g", "steps": [{"do": "look", "direction": "over there"}]})] * 2)).plan_goal("x", "m")
+    assert p.steps[0].args == {"direction": [-1.0, 0.0, 0.0], "frame": "robot"} and "three numbers" in vlm.calls[1]
+    with pytest.raises(VLMFailure):  # a word is not turned into a vector by Python; an unknown frame is not guessed
+        Roles(RecordedVLM([json.dumps({"goal": "g", "steps": [{"do": "look", "direction": [1, 0, 0], "frame": "mine"}]})] * 2)).plan_goal("x", "m")
 
 
 def test_frames_are_explicit_and_differ():
-    assert np.allclose(direction_vector("left", "robot"), [-1, 0, 0]) and np.allclose(direction_vector("down", "camera"), [0, 0, -1])
-    assert not np.allclose(direction_vector("left", "camera"), direction_vector("left", "robot"))
+    assert np.allclose(direction_vector([-2, 0, 0], "robot"), [-1, 0, 0]) and np.allclose(direction_vector([0, 0, -1], "camera"), [0, 0, -1])
+    assert not np.allclose(direction_vector([-1, 0, 0], "camera"), direction_vector([-1, 0, 0], "robot"))
+    with pytest.raises(ValueError):
+        direction_vector([0, 0, 0])
 
 
-@pytest.mark.parametrize("direction", ["left", "right", "forward", "down"])
+@pytest.mark.parametrize("direction", [[-1, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, -1], [-1, 1, 0]])
 def test_look_moves_the_wrist_camera_and_measures_where_it_points(direction):
     t = ArmTools()
     ctx = context(t)
@@ -131,13 +133,13 @@ def test_look_moves_the_wrist_camera_and_measures_where_it_points(direction):
 
 def test_a_blocked_move_is_not_reported_as_looking():
     t = ArmTools(ok=False, reason="motion blocked by the execution controls")
-    r = caps.run_look(context(t), {"direction": "left", "frame": "robot"})
+    r = caps.run_look(context(t), {"direction": [-1, 0, 0], "frame": "robot"})
     assert r.outcome == "failed" and "not executed" in r.summary and "view" not in r.data
 
 
 def test_a_viewpoint_not_reached_fails():
     t = ArmTools(move=False)  # the command returned ok but the joints did not get there
-    r = caps.run_look(context(t), {"direction": "left", "frame": "robot"})
+    r = caps.run_look(context(t), {"direction": [-1, 0, 0], "frame": "robot"})
     assert r.outcome == "failed" and "not reached" in r.summary
 
 
@@ -145,14 +147,14 @@ def test_no_safe_viewpoint_is_infeasible_not_success(monkeypatch):
     from control.collision import Box
     t = ArmTools()
     monkeypatch.setattr(t, "obstacles", lambda: [Box("wall", np.array([0.0, 0.0, 0.8]), np.eye(3), np.array([2.0, 2.0, 0.05]))])
-    r = caps.run_look(context(t), {"direction": "left", "frame": "robot"})
+    r = caps.run_look(context(t), {"direction": [-1, 0, 0], "frame": "robot"})
     assert r.outcome == "infeasible" and "no safe viewpoint" in r.summary and t.executed == []
 
 
 def test_no_looking_around_while_holding_an_object():
     t = ArmTools()
     t.world.holding = 1
-    r = caps.run_look(context(t), {"direction": "left", "frame": "robot"})
+    r = caps.run_look(context(t), {"direction": [-1, 0, 0], "frame": "robot"})
     assert r.outcome == "infeasible" and t.executed == []
 
 
@@ -160,24 +162,24 @@ def test_no_looking_around_while_holding_an_object():
 from agent.goals import GoalEvaluator, derive_conditions  # noqa: E402
 from tests.support.runners import plan, run_supervisor as run  # noqa: E402
 
-LOOK_LEFT = ("look", {"direction": "left", "frame": "robot"})
+LOOK_LEFT = ("look", {"direction": [-1, 0, 0], "frame": "robot"})
 
 
 def test_look_sets_a_measured_viewing_condition_that_a_later_motion_ends():
-    assert derive_conditions([("look", {"direction": "left", "frame": "robot"})]) == [
-        {"pred": "viewing", "args": ["left"], "frame": "robot"}]
-    assert derive_conditions([("look", {"direction": "left", "frame": "robot"}), ("return_home", {})]) == [
+    assert derive_conditions([("look", {"direction": [-1, 0, 0], "frame": "robot"})]) == [
+        {"pred": "viewing", "args": [], "direction": [-1, 0, 0], "frame": "robot"}]
+    assert derive_conditions([("look", {"direction": [-1, 0, 0], "frame": "robot"}), ("return_home", {})]) == [
         {"pred": "at_home", "args": []}]
     assert derive_conditions([("observe", {})]) == [{"pred": "seen", "args": [], "camera": "table"}]
 
 
 def test_viewing_is_evaluated_from_the_measured_joint_state():
     t = ArmTools()
-    caps.run_look(context(t), {"direction": "right", "frame": "robot"})
+    caps.run_look(context(t), {"direction": [1, 0, 0], "frame": "robot"})
     ev = GoalEvaluator(t, None)
-    yes = ev.evaluate({"pred": "viewing", "args": ["right"], "frame": "robot"}, {})
-    no = ev.evaluate({"pred": "viewing", "args": ["left"], "frame": "robot"}, {})
-    assert (yes.satisfied, yes.confidence) == (True, "measured") and "deg from right" in yes.evidence
+    yes = ev.evaluate({"pred": "viewing", "args": [], "direction": [1, 0, 0], "frame": "robot"}, {})
+    no = ev.evaluate({"pred": "viewing", "args": [], "direction": [-1, 0, 0], "frame": "robot"}, {})
+    assert (yes.satisfied, yes.confidence) == (True, "measured") and "deg from [1, 0, 0]" in yes.evidence
     assert no.satisfied is False
 
 
@@ -216,7 +218,7 @@ def test_a_camera_that_ends_up_pointing_elsewhere_fails_the_goal(tmp_path, monke
     monkeypatch.setattr(caps, "run_look", look_then_drift)
     r, _ = run(tmp_path, t, instruction="Look at your left side.")
     assert r["status"] != "COMPLETED"
-    assert r["subgoal_checks"][0]["outcome"] == "failed" and "deg from left" in r["subgoal_checks"][0]["summary"]
+    assert r["subgoal_checks"][0]["outcome"] == "failed" and "deg from [-1" in r["subgoal_checks"][0]["summary"]
 
 
 def test_a_plan_with_nothing_verifiable_is_never_completed(tmp_path, monkeypatch):
@@ -230,7 +232,8 @@ def test_a_plan_with_nothing_verifiable_is_never_completed(tmp_path, monkeypatch
 
 
 def test_moving_the_hand_is_not_turned_into_looking(tmp_path):
-    """No capability moves the gripper to a free position: Gemma's empty plan is reported as unsupported, nothing moves."""
+    """No implemented operation moves the gripper to a free position: Gemma's empty plan (or an unimplemented
+    operation, test_supervisor_goal) is reported as unsupported; nothing moves, nothing is substituted."""
     t = ArmTools([plan(reason="I cannot move my hand to a free position; I can point my camera or pick and place")])
     r, _ = run(tmp_path, t, instruction="Move your hand to the left.")
     assert r["status"] == "UNSUPPORTED" and t.executed == []
@@ -238,5 +241,6 @@ def test_moving_the_hand_is_not_turned_into_looking(tmp_path):
 
 def test_home_is_not_counted_as_looking_anywhere_in_particular():
     """At HOME the canted wrist camera looks down and to the front-left; it is not 'looking left' or 'looking down'."""
-    errs = {d: view_error(ARM_HOME, d) for d in DIRECTIONS}
+    dirs = ([-1, 0, 0], [1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, -1])
+    errs = {str(d): view_error(ARM_HOME, d) for d in dirs}
     assert not any(v["pointing"] for v in errs.values()), {d: v["error_deg"] for d, v in errs.items()}

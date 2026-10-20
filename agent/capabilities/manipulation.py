@@ -68,7 +68,7 @@ def run_pick(ctx: Context, args: dict, step_no: int) -> StepResult:
 
 def run_place(ctx: Context, args: dict, final_home: bool, step_no: int) -> StepResult:
     t = ctx.tools
-    named = (args.get("object") or {}).get("text", "") if isinstance(args.get("object"), dict) else ""
+    named = ((args.get("object") or {}).get("text") or "") if isinstance(args.get("object"), dict) else ""
     if t.held_object is None:
         o = t.world.objects.get(int(named[1:])) if named.startswith("#") and named[1:].isdigit() else None
         if o is not None and o.status == "missing":  # it was held, the fingers say it no longer is
@@ -85,12 +85,18 @@ def run_place(ctx: Context, args: dict, final_home: bool, step_no: int) -> StepR
                           {"evidence": [{"kind": "verification", "check": "held_state", "pass": False}]})
     task = {"object": {"text": f"#{t.held_object}"}, "relation": args["relation"], "reference": args["reference"],
             "frame": args.get("frame") or "robot"}
-    return _skill(ctx, "place", task, final_home, step_no)
+    r = _skill(ctx, "place", task, final_home, step_no)
+    r.data.setdefault("bindings", {})["#held"] = held  # the object placed (a place step may leave it unnamed)
+    return r
 
 
 def run_pick_place(ctx: Context, args: dict, final_home: bool, step_no: int) -> StepResult:
-    if ctx.tools.held_object is not None:
-        return StepResult("unsafe", f"the gripper already holds #{ctx.tools.held_object}; place it before picking another object")
+    held = ctx.tools.held_object
+    if held is not None:
+        if (args.get("object") or {}).get("text") == f"#{held}":  # a precondition fact (no motion); Gemma decides
+            return StepResult("infeasible", f"#{held} is already in the gripper; pick_place starts with a grasp, so "
+                                            "nothing was executed")
+        return StepResult("unsafe", f"the gripper already holds #{held}; place it before picking another object")
     task = {"object": args["object"], "relation": args["relation"], "reference": args["reference"],
             "frame": args.get("frame") or "robot"}
     return _skill(ctx, "pick_place", task, final_home, step_no)

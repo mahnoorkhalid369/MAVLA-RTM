@@ -29,23 +29,30 @@ def terminal(text: str, timeout_s: float = 5.0) -> tuple[TerminalResponder, io.S
 
 
 # ------------------------------------------------------------------------ parsing a person's answer
-@pytest.mark.parametrize("text, mark", [("3", 3), ("#7", 7), ("object 7", 7), ("I mean 1", 1), ("the gold one", 3),
-                                        ("olive", 7), ("nearest", 7), ("the farthest one", 3), ("far yellow", 3)])
-def test_valid_answers_select_one_candidate(text, mark):
+# The protocol (agent/ask.py): a listed number, or an empty line for none. No words are interpreted in Python
+# (2026-10-20: "the gold one", "nearest", "cancel" etc. are no longer matched).
+@pytest.mark.parametrize("text, mark", [("3", 3), ("#7", 7), (" 1 ", 1), ("# 7", 7)])
+def test_a_listed_number_selects_one_candidate(text, mark):
     a, why = parse_answer(text, Q)
     assert a is not None and a.kind == "choice" and a.mark == mark, why
 
 
-@pytest.mark.parametrize("text, reason", [("9", "not one of"), ("1 or 3", "several numbers"), ("yellow", "fits several"),
-                                          ("purple", "no candidate"), ("", "empty"), ("hmm", "no candidate")])
-def test_invalid_answers_are_explained(text, reason):
+@pytest.mark.parametrize("text, reason", [("9", "not one of"), ("1 or 3", "answer with one of the numbers"),
+                                          ("the gold one", "answer with one of the numbers"),
+                                          ("nearest", "answer with one of the numbers"), ("object 7", "answer with one")])
+def test_anything_else_is_explained_and_not_interpreted(text, reason):
     a, why = parse_answer(text, Q)
     assert a is None and reason in why
 
 
-@pytest.mark.parametrize("text", ["cancel", "Stop please", "abort", "quit"])
-def test_only_explicit_words_cancel(text):
+@pytest.mark.parametrize("text", ["", "   "])
+def test_an_empty_line_is_no_choice(text):
     assert parse_answer(text, Q)[0].kind == "cancel"
+
+
+def test_words_do_not_cancel_or_choose():
+    for text in ("cancel", "stop", "yes", "no", "the yellow one"):
+        assert parse_answer(text, Q)[0] is None
 
 
 # ------------------------------------------------------------------------- the terminal responder
@@ -60,7 +67,7 @@ def test_terminal_shows_ids_descriptions_and_positions_then_waits_for_input():
 
 
 def test_terminal_repeats_the_question_after_an_invalid_answer():
-    resp, out = terminal("9\nyellow\nthe gold one\n")
+    resp, out = terminal("9\nyellow\n3\n")
     a = resp(Q)
     assert a.mark == 3 and [r["input"] for r in a.attempts] == ["9", "yellow"]
     assert out.getvalue().count("Please answer again") == 2
@@ -117,7 +124,7 @@ def test_destination_choice_continues_the_same_task(tmp_path):
 
 def test_both_object_and_destination_ambiguous(tmp_path):
     t = StubTools(ambiguous={"a": [1, 3], "b": [2, 3]})
-    resp, _ = terminal("nearest\n2\n")
+    resp, _ = terminal("1\n2\n")
     r, ev = run(tmp_path, t, responder=resp)
     assert r["status"] == "COMPLETED"
     assert [(e["role"], e["mark"]) for e in ev if e["kind"] == "ask_user"] == [("object", 1), ("reference", 2)]
@@ -125,16 +132,16 @@ def test_both_object_and_destination_ambiguous(tmp_path):
 
 def test_invalid_then_valid_selection(tmp_path):
     t = StubTools(ambiguous={"a": [1, 3]})
-    resp, _ = terminal("5\nthe gold one\n")
+    resp, _ = terminal("5\n3\n")
     r, ev = run(tmp_path, t, responder=resp)
     ask = [e for e in ev if e["kind"] == "ask_user"][0]
     assert r["status"] == "COMPLETED" and ask["mark"] == 3 and ask["rejected"][0]["input"] == "5"
 
 
-def test_explicit_cancel(tmp_path):
-    resp, _ = terminal("cancel\n")
+def test_an_empty_answer_cancels(tmp_path):
+    resp, _ = terminal("\n")
     r, _ = run(tmp_path, StubTools(ambiguous={"a": [1, 3]}), responder=resp)
-    assert r["status"] == "CANCELLED" and "you answered 'cancel'" in r["failure"]["reason"]
+    assert r["status"] == "CANCELLED"
     assert r["failure"]["answer_source"] == "terminal"
 
 

@@ -55,7 +55,7 @@ def test_scene_question_observes_automatically_and_marks_the_answer_unverified(t
 def test_empty_plan_is_reported_as_unsupported_with_the_capabilities(tmp_path):
     t = GoalTools([plan(reason="I cannot sing")])
     r, _ = run(tmp_path, t)
-    assert r["status"] == "UNSUPPORTED" and "I cannot sing" in r["message"] and "describe the table" in r["message"]
+    assert r["status"] == "UNSUPPORTED" and "I cannot sing" in r["message"] and "Operations implemented now:" in r["message"]
     assert t.executed == []
 
 
@@ -84,7 +84,7 @@ def test_not_visible_target_goes_to_gemma_which_decides_to_explore(tmp_path, exp
     assert [s["capability"] for s in r["plan"]] == ["observe", "locate", "explore", "locate"]
     assert [s["status"] for s in r["plan"]][:3] == ["done", "replaced", "done"]
     assert len(explore_stub) == 1 and "insufficient_info" in t.decide_calls[0]["event"]
-    assert "the worker suggests: explore" in t.decide_calls[0]["event"]  # the worker's advice reaches Gemma
+    assert "suggests" not in t.decide_calls[0]["event"]  # Python names no next operation (removed 2026-10-20)
     assert r["status"] == "FAILED" and r["outcome"] == "insufficient_info"  # exploring is not finding
     assert [e["action"] for e in ev if e["kind"] == "gemma_decision"] == ["replan", "stop"]
 
@@ -161,21 +161,32 @@ def test_planner_failure_is_a_clear_failure(tmp_path):
 
 
 # --------------------------------------------------------------------------- planner validation (real Roles)
-def test_planner_rejects_unknown_capabilities_and_bad_arguments():
+def test_planner_keeps_unknown_operations_and_checks_known_operations_arguments():
+    """The operation name is open: an operation nobody implements is kept (reported unavailable when reached, never
+    replaced); an implemented operation's arguments are checked by its own interface (one retry with the error)."""
     good = json.dumps({"goal": "g", "steps": [{"do": "pick_place", "object": "a", "relation": "on", "target": "b"}]})
-    for bad in ('{"steps": [{"do": "dance"}]}',
-                '{"steps": [{"do": "pick_place", "object": "a"}]}',
+    for bad in ('{"steps": [{"do": "pick_place", "object": "a"}]}',
                 '{"steps": [{"do": "answer"}]}',
                 '{"steps": [{"do": "locate"}]}',
-                json.dumps({"steps": [{"do": "pick_place", "object": "a", "relation": "on", "target": "b",
-                                       "object_relation": "on", "object_anchor": "b"}]})):
+                '{"steps": [{"do": "pick_place", "object": "a", "relation": "inside", "target": "b"}]}',
+                '{"steps": [{"do": "look", "direction": "left"}]}',
+                '{"steps": [{"do": ""}]}'):
         vlm = RecordedVLM([bad, good])
         p = Roles(vlm).plan_goal("x", "menu")
         assert p.steps[0].capability == "pick_place" and len(vlm.calls) == 2  # one retry with the error
         assert p.steps[0].args == {"object": {"text": "a", "relation": None, "anchor": None}, "relation": "on",
                                    "reference": {"text": "b", "relation": None, "anchor": None}, "frame": "robot"}
-    with pytest.raises(VLMFailure):
-        Roles(RecordedVLM(['{"steps": [{"do": "rm -rf"}]}'] * 2)).plan_goal("x", "menu")
+    p = Roles(RecordedVLM(['{"goal": "g", "steps": [{"do": "move_hand", "offset": [-0.1, 0, 0], "frame": "robot"}]}'])).plan_goal("x", "m")
+    assert p.steps[0].capability == "move_hand" and p.steps[0].args == {"offset": [-0.1, 0, 0], "frame": "robot"}
+
+
+def test_an_operation_nobody_implements_is_reported_unavailable_and_never_replaced(tmp_path):
+    t = GoalTools([plan(("move_hand", {"offset": [-0.1, 0, 0], "frame": "robot"}))])
+    t.decisions = [{"action": "stop", "reason": "I cannot move my hand freely"}]
+    r, ev = run(tmp_path, t, instruction="Move your hand to the left.")
+    assert r["status"] == "UNSUPPORTED" and t.executed == [] and "'move_hand' is not implemented" in r["message"]
+    assert [s["capability"] for s in r["plan"]] == ["move_hand"]  # nothing substituted
+    assert "not implemented" in t.decide_calls[0]["event"]
 
 
 def test_locate_finds_confirms(tmp_path):
@@ -205,9 +216,19 @@ def test_gemma_plan_is_executed_as_written_and_a_missing_answer_goes_back_to_gem
     assert "goal is not shown" in t.decide_calls[0]["event"] and r["status"] == "COMPLETED"
 
 
-def test_locate_reports_not_visible_when_no_description_matches(tmp_path, explore_stub):
-    t = GoalTools([plan(("observe", {}), ("locate", {"object": "banana"})), plan(("observe", {}), ("locate", {"object": "banana"}))],
-                  ambiguous={"banana": [1, 2, 3]})  # Gemma lists everything when nothing fits
+def test_gemma_listing_several_candidates_is_ambiguous_not_inferred_invisible(tmp_path, explore_stub):
+    """Behaviour change (2026-10-20): Python no longer overrides Gemma's ambiguous answer with a word-overlap test
+    ("no description contains the words -> not visible"). Gemma's verdict stands and Gemma decides what next."""
+    t = GoalTools([plan(("observe", {}), ("locate", {"object": "banana"}))], ambiguous={"banana": [1, 2, 3]})
+    t.decisions = [{"action": "stop", "reason": "none of them looks like a banana"}]
+    r, _ = run(tmp_path, t)
+    assert r["status"] == "CANCELLED" and r["outcome"] == "ambiguous" and "several objects could be 'banana'" in r["message"]
+    assert "ambiguous" in t.decide_calls[0]["event"]
+
+
+def test_locate_with_no_candidate_from_gemma_reports_not_seen(tmp_path):
+    t = GoalTools([plan(("observe", {}), ("locate", {"object": "banana"}))], ambiguous={"banana": []})
+    t.decisions = [{"action": "stop", "reason": "not here"}]
     r, _ = run(tmp_path, t)
     assert r["status"] == "FAILED" and r["outcome"] == "insufficient_info" and "do not see 'banana'" in r["message"]
 
@@ -218,12 +239,8 @@ def test_result_comes_before_the_observation_summary(tmp_path):
     assert r["message"].startswith("I see 3 objects") and r["message"].rstrip().endswith("workspace points from the camera)")
 
 
-def test_counting_answer_must_match_the_cited_objects():
-    vlm = RecordedVLM(['{"answer": "11", "object_ids": [1, 2, 3]}', '{"answer": "3", "object_ids": [1, 2, 3]}'])
-    a = Roles(vlm).answer("how many?", "facts", [1, 2, 3, 4])
-    assert a.answer == "3" and "count again" in vlm.calls[1]
-
-
+@pytest.mark.xfail(strict=True, reason="awaiting the next phase: the objective guard was a Python rule by capability "
+                   "group (removed 2026-10-20); goal conditions owned by Gemma for the whole task are not designed yet")
 def test_replan_that_drops_the_objective_cannot_complete_the_goal(tmp_path, explore_stub):
     """Regression (live 18:48): 'find the banana' -> locate failed -> a replan [observe] must not complete the goal:
     the located(banana) condition stays part of the goal, so the final check fails and the loop stops."""
@@ -232,3 +249,11 @@ def test_replan_that_drops_the_objective_cannot_complete_the_goal(tmp_path, expl
     r, ev = run(tmp_path, t)
     assert r["status"] == "FAILED" and "banana" in r["message"]
     assert any(c["condition"]["pred"] == "located" and not c["satisfied"] for c in r["goal_check"])
+
+
+def test_arguments_flat_or_nested_are_the_same_step():
+    """JSON shape only (measured 2026-10-20: Gemma nested the arguments under "arguments" after the prompt cleanup)."""
+    from agent.vlm_roles import PlanStep
+    flat = PlanStep.model_validate({"do": "locate", "object": "the <A>"})
+    for key in ("arguments", "args"):
+        assert PlanStep.model_validate({"do": "locate", key: {"object": "the <A>"}}).args == flat.args

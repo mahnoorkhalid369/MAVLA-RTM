@@ -1,6 +1,10 @@
-"""The capability registry: what the planner may ask for (CapabilitySpec: inputs, preconditions, safety class,
-effect class, failures, verification), the planner's menu, the typed step result and the per-instruction
-context the executors use.
+"""The operations this software implements (CapabilitySpec: inputs, preconditions, safety class, effect class,
+failures, verification, argument interface), shown to Gemma as what is available NOW, the typed step result and the
+per-instruction context the executors use.
+
+This is not the vocabulary of the robot's tasks: Gemma may name any operation in a plan. An operation listed here
+validates its own arguments (its interface); an operation not listed here has no implementation and is reported as
+unavailable when the plan reaches it (nothing is substituted for it).
 
 Safety classes: "read_only" (cameras / models only, no robot command), "motion" (robot commands, each one
 collision-checked and verified). Effect classes (agent/authority.py): none | sensing | object_change."""
@@ -23,6 +27,9 @@ class CapabilitySpec:
     verification: str
     implemented: bool = True
     effect: str = "none"  # none | sensing | object_change (agent/authority.py): what running it may change
+    adapt: Callable | None = None  # Gemma's flat step fields -> the executor's arguments; ValueError = invalid
+    needs_view: bool = False  # needs a fresh measured observation first (the supervisor takes one)
+    verify_after: bool = False  # its effect is measurable: the verification worker checks it right after the step
 
 
 @dataclass
@@ -30,6 +37,102 @@ class StepResult:
     outcome: str  # agent.task_state.OUTCOMES
     summary: str
     data: dict = field(default_factory=dict)
+
+
+# ----------------------------------------------------------------------- argument interfaces (validation)
+NULLS = {"", "null", "none"}  # "not given", as a small model sometimes writes JSON null as text
+FRAMES = ("robot", "camera")  # coordinate frames the geometry can express (agent/directions.py)
+# relations the validated placement planner and the measured relation check compute (agent/tools/manipulation.py,
+# agent/tools/resolution.py relation_holds); "in" only as a location constraint on a reference
+PLACE_RELATIONS = ("on", "next_to", "left_of", "right_of", "in_front_of", "behind")
+LOCATION_RELATIONS = PLACE_RELATIONS + ("in",)
+
+
+def _text(v):
+    return None if v is None or str(v).strip().lower() in NULLS else str(v).strip()
+
+
+def _need(op: str, raw: dict, *keys) -> None:
+    missing = [k for k in keys if _text(raw.get(k)) is None]
+    if missing:
+        raise ValueError(f"{op} needs {', '.join(missing)}")
+
+
+def _frame(op: str, raw: dict) -> str:
+    f = (_text(raw.get("frame")) or "robot").lower()
+    if f not in FRAMES:
+        raise ValueError(f"{op}: frame must be one of {FRAMES}, not {f!r}")
+    return f
+
+
+def _relation(op: str, v, allowed) -> str:
+    r = (_text(v) or "").lower()
+    if r not in allowed:
+        raise ValueError(f"{op}: the relation must be one the geometry can compute {allowed}, not {r!r}")
+    return r
+
+
+def _ref(op: str, raw: dict, key: str) -> dict:
+    rel, anchor = _text(raw.get("object_relation")), _text(raw.get("object_anchor"))
+    if bool(rel) != bool(anchor):
+        raise ValueError(f"{op}: object_relation and object_anchor go together")
+    return {"text": _text(raw.get(key)), "relation": _relation(op, rel, LOCATION_RELATIONS) if rel else None, "anchor": anchor}
+
+
+def _none(op):
+    return lambda raw: {}
+
+
+def _target(op):
+    def f(raw):
+        _need(op, raw, "object")
+        r = _ref(op, raw, "object")
+        return {"target": r["text"], "relation": r["relation"], "anchor": r["anchor"]}
+    return f
+
+
+def _pick(raw):
+    _need("pick", raw, "object")
+    return {"object": _ref("pick", raw, "object")}
+
+
+def _place(raw):
+    _need("place", raw, "relation", "target")
+    return {"object": {"text": _text(raw.get("object")), "relation": None, "anchor": None},
+            "relation": _relation("place", raw.get("relation"), PLACE_RELATIONS),
+            "reference": {"text": _text(raw.get("target")), "relation": None, "anchor": None}, "frame": _frame("place", raw)}
+
+
+def _pick_place(raw):
+    _need("pick_place", raw, "object", "relation", "target")
+    return {"object": _ref("pick_place", raw, "object"), "relation": _relation("pick_place", raw.get("relation"), PLACE_RELATIONS),
+            "reference": {"text": _text(raw.get("target")), "relation": None, "anchor": None}, "frame": _frame("pick_place", raw)}
+
+
+def _answer(raw):
+    _need("answer", raw, "question")
+    return {"question": _text(raw.get("question"))}
+
+
+def _explore(raw):
+    _need("explore", raw, "object")
+    return {"target": _text(raw.get("object")), "near": _text(raw.get("near"))}
+
+
+def _decompose(raw):
+    _need("decompose", raw, "goal")
+    return {"goal": _text(raw.get("goal"))}
+
+
+def _look(raw):
+    from agent.directions import direction_vector
+    frame = _frame("look", raw)
+    d = raw.get("direction")
+    try:
+        direction_vector(d, frame)
+    except ValueError as exc:
+        raise ValueError(f"look: {exc}") from None
+    return {"direction": [float(v) for v in d], "frame": frame}
 
 
 _SPECS = [
@@ -72,14 +175,14 @@ _SPECS = [
                    '{"do": "inspect", "object": "<words>"}', "motion",
                    "object visible and confirmed; nothing held", "close-up position / size / description (wrist camera); arm back at HOME",
                    "object not found / no safe viewpoint / move failed", "viewpoint reached (joint feedback), wrist measurement associated"),
-    CapabilitySpec("look", "point your wrist camera in a direction and see what is there (the arm moves only to aim the "
-                   "camera, and stays there). frame \"robot\" = your own directions; \"camera\" only when the user means "
-                   "directions in the fixed camera's picture",
-                   '{"do": "look", "direction": "left" | "right" | "forward" | "backward" | "down", "frame": "robot"}',
+    CapabilitySpec("look", "point your wrist camera along a direction and see what is there (the arm moves only to aim "
+                   "the camera, and stays there). direction = [x, y, z] in the frame: \"robot\" = your own axes; \"camera\" "
+                   "only when the user means directions in the fixed camera's picture",
+                   '{"do": "look", "direction": [<x>, <y>, <z>], "frame": "robot"}',
                    "motion", "nothing held", "the wrist camera points that way (arm stays there); wrist observation in the world model",
                    "no safe viewpoint that way / move not executed / viewpoint not reached / holding an object",
                    "camera direction measured from joint feedback (forward kinematics): the looked-at floor point within 30 deg of "
-                   "the direction (down: axis within 15 deg)"),
+                   "the direction (a vertical direction: axis within 15 deg)"),
     CapabilitySpec("explore", "look for something the fixed camera cannot see (e.g. behind another object)",
                    '{"do": "explore", "object": "<words>", "near": "<words for an object it may be behind, or null>"}', "motion",
                    "nothing held", "wrist observations of hidden regions in the world model; arm back at HOME",
@@ -89,7 +192,15 @@ _SPECS = [
 EFFECT = {"pick": "object_change", "place": "object_change", "pick_place": "object_change", "inspect": "sensing",
           "explore": "sensing", "look": "sensing", "return_home": "sensing"}  # everything else: none (read-only)
 
-SPECS: dict[str, CapabilitySpec] = {s.name: replace(s, effect=EFFECT.get(s.name, "none")) for s in _SPECS}
+ADAPT = {"observe": _none("observe"), "describe_scene": _none("describe_scene"), "answer": _answer,
+         "locate": _target("locate"), "pick": _pick, "place": _place, "decompose": _decompose, "pick_place": _pick_place,
+         "return_home": _none("return_home"), "inspect": _target("inspect"), "look": _look, "explore": _explore}
+NEEDS_VIEW = {"describe_scene", "answer", "locate", "inspect", "explore", "look", "decompose"}  # measured view first
+VERIFY_AFTER = {"pick", "place", "pick_place", "return_home", "locate", "inspect", "look"}  # measurable effect
+
+SPECS: dict[str, CapabilitySpec] = {s.name: replace(s, effect=EFFECT.get(s.name, "none"), adapt=ADAPT[s.name],
+                                                    needs_view=s.name in NEEDS_VIEW, verify_after=s.name in VERIFY_AFTER)
+                                    for s in _SPECS}
 
 MOTION = {n for n, s in SPECS.items() if s.safety == "motion"}
 
@@ -101,6 +212,15 @@ INTERNAL: dict[str, CapabilitySpec] = {
                              "no evidence for a condition", "goal predicates over measured state (agent/goals.py)",
                              effect="none"),
 }
+
+
+def adapt_args(name: str, raw: dict) -> dict:
+    """Gemma's flat step fields -> arguments: through the operation's own interface if it is implemented
+    (ValueError if invalid), otherwise kept as given (the operation is unavailable; it is never replaced)."""
+    spec = SPECS.get(name) or INTERNAL.get(name)
+    if spec is not None and spec.adapt is not None:
+        return spec.adapt(raw)
+    return {k: v for k, v in raw.items() if not (isinstance(v, str) and _text(v) is None) and v is not None}
 
 
 def planner_menu(specs: dict[str, CapabilitySpec] | None = None) -> str:
