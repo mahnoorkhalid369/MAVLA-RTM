@@ -427,9 +427,12 @@ class GoalSupervisor:
             self._review(step, "original goal verified", f"tool {getattr(res, 'status', '-')}, subtask {step.subtask}")
             return {"next": "VERIFYING_GOAL"}
         unsettled = list(getattr(res, "uncertainty", []) or [])
+        note = (f" | your last decision was continue, so the steps you gave with it ({', '.join(self.ignored_steps)}) "
+                "were not used; use replan to change the steps") if self.ignored_steps else ""
+        self.ignored_steps = []
         self.event = (f"step {step.index} ({step.worker or '?'} worker: {step.capability} {_args_line(step.args)}): "
                       f"tool {getattr(res, 'status', 'not run')}, subtask {step.subtask}: {step.summary[:300]}"
-                      + (f" | uncertain: {'; '.join(unsettled)}" if unsettled else ""))
+                      + (f" | uncertain: {'; '.join(unsettled)}" if unsettled else "") + note)
         self.event_outcome, self.event_step = step.outcome, step
         self._review(step, "ask Gemma", f"tool {getattr(res, 'status', 'not run')}, subtask {step.subtask}, "
                                         f"{len(self.ts.unmet)} original criteria not yet shown")
@@ -453,7 +456,11 @@ class GoalSupervisor:
         record = {"reason": event, "action": d.action, "accepted": True, "why": d.reason,
                   "steps": [st.capability for st in d.steps]}
         self.ts.consults.append(record)
-        if d.action == "continue":
+        if d.action == "continue":  # keeps the planned steps; steps sent with it are not used (Gemma is told)
+            if d.steps:
+                self.ignored_steps = [st.capability for st in d.steps]
+                self.log("replan", accepted=False, reason=f"continue keeps the plan: the steps given with it "
+                                                         f"({', '.join(self.ignored_steps)}) were not used")
             return {"next": "DISPATCHING"}
         if self.ts.replans >= self.controls.max_replans:  # a change of course beyond the budget
             record["accepted"] = False
@@ -550,6 +557,7 @@ class GoalSupervisor:
         self.ts.capabilities = [n for n, s in self.specs.items() if s.implemented]
         self.event, self.event_outcome, self.event_step = "", None, None  # fresh task memory for this instruction
         self.grounded = set()  # (reference, frame) grounded for the goal check in this task
+        self.ignored_steps = []  # steps Gemma gave with a "continue" (not used; it is told in the next event)
         self.ctx = caps.Context(self.tools, self.log, self.run_dir, self.responder, self.budgets, self.ts)
         self.ctx.vlm_calls = lambda: getattr(self.tools.roles, "calls", 0)
         self.log("instruction", text=instruction, held=self.tools.held_object, last_referent=self.tools.last_referent)

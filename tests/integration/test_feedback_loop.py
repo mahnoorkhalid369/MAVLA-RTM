@@ -377,14 +377,16 @@ def test_criteria_in_the_prompts_notation_and_nested_shapes_are_read_structurall
     assert got[4]["direction"] == [0, 0, -1] and got[5]["pred"] == "the robot reports"
 
 
-def test_continue_with_new_steps_is_ambiguous_and_rejected():
-    """Live 2026-10-20: Gemma answered continue + new steps; continue keeps the plan, so this is sent back."""
-    vlm = RecordedVLM([json.dumps({"action": "continue", "steps": [{"worker": "manipulation", "do": "place", "object": "#6",
-                                                                     "relation": "on", "target": "blue block"}]}),
-                       json.dumps({"action": "replan", "steps": [{"worker": "manipulation", "do": "place", "object": "#6",
-                                                                   "relation": "on", "target": "blue block"}]})])
-    d = Roles(vlm).decide("g", "", "e", "menu", has_pending=True)
-    assert d.action == "replan" and "to give new steps choose replan" in vlm.calls[1]
+def test_continue_keeps_the_plan_and_gemma_is_told_its_extra_steps_were_not_used(tmp_path):
+    """Live 2026-10-20: Gemma answered continue + new steps. continue keeps the planned steps; the extra ones are not
+    used, and the next event says so (use replan to change the steps)."""
+    t = tools([plan(("observe", {}), ("pick", {"object": "a"}), success=[{"pred": "on", "args": ["a", "b"]}])])
+    t.continue_on_success = False
+    t.decisions = [{"action": "continue", "steps": [{"do": "place", "object": "#1", "relation": "on", "target": "b"}]},
+                   {"action": "stop", "reason": "-"}]
+    r, ev = run(tmp_path, t, instruction="Put a on b.")
+    assert [s["capability"] for s in r["plan"]] == ["observe", "pick"]  # the plan was kept
+    assert "were not used; use replan" in t.decide_calls[1]["event"]
 
 
 def test_words_bound_to_the_held_object_in_this_task_name_it(tmp_path):

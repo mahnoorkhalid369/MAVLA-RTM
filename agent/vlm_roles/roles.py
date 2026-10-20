@@ -26,8 +26,6 @@ def check_decision(d: Decision, has_pending: bool) -> None:
         check_steps(d.steps)
     if d.action == "continue" and not has_pending:
         raise ValueError("no steps remain: choose replan, finish, ask_user or stop")
-    if d.action == "continue" and d.steps:
-        raise ValueError("continue keeps the planned steps; to give new steps choose replan")
     if d.action == "ask_user" and not (d.question or "").strip():
         raise ValueError("ask_user needs a question")
 
