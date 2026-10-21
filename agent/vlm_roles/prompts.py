@@ -25,7 +25,8 @@ reported() (the user was told what is seen), answered(<question>), at_home(). <x
 object (the same words as in the steps) or "#<id>".
 Plan what the request actually needs. If it needs an operation that is not listed, still name it with its arguments:
 it will be reported as not available. Never put a different operation in its place and never claim something you
-cannot do. Refer to objects with the user's own words, or "#<id>" for objects named in the context.
+cannot do. Refer to objects with the user's own words, all of them (also where the object is and its size compared
+with others), or "#<id>" for objects named in the context.
 Answer with ONE JSON object only. Each step has "worker", "do" (the operation) and that operation's arguments,
 written exactly as in its list entry above:
 {{"goal": "<one line>", "success": [{{"pred": "<condition>", "args": ["<object>"]}}], "steps": [{{"worker": "<worker>", "do": "<operation>", "<argument>": "<value>"}}], "reason": "<short>"}}"""
@@ -89,7 +90,8 @@ REFERENCE_PROMPT = """The user refers to one object as: "{text}"
 Split these words by how each part can be checked:
 - "appearance": the words about what the object looks like (kind, colour, shape, markings), copied from the user;
   "" if there are none.
-- "size": only if the user compares sizes with the other objects. "measure" is "volume" (overall size), "height"
+- "size": only if a size word compares the object with the others (big, small, largest, tall, short, wide, ...:
+  "the small <X>" means the smallest of the <X>). "measure" is "volume" (overall size), "height"
   (tall / short), "footprint" (area on the floor) or "width" (wide / narrow); "order" is "largest" or "smallest".
   null otherwise.
 - "side": only if the user names a side of you or of the camera picture: "direction" = [x, y, z] in "frame"
@@ -100,10 +102,16 @@ Answer with ONE JSON object only:
 {{"appearance": "<words>", "size": {{"measure": "...", "order": "..."}} | null, "side": {{"direction": [<x>, <y>, <z>], "frame": "robot"}} | null, "other": "<words>"}}"""
 
 
-APPEARANCE_PROMPT = """The picture shows numbered objects, each in its own tile (the number is above the object).
-Which of them look like "{appearance}"? Judge only how they look (kind, colour, shape, markings), not their size or
-where they are. List every number that fits in "matches", and in "unsure" the numbers you cannot judge from the
-picture. Answer with ONE JSON object only: {{"matches": [<numbers>], "unsure": [<numbers>]}}"""
+APPEARANCE_ONE_PROMPT = """This picture shows one object at full brightness; everything around it is dimmed.
+Does that object look like "{appearance}"? Judge only how it looks (kind, colour, shape, markings), not its size.
+"unsure" only if the object is too hidden or unclear to judge. Answer with ONE JSON object only:
+{{"match": "yes" | "no" | "unsure", "reason": "<short>"}}"""
+
+
+APPEARANCE_PROMPT = """The picture shows numbered objects, each in its own tile (the number is above the object). Each
+was judged on its own to look like "{appearance}". Compare them with each other: which of them fit "{appearance}"
+best? Judge only how they look (kind, colour, shape, markings). List in "matches" the numbers that fit best; if they
+fit equally well, list all of them. Answer with ONE JSON object only: {{"matches": [<numbers>], "unsure": []}}"""
 
 
 CONFIRM_PROMPT = """Look at the object at full brightness in this picture (everything around it is dimmed). Is it "{text}"?

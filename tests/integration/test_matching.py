@@ -14,7 +14,7 @@ pytest.importorskip("pydantic")
 
 from agent.ask import Candidate, Question, ScriptedResponder, parse_answer  # noqa: E402
 from agent.tools.resolution import ResolutionTools, rank_by_size, side_split  # noqa: E402
-from agent.vlm_roles import AppearanceMatch, ReferenceSpec, Resolution  # noqa: E402
+from agent.vlm_roles import AppearanceMatch, Confirmation, ReferenceSpec, Resolution  # noqa: E402
 from tests.support.fakes import StubTools, geom  # noqa: E402
 
 
@@ -59,14 +59,18 @@ def test_side_in_the_robot_frame_with_a_borderline_band():
 class Matcher(ResolutionTools):
     """ResolutionTools over a scripted scene; Gemma's parts are scripted (split and appearance)."""
 
-    def __init__(self, tmp_path, measured, spec, looks_like, unsure=()):
-        self.run_dir, self.events, self.shown = tmp_path, [], []
+    def __init__(self, tmp_path, measured, spec, looks_like, unsure=(), best=None):
+        self.run_dir, self.events, self.shown, self.compared = tmp_path, [], [], []
         (tmp_path / "images").mkdir(exist_ok=True)
 
-        def appearance(img, words, ids):
-            self.shown.append(sorted(ids))
-            return AppearanceMatch(matches=[k for k in ids if k in looks_like], unsure=[k for k in ids if k in unsure])
-        self.roles = SimpleNamespace(parse_reference=lambda text: spec, match_appearance=appearance)
+        def each(crops, words):
+            self.shown.append(sorted(crops))
+            return {k: Confirmation(match="yes" if k in looks_like else "unsure" if k in unsure else "no") for k in crops}
+
+        def joint(img, words, ids):
+            self.compared.append(sorted(ids))
+            return AppearanceMatch(matches=[k for k in ids if best is None or k in best])
+        self.roles = SimpleNamespace(parse_reference=lambda text: spec, appearance_each=each, match_appearance=joint)
         rgb = np.zeros((60, 200, 3), np.uint8)
         marks = {}
         for i, k in enumerate(measured):
@@ -107,10 +111,30 @@ def test_indistinguishable_sizes_go_to_the_user(tmp_path):
     assert r.id is None and r.ambiguous and r.candidates == [12, 14]
 
 
-def test_an_appearance_gemma_cannot_judge_goes_to_the_user(tmp_path):
-    t = Matcher(tmp_path, SCENE, ReferenceSpec(appearance="pink block"), looks_like={12}, unsure={14})
+def test_an_appearance_gemma_cannot_judge_goes_to_the_user_when_nothing_clearly_fits(tmp_path):
+    t = Matcher(tmp_path, SCENE, ReferenceSpec(appearance="pink block"), looks_like=set(), unsure={12, 14})
     r = t.resolve(t.obs, "the pink block")
     assert r.id is None and r.ambiguous and r.candidates == [12, 14]
+
+
+def test_unsure_objects_do_not_block_a_clear_match(tmp_path):
+    """Live 2026-10-21: Gemma 4 E2B called almost every non-matching object "unsure"."""
+    t = Matcher(tmp_path, SCENE, ReferenceSpec(appearance="pink block"), looks_like={12}, unsure={5, 9, 14})
+    assert t.resolve(t.obs, "the pink block").id == 12
+
+
+def test_several_clear_matches_are_compared_jointly(tmp_path):
+    t = Matcher(tmp_path, SCENE, ReferenceSpec(appearance="maroon block"), looks_like={5, 12}, best={12})
+    assert t.resolve(t.obs, "the maroon block").id == 12 and t.compared == [[5, 12]]
+    t2 = Matcher(tmp_path, SCENE, ReferenceSpec(appearance="maroon block"), looks_like={5, 12})  # no difference
+    r = t2.resolve(t2.obs, "the maroon block")
+    assert r.id is None and sorted(r.candidates) == [5, 12]
+
+
+def test_no_joint_comparison_when_size_decides(tmp_path):
+    t = Matcher(tmp_path, SCENE, BIGGEST_PINK_RIGHT, looks_like={9, 12, 14})
+    t.resolve(t.obs, "the biggest pink block on your right")
+    assert t.compared == []
 
 
 def test_one_clear_appearance_match_needs_no_question(tmp_path):
@@ -227,3 +251,9 @@ def test_the_match_line_shows_every_stage(tmp_path):
     assert line.text == ("match 'the biggest pink block on your right' in table_001: side [1.0, 0.0, 0.0] (robot): "
                          "[12, 14, 5]; looks like 'pink block': [12, 14]; largest volume [12=68921, 14=91125 mm3]: 14; "
                          "-> object 14 (world #114)")
+
+
+def test_the_reference_split_accepts_words_as_a_list_or_null():
+    """Live 2026-10-21: Gemma wrote "appearance": ["pink", "block"] and "other": null."""
+    s = ReferenceSpec.model_validate({"appearance": ["pink", "block"], "size": None, "side": None, "other": None})
+    assert (s.appearance, s.other) == ("pink block", "")

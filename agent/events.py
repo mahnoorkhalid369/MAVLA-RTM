@@ -268,6 +268,8 @@ def _match_text(e: dict) -> str:
         elif st["stage"] == "appearance":
             parts.append(f"looks like {st.get('words')!r}: {st.get('matches')}"
                          + (f", unsure {st['unsure']}" if st.get("unsure") else ""))
+        elif st["stage"] == "joint appearance":
+            parts.append(f"compared {st.get('compared')}: best {st.get('matches') or 'no difference'}")
         elif st["stage"] == "size":
             vals = ", ".join(f"{k}={v}" for k, v in (st.get("values") or {}).items())
             parts.append(f"{st.get('order')} {st.get('measure')}{' (approximate)' if st.get('approximate') else ''} "

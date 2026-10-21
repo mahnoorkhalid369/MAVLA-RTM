@@ -13,7 +13,8 @@ from pydantic import ValidationError
 from agent.vlm_roles.gemma import VLM
 from agent.vlm_roles.prompts import (ANSWER_PROMPT, CONFIRM_PROMPT, DECIDE_SYSTEM, DECOMPOSE_PROMPT, DESCRIBE_ONE_PROMPT,
                                      DESCRIBE_PROMPT, IDENTITY_SYSTEM, PLAN_SYSTEM, REQUEST_SYSTEM, RESOLVE_PROMPT,
-                                     SHORTLIST_PROMPT, REFERENCE_PROMPT, APPEARANCE_PROMPT)
+                                     SHORTLIST_PROMPT, REFERENCE_PROMPT, APPEARANCE_PROMPT,
+                                     APPEARANCE_ONE_PROMPT)
 from agent.vlm_roles.schemas import (AppearanceMatch, Confirmation, Decision, Descriptions, GoalPlan, ObjectDescription,
                                      PlanStep, ReferenceSpec, RequestKind, Resolution, SceneAnswer, Shortlist, SubPlan,
                                      VLMFailure)
@@ -229,6 +230,31 @@ class Roles:
                 from agent.directions import direction_vector
                 direction_vector(r.side.direction, r.side.frame)  # ValueError -> one retry with the reason
         return self._call("reference", ReferenceSpec, REFERENCE_PROMPT.format(text=text), check=check, max_new_tokens=160)
+
+    def appearance_each(self, crops: dict[int, np.ndarray], appearance: str, batch: int = 8) -> dict[int, Confirmation]:
+        """Gemma judges each candidate's isolated crop on its own: does it look like the words? Batched calls with the
+        identical prompt (if the VLM supports it); an invalid answer gets one retry on its own."""
+        prompt = APPEARANCE_ONE_PROMPT.format(appearance=appearance)
+        if not hasattr(self.vlm, "generate_batch"):
+            return {k: self._call("appearance_one", Confirmation, prompt, image=c, max_new_tokens=80) for k, c in crops.items()}
+        out, keys = {}, list(crops)
+        for i in range(0, len(keys), batch):
+            ks = keys[i:i + batch]
+            t0 = time.monotonic()
+            raws = self.vlm.generate_batch(prompt, [crops[k] for k in ks], max_new_tokens=80)
+            dt = (time.monotonic() - t0) / len(ks)
+            for k, raw in zip(ks, raws):
+                try:
+                    out[k] = Confirmation.model_validate(_json(raw))
+                    ok, err = True, None
+                except (ValueError, ValidationError, json.JSONDecodeError) as exc:
+                    ok, err = False, str(exc).splitlines()[0][:200]
+                if self.log:
+                    self.log("vlm", role="appearance_one", attempt=1, prompt=prompt, answer=raw, valid=ok, error=err,
+                             seconds=round(dt, 2), batched=len(ks), mark=k)
+                if not ok:
+                    out[k] = self._call("appearance_one", Confirmation, prompt, image=crops[k], max_new_tokens=80)
+        return out
 
     def match_appearance(self, grid_image: np.ndarray, appearance: str, ids: list[int]) -> AppearanceMatch:
         """Gemma looks at close-up tiles of the candidates and lists those that look like the words."""

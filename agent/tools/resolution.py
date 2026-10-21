@@ -122,7 +122,14 @@ class ResolutionTools:
             m, u = self.appearance(obs, spec.appearance, sure + unsure)
             stages.append({"stage": "appearance", "words": spec.appearance, "matches": m, "unsure": u,
                            "rejected": sorted(set(sure + unsure) - set(m) - set(u))})
+            if m:  # an object Gemma could not judge matters only when none clearly fits
+                u = []
             sure, unsure = [k for k in sure if k in m], sorted(set(u) | {k for k in unsure if k in m})
+            if len(sure) > 1 and spec.size is None and len(sure) <= APPEARANCE_TILES:  # joint comparison, when needed
+                best = self.compare_appearance(obs, spec.appearance, sure)
+                stages.append({"stage": "joint appearance", "words": spec.appearance, "compared": sure, "matches": best})
+                if best:
+                    sure = [k for k in sure if k in best]
         if spec.size is not None and len(sure) + len(unsure) > 1:
             rk = rank_by_size({k: obs.measured[k] for k in sure + unsure}, spec.size.measure, spec.size.order)
             stages.append({"stage": "size", "order": spec.size.order, "requested": spec.size.measure,
@@ -165,18 +172,21 @@ class ResolutionTools:
         return cache[key]
 
     def appearance(self, obs: Observation, words: str, marks: list[int]) -> tuple[list[int], list[int]]:
-        """Gemma compares the candidates' isolated crops side by side (APPEARANCE_TILES per picture) against the
-        appearance words. -> (matches, unsure)."""
-        matches, unsure = [], []
-        for i in range(0, len(marks), APPEARANCE_TILES):
-            chunk = marks[i:i + APPEARANCE_TILES]
-            img = grid({k: isolate(obs.rgb, obs.marks[k]) for k in chunk}, cols=min(4, len(chunk)))
-            path = self.run_dir / "images" / f"{obs.frame_id}_appearance_{'_'.join(map(str, chunk))}.jpg"
-            cv2.imwrite(str(path), cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
-            a = self.roles.match_appearance(img, words, chunk)
-            matches += [k for k in a.matches if k in chunk]
-            unsure += [k for k in a.unsure if k in chunk and k not in a.matches]
-        return matches, unsure
+        """Gemma judges each candidate's isolated crop on its own against the appearance words (batched).
+        -> (matches, unsure). Live 2026-10-21: judging eight tiles in one picture, Gemma 4 E2B missed clear matches
+        and called nearly every other object "unsure"; one crop at a time is the reliable form."""
+        a = self.roles.appearance_each({k: isolate(obs.rgb, obs.marks[k]) for k in marks}, words)
+        return [k for k in marks if a[k].match == "yes"], [k for k in marks if a[k].match == "unsure"]
+
+    def compare_appearance(self, obs: Observation, words: str, marks: list[int]) -> list[int]:
+        """Several crops each fit on their own: Gemma compares them side by side in one picture and keeps those that
+        fit best (a subset of marks; [] = no narrowing)."""
+        img = grid({k: isolate(obs.rgb, obs.marks[k]) for k in marks}, cols=min(4, len(marks)))
+        cv2.imwrite(str(self.run_dir / "images" / f"{obs.frame_id}_appearance_{'_'.join(map(str, marks))}.jpg"),
+                    cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
+        a = self.roles.match_appearance(img, words, marks)
+        best = [k for k in marks if k in a.matches]
+        return best if 0 < len(best) < len(marks) else []
 
     def _resolve_described(self, obs: Observation, text: str, pool: list[int]):
         """Gemma's resolve over its descriptions and the measured facts of the pool."""
@@ -250,6 +260,8 @@ def _stage_text(s: dict) -> str:
         return f"{len(s['inside'])} on that side ({s['frame']} frame)"
     if s["stage"] == "appearance":
         return f"appearance fits {s['matches']}"
+    if s["stage"] == "joint appearance":
+        return f"fits best {s['matches'] or s['compared']}"
     if s["stage"] == "size":
         return f"{s['order']} by {s['measure']}" + (" (approximate)" if s["approximate"] else "")
     return f"{s['stage']}: {s.get('words', '')}"

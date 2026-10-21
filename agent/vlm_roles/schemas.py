@@ -171,6 +171,13 @@ class ReferenceSpec(BaseModel):
     side: SideSpec | None = None
     other: str = ""  # any other words that pick the object out (e.g. a relation to another object)
 
+    @field_validator("appearance", "other", mode="before")
+    @classmethod
+    def _words(cls, v):  # Gemma sometimes gives the words as a list, or null for none
+        if v is None:
+            return ""
+        return " ".join(str(x) for x in v) if isinstance(v, list) else v
+
 
 class AppearanceMatch(BaseModel):
     matches: list[int] = []  # numbers whose appearance fits
