@@ -227,6 +227,11 @@ def format_event(e: dict) -> Line | None:  # noqa: C901 (a flat dispatch on the 
             what = "grasp" if c == "contact" else "still holding after the carry"
             return Line(w, "VERIFICATION", f"{what}: fingers stopped {e.get('stopped_short_deg')} deg short (need >= 1.5): "
                                      + ("confirmed" if ok else "NO CONTACT"), lvl)
+        if e.get("camera") is not None:  # borderline fingers: the table camera decided
+            cam = e["camera"]
+            return Line(w, "VERIFICATION", f"{c}: fingers borderline ({e.get('stopped_short_deg')} deg short), table camera "
+                                           f"{cam.get('frame_id')}: {'object in the gripper' if cam.get('in_gripper') else 'nothing in the gripper'}, "
+                                           f"old spot {cam.get('old_spot')} -> " + ("held" if ok else "NOT confirmed"), lvl)
         if c == "placement":
             if "xy_error_mm" not in e:
                 return Line(w, "VERIFICATION", f"placement: {e.get('reason')}", lvl)

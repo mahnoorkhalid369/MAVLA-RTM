@@ -24,6 +24,42 @@ class VerificationTools:
         self.log("verification", **v)
         return v
 
+    IN_GRIPPER_XY_M, IN_GRIPPER_Z_M = 0.06, (-0.15, 0.08)  # around the fingertip centre (TCP): a held object's centre
+
+    def confirm_held(self, close_target: float, object_id: int | None, check: str) -> dict:
+        """Is the object still in the gripper? Fingers first: clearly stalled -> held; closed on nothing -> not held.
+        In between (live 2026-10-21: 1.45 deg short after a lift, threshold 1.5, object still in the fingers) the table
+        camera looks (look_in_gripper): held if it measures something in the gripper and the object's old spot on the
+        table is empty; anything else stays not confirmed (never assumed)."""
+        v = self.verify_contact(close_target)
+        v["check"], v["by"] = check, "fingers"
+        if v["pass"] or v["stopped_short_deg"] < self.tol.empty_deg:
+            return v
+        look = self.look_in_gripper(object_id)
+        v.update(by="fingers borderline -> table camera", camera=look,
+                 **{"pass": bool(look["in_gripper"] and look["old_spot"] != "occupied")})
+        self.log("verification", **{k: v[k] for k in ("check", "by", "pass", "stopped_short_deg")}, camera=look)
+        return v
+
+    def look_in_gripper(self, object_id: int | None) -> dict:
+        """One table-camera observation (no Gemma): is something measured in the gripper (around the fingertip centre,
+        off the table), and is the object's remembered spot on the table empty?"""
+        obs = self.perceive("table")
+        tool = self.kin.fk(self.bridge.q())[:3, 3]
+        near = [k for k, g in obs.measured.items()
+                if np.hypot(g["centre"][0] - tool[0], g["centre"][1] - tool[1]) < self.IN_GRIPPER_XY_M
+                and self.IN_GRIPPER_Z_M[0] < g["centre"][2] - tool[2] < self.IN_GRIPPER_Z_M[1] and g.get("support_z", 0.0) > 0.02]
+        removed = [e for e in obs.excluded if e.get("reason") == "the held object"]  # dropped by perceive (held box)
+        spot = "unknown"
+        o = self.world.objects.get(object_id) if object_id is not None else None
+        g0 = (self.held_geom if object_id == self.held_object and self.held_geom else None) or (o.geometry if o else None)
+        if g0 is not None:
+            on_spot = any(np.hypot(g["centre"][0] - g0["centre"][0], g["centre"][1] - g0["centre"][1]) < 0.03
+                          and abs(g["top_z"] - g0["top_z"]) < 0.02 for g in obs.measured.values())
+            spot = "occupied" if on_spot else "empty"
+        return {"frame_id": obs.frame_id, "in_gripper": bool(near or removed), "marks_in_gripper": near,
+                "old_spot": spot, "tcp_mm": [round(float(x) * 1000) for x in tool]}
+
     def verify_home(self) -> dict:
         """HOME from joint-state feedback: every joint within HOME_TOLERANCE_DEG of ARM_HOME."""
         self.bridge.wait_still()

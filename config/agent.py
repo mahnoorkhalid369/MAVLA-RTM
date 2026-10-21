@@ -19,6 +19,7 @@ class Tolerances:
     z_m: float = 0.005
     tilt_deg: float = 5.0
     contact_deg: float = 1.5  # fingers stopping this far before the close target = contact
+    empty_deg: float = 0.5  # stopping less than this short = closed on nothing; in between, the table camera decides
     min_support_width_m: float = 0.030  # "on": the support's top must be at least this wide
 
 

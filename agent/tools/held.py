@@ -39,10 +39,23 @@ class HeldObjectState:
         ev = {"held_object": self.held_object, "finger_deg": round(finger, 2), "last_referent": self.last_referent}
         if self.held_object is None:
             ev["held"] = "none"
-            if finger > self.OPEN_FINGER_DEG:
+            pending = getattr(self, "unconfirmed_grasp", None)  # a grasp the last lift check could not confirm
+            if finger > self.OPEN_FINGER_DEG and pending is not None:
+                plan, target = pending
+                look = self.look_in_gripper(plan.object_id)  # the table camera looks (no Gemma)
+                ev["camera"] = look
+                if look["in_gripper"] and look["old_spot"] == "empty":
+                    self.set_held(plan, target)
+                    ev.update(held="recovered", held_object=plan.object_id,
+                              note=f"the table camera sees #{plan.object_id} in the gripper and its old spot empty")
+                else:
+                    ev["note"] = "gripper not open, nothing recorded as held, and the camera could not confirm an object in it"
+            elif finger > self.OPEN_FINGER_DEG:
                 ev["note"] = "gripper not open, but nothing is recorded as held"
+            self.unconfirmed_grasp = None
         else:
-            v = self.verify_contact(self.held_close_target)
+            v = self.confirm_held(self.held_close_target, self.held_object, "held_state") if hasattr(self, "confirm_held") \
+                else self.verify_contact(self.held_close_target)
             if v["pass"]:
                 ev["held"] = "verified"
             else:

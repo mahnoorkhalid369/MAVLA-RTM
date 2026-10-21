@@ -364,10 +364,10 @@ class PickPlaceWorkflow:
             out = self._run(p.lift, "lift", state, "COMPLETED")
             if out["next"] != "COMPLETED":
                 return out
-            v = self.tools.verify_contact(self.tools.held_close_target)
-            v["check"] = "retention_after_lift"
+            v = self._held(p, "retention_after_lift")
             vs = list(state.get("verifications", [])) + [v]
             if not v["pass"]:
+                self.tools.unconfirmed_grasp = (p, self.tools.held_close_target)  # re-checked at the next instruction
                 self.tools.clear_held()
                 return {**self._fail(state, "execution", "object lost while lifting (fingers no longer stalled)"), "verifications": vs}
             self.tools.last_referent = p.object_id
@@ -376,12 +376,19 @@ class PickPlaceWorkflow:
         out = self._run(steps, "carry" if self.mode == "place" else "lift and carry", state, "PLACING")
         if out["next"] != "PLACING":
             return out
-        v = self.tools.verify_contact(self.tools.held_close_target)  # still holding after the carry?
-        v["check"] = "contact_after_carry"
+        v = self._held(p, "contact_after_carry")  # still holding after the carry?
         vs = list(state.get("verifications", [])) + [v]
         if not v["pass"]:
             return {**self._fail(state, "execution", "object lost during transport (fingers no longer stalled)"), "verifications": vs}
         return {**out, "verifications": vs}
+
+    def _held(self, p, check: str) -> dict:
+        """Retention: fingers, and the table camera when the fingers are borderline (Tools.confirm_held)."""
+        if hasattr(self.tools, "confirm_held"):
+            return self.tools.confirm_held(self.tools.held_close_target, p.object_id, check)
+        v = self.tools.verify_contact(self.tools.held_close_target)
+        v["check"] = check
+        return v
 
     def _placing(self, state) -> dict:
         p = self.ctx["plan"]
