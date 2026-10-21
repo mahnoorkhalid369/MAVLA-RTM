@@ -100,7 +100,7 @@ PROMPT_SHA256_16 = {  # deliberate prompt versions; 2026-10-20b: original goal (
     "DESCRIBE_ONE_PROMPT": "30e7f4389ba0ab9c",
     "DESCRIBE_PROMPT": "c76f8ba28b9ad381",
     "IDENTITY_SYSTEM": "a1f6423716b7a05b",
-    "PLAN_SYSTEM": "5c65be3e3141cd7c",
+    "PLAN_SYSTEM": "8adf76d69875f553",
     "REFERENCE_PROMPT": "449c59a6572ef680",
     "REQUEST_SYSTEM": "03ac7b84cad87e6b",
     "RESOLVE_PROMPT": "4e86a24a869e7b81",

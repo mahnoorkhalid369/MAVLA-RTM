@@ -25,8 +25,7 @@ reported() (the user was told what is seen), answered(<question>), at_home(). <x
 object (the same words as in the steps) or "#<id>".
 Plan what the request actually needs. If it needs an operation that is not listed, still name it with its arguments:
 it will be reported as not available. Never put a different operation in its place and never claim something you
-cannot do. Refer to objects with the user's own words, all of them (also where the object is and its size compared
-with others), or "#<id>" for objects named in the context.
+cannot do. Refer to objects with the user's own words, or "#<id>" for objects named in the context.
 Answer with ONE JSON object only. Each step has "worker", "do" (the operation) and that operation's arguments,
 written exactly as in its list entry above:
 {{"goal": "<one line>", "success": [{{"pred": "<condition>", "args": ["<object>"]}}], "steps": [{{"worker": "<worker>", "do": "<operation>", "<argument>": "<value>"}}], "reason": "<short>"}}"""
