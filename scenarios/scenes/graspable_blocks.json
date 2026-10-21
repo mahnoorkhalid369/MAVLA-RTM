@@ -1,0 +1,466 @@
+{
+ "name": "graspable_blocks",
+ "seed": 0,
+ "description": "The default cube scene without objects wider than the gripper can hold (> 80 mm across the fingers: magenta_box_too_wide removed), plus four taller blocks (70-100 mm high, 40-50 mm wide) in the reliable reach ring in front. Poses are fixed.",
+ "objects": [
+  {
+   "name": "red_cube",
+   "shape": "box",
+   "xy": [
+    0.0,
+    0.58
+   ],
+   "size": [
+    0.06,
+    0.06,
+    0.06
+   ],
+   "color": [
+    0.8,
+    0.1,
+    0.1
+   ],
+   "role": "from the default scene (easy)"
+  },
+  {
+   "name": "green_cube",
+   "shape": "box",
+   "xy": [
+    0.15,
+    0.5
+   ],
+   "size": [
+    0.05,
+    0.05,
+    0.05
+   ],
+   "color": [
+    0.1,
+    0.7,
+    0.2
+   ],
+   "role": "from the default scene (easy)"
+  },
+  {
+   "name": "blue_cube",
+   "shape": "box",
+   "xy": [
+    -0.15,
+    0.5
+   ],
+   "size": [
+    0.05,
+    0.05,
+    0.05
+   ],
+   "color": [
+    0.1,
+    0.25,
+    0.85
+   ],
+   "role": "from the default scene (easy)"
+  },
+  {
+   "name": "yellow_cube",
+   "shape": "box",
+   "xy": [
+    0.1,
+    0.72
+   ],
+   "size": [
+    0.06,
+    0.06,
+    0.06
+   ],
+   "color": [
+    0.95,
+    0.85,
+    0.1
+   ],
+   "role": "from the default scene (easy)"
+  },
+  {
+   "name": "orange_cube",
+   "shape": "box",
+   "xy": [
+    -0.12,
+    0.7
+   ],
+   "size": [
+    0.035,
+    0.035,
+    0.035
+   ],
+   "color": [
+    0.9,
+    0.4,
+    0.05
+   ],
+   "role": "from the default scene (medium)"
+  },
+  {
+   "name": "pink_cube",
+   "shape": "box",
+   "xy": [
+    0.62,
+    0.1
+   ],
+   "size": [
+    0.04,
+    0.04,
+    0.04
+   ],
+   "color": [
+    1.0,
+    0.45,
+    0.7
+   ],
+   "role": "from the default scene (medium)"
+  },
+  {
+   "name": "black_cube",
+   "shape": "box",
+   "xy": [
+    -0.6,
+    0.05
+   ],
+   "size": [
+    0.045,
+    0.045,
+    0.045
+   ],
+   "color": [
+    0.05,
+    0.05,
+    0.05
+   ],
+   "role": "from the default scene (medium)"
+  },
+  {
+   "name": "purple_cylinder",
+   "shape": "cylinder",
+   "xy": [
+    0.45,
+    0.45
+   ],
+   "size": [
+    0.05,
+    0.05,
+    0.07
+   ],
+   "color": [
+    0.5,
+    0.2,
+    0.75
+   ],
+   "role": "from the default scene (medium)"
+  },
+  {
+   "name": "gray_cylinder",
+   "shape": "cylinder",
+   "xy": [
+    -0.32,
+    0.58
+   ],
+   "size": [
+    0.04,
+    0.04,
+    0.05
+   ],
+   "color": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "role": "from the default scene (medium)"
+  },
+  {
+   "name": "brown_cube_rotated",
+   "shape": "box",
+   "xy": [
+    0.5,
+    -0.25
+   ],
+   "size": [
+    0.06,
+    0.06,
+    0.06
+   ],
+   "color": [
+    0.45,
+    0.28,
+    0.12
+   ],
+   "yaw_deg": 45.0,
+   "role": "from the default scene (hard)"
+  },
+  {
+   "name": "teal_sphere",
+   "shape": "sphere",
+   "xy": [
+    -0.4,
+    -0.35
+   ],
+   "size": [
+    0.05,
+    0.05,
+    0.05
+   ],
+   "color": [
+    0.0,
+    0.55,
+    0.55
+   ],
+   "role": "from the default scene (hard)"
+  },
+  {
+   "name": "white_tall_cylinder",
+   "shape": "cylinder",
+   "xy": [
+    0.25,
+    -0.55
+   ],
+   "size": [
+    0.025,
+    0.025,
+    0.12
+   ],
+   "color": [
+    0.95,
+    0.95,
+    0.95
+   ],
+   "role": "from the default scene (hard)"
+  },
+  {
+   "name": "lime_cube_stacked",
+   "shape": "box",
+   "xy": [
+    -0.15,
+    0.5
+   ],
+   "size": [
+    0.04,
+    0.04,
+    0.04
+   ],
+   "color": [
+    0.55,
+    0.85,
+    0.1
+   ],
+   "on": "blue_cube",
+   "role": "from the default scene (hard)"
+  },
+  {
+   "name": "navy_cube_far",
+   "shape": "box",
+   "xy": [
+    0.0,
+    0.89
+   ],
+   "size": [
+    0.045,
+    0.045,
+    0.045
+   ],
+   "color": [
+    0.05,
+    0.1,
+    0.4
+   ],
+   "role": "from the default scene (hard)"
+  },
+  {
+   "name": "olive_cube_near_base",
+   "shape": "box",
+   "xy": [
+    0.0,
+    0.43
+   ],
+   "size": [
+    0.045,
+    0.045,
+    0.045
+   ],
+   "color": [
+    0.45,
+    0.45,
+    0.1
+   ],
+   "role": "from the default scene (hard)"
+  },
+  {
+   "name": "tan_box_wide",
+   "shape": "box",
+   "xy": [
+    0.72,
+    -0.08
+   ],
+   "size": [
+    0.075,
+    0.075,
+    0.05
+   ],
+   "color": [
+    0.8,
+    0.65,
+    0.45
+   ],
+   "role": "from the default scene (hard)"
+  },
+  {
+   "name": "steel_cube_heavy",
+   "shape": "box",
+   "xy": [
+    -0.25,
+    -0.5
+   ],
+   "size": [
+    0.06,
+    0.06,
+    0.06
+   ],
+   "color": [
+    0.35,
+    0.38,
+    0.42
+   ],
+   "mass_kg": 3.0,
+   "role": "from the default scene (hard)"
+  },
+  {
+   "name": "gold_cube_far",
+   "shape": "box",
+   "xy": [
+    0.0,
+    1.15
+   ],
+   "size": [
+    0.05,
+    0.05,
+    0.05
+   ],
+   "color": [
+    0.85,
+    0.65,
+    0.15
+   ],
+   "role": "from the default scene (impossible)"
+  },
+  {
+   "name": "silver_cube_behind",
+   "shape": "box",
+   "xy": [
+    0.0,
+    -0.62
+   ],
+   "size": [
+    0.05,
+    0.05,
+    0.05
+   ],
+   "color": [
+    0.75,
+    0.75,
+    0.8
+   ],
+   "role": "from the default scene (impossible)"
+  },
+  {
+   "name": "beige_cube_too_close",
+   "shape": "box",
+   "xy": [
+    0.3,
+    0.15
+   ],
+   "size": [
+    0.045,
+    0.045,
+    0.045
+   ],
+   "color": [
+    0.95,
+    0.88,
+    0.75
+   ],
+   "role": "from the default scene (impossible)"
+  },
+  {
+   "name": "pink_tall_block",
+   "shape": "box",
+   "xy": [
+    0.55,
+    0.22
+   ],
+   "size": [
+    0.045,
+    0.045,
+    0.09
+   ],
+   "color": [
+    0.95,
+    0.35,
+    0.65
+   ],
+   "role": "added: taller block, narrower than the gripper opening"
+  },
+  {
+   "name": "cyan_tall_block",
+   "shape": "box",
+   "xy": [
+    0.35,
+    0.65
+   ],
+   "size": [
+    0.04,
+    0.04,
+    0.08
+   ],
+   "color": [
+    0.1,
+    0.75,
+    0.8
+   ],
+   "role": "added: taller block, narrower than the gripper opening"
+  },
+  {
+   "name": "violet_tall_block",
+   "shape": "box",
+   "xy": [
+    -0.5,
+    0.55
+   ],
+   "size": [
+    0.05,
+    0.05,
+    0.1
+   ],
+   "color": [
+    0.55,
+    0.25,
+    0.85
+   ],
+   "role": "added: taller block, narrower than the gripper opening"
+  },
+  {
+   "name": "maroon_tall_block",
+   "shape": "box",
+   "xy": [
+    0.28,
+    0.8
+   ],
+   "size": [
+    0.04,
+    0.04,
+    0.07
+   ],
+   "color": [
+    0.5,
+    0.1,
+    0.15
+   ],
+   "role": "added: taller block, narrower than the gripper opening"
+  }
+ ]
+}
