@@ -142,11 +142,17 @@ class GoalEvaluator:
         dxy = float(np.hypot(a["centre"][0] - b["centre"][0], a["centre"][1] - b["centre"][1]))
         ok = dz <= 0.010 and dxy <= max(b["footprint"]) / 2 + 0.010
         why = f"support {dz * 1000:.0f} mm from the top, centre {dxy * 1000:.0f} mm from its centre"
-        if not ok and (p := self._placed(ids[0])) is not None and p.get("reference_id") == ids[1] and p.get("relation") == "on":
-            # the worker's own camera check of this placement passed (the measured top where it was planned); the
-            # world model's bottom of a stack can be wrong when the camera sees it as one object (live 2026-10-21)
-            return True, "measured", (f"placement check passed: {p.get('xy_error_mm')} mm from the planned spot, top "
-                                      f"{p.get('z_error_mm')} mm (frame {p.get('frame_id')}); world model: {why}")
+        return self._worker_placed(ids, c, ok, why)
+
+    def _worker_placed(self, ids, c, ok, why):
+        """The manipulation worker's response is accepted as measured evidence: its own camera check of placing THIS
+        object with THIS relation on/at THIS destination passed (the measured pose where it was planned). The world
+        model can disagree when the camera sees a stack as one object (live 2026-10-21). A check of another object,
+        relation or destination proves nothing, and a later grasp makes it stale."""
+        p = None if ok else self._placed(ids[0])
+        if p is not None and p.get("reference_id") == ids[1] and p.get("relation") == c.get("pred"):
+            return True, "measured", (f"the worker's placement check passed: {p.get('xy_error_mm')} mm from the planned "
+                                      f"spot, top {p.get('z_error_mm')} mm (frame {p.get('frame_id')}); world model: {why}")
         return ok, "measured", why
 
     def _placed(self, oid):
@@ -168,7 +174,7 @@ class GoalEvaluator:
             return None, "none", "objects not identified"
         ok = bool(self.t.relation_holds(a, b, c["pred"], c.get("frame", "robot")) and a["support_z"] <= 0.010)
         d = float(np.hypot(a["centre"][0] - b["centre"][0], a["centre"][1] - b["centre"][1]))
-        return ok, "measured", f"centres {d * 1000:.0f} mm apart, on the floor: {a['support_z'] <= 0.010}"
+        return self._worker_placed(ids, c, ok, f"centres {d * 1000:.0f} mm apart, on the floor: {a['support_z'] <= 0.010}")
 
     _next_to = _left_of = _right_of = _in_front_of = _behind = _relation
 

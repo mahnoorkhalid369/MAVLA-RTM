@@ -97,3 +97,10 @@ def test_the_goal_check_accepts_the_workers_passed_placement_check():
     assert GoalEvaluator(t, SimpleNamespace(verified=[other]))._on([held, block], {"pred": "on"})[0] is False
     later_grasp = [rec, {"check": "contact", "pass": True}]  # picked up again since: the record is stale
     assert GoalEvaluator(t, SimpleNamespace(verified=later_grasp))._on([held, block], {"pred": "on"})[0] is False
+
+
+def test_a_placement_check_for_another_relation_is_not_accepted():
+    w, block, held, merged = stacked_scene()
+    w.objects[held].geometry = dict(merged)
+    rec = {"check": "placement", "object_id": held, "relation": "next_to", "reference_id": block, "pass": True}
+    assert GoalEvaluator(SimpleNamespace(world=w), SimpleNamespace(verified=[rec]))._on([held, block], {"pred": "on"})[0] is False
