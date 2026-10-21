@@ -12,6 +12,16 @@ from dataclasses import dataclass, field
 import numpy as np
 
 SAME_XY, SAME_TOP, SAME_FOOTPRINT = 0.03, 0.02, 0.02  # m: gates for "the same object"
+HIDDEN_TOL = 0.010  # m: a support or top this much off the remembered one is a hidden part, not a change
+
+
+def covered_by(og: dict, others) -> bool:
+    """Another measurement of the same frame rests on the remembered object og: it stands over og's footprint, its
+    bottom at or above og's top. og's top face is then hidden, and a measurement of og is a partial (side) view."""
+    reach = max(og["footprint"]) / 2 + HIDDEN_TOL
+    return any(np.hypot(o["centre"][0] - og["centre"][0], o["centre"][1] - og["centre"][1]) < reach
+               and o.get("support_z", 0.0) >= og["top_z"] - 1.5 * HIDDEN_TOL and o["top_z"] > og["top_z"] + HIDDEN_TOL
+               for o in others)
 
 
 def same_place(a: dict, b: dict) -> bool:
@@ -67,7 +77,13 @@ class WorldModel:
                 best, best_d = o.id, d
         return best
 
-    def observe(self, g: dict, description: dict | None) -> int:
+    def observe(self, g: dict, description: dict | None, others=()) -> int:
+        """Fold one table-camera measurement in. others: the frame's other measurements. Two occlusion cases keep
+        what was measured before instead of a partial view (live 2026-10-21: an object placed on a 71 mm support;
+        the support was then seen as a 60 mm sliver and the placed object's bottom 18 mm too high, so on() failed):
+          covered     another object rests on the remembered one: its geometry is kept as it was
+          bottom hid  same top, but the support appears higher than remembered: the lower part is hidden; the
+                      remembered support (and so the height) is kept, the new top and position are used"""
         oid = self.match(g)
         now = time.time()
         if oid is None:
@@ -76,6 +92,13 @@ class WorldModel:
             self.objects[oid] = ObjectRecord(oid, g, description)
         else:
             o = self.objects[oid]
+            og = o.geometry
+            if covered_by(og, [x for x in others if x is not g]):
+                g = og
+            elif og.get("support_z") is not None and g.get("support_z") is not None and \
+                    g["support_z"] > og["support_z"] + HIDDEN_TOL:
+                g = dict(g, support_z=og["support_z"], height=g["top_z"] - og["support_z"])
+                g["centre"] = [g["centre"][0], g["centre"][1], og["support_z"] + g["height"] / 2]
             o.geometry, o.last_seen, o.times_seen, o.absent_count = g, now, o.times_seen + 1, 0
             o.status = "on_surface" if o.status != "held" else o.status
             if description:

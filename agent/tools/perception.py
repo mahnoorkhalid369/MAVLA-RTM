@@ -156,7 +156,7 @@ class PerceptionTools:
         """Store every measured object; returns neighbours that moved (whole-scene re-perception)."""
         before = {oid: list(o.geometry["centre"]) for oid, o in self.world.objects.items()}
         for k, g in obs.measured.items():
-            obs.object_ids[k] = self.world.observe(g, obs.descriptions.get(k))
+            obs.object_ids[k] = self.world.observe(g, obs.descriptions.get(k), others=list(obs.measured.values()))
             if k not in obs.descriptions and self.world.objects[obs.object_ids[k]].description:  # known: no VLM call
                 obs.descriptions[k] = dict(self.world.objects[obs.object_ids[k]].description)
         moved = []
