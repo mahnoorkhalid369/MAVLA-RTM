@@ -134,17 +134,25 @@ class PickPlaceWorkflow:
 
     # -------------------------------------------------------------------- states
     def _observing(self, state) -> dict:
+        """Observe from the current pose. The existing clear-view park is a perception-recovery fallback only: it runs
+        when the previous localization could not find the required object AND the arm blocks part of the camera's
+        view now (otherwise moving cannot help). Generic workspace occlusion alone never moves the arm."""
         given = self.ctx.pop("given_obs", None)
-        if given is not None and self.tools.is_fresh(given, need_clear_view=True):
-            obs = given  # the supervisor's observation: same frame, robot not moved since, cleared view
+        if given is not None and self.tools.is_fresh(given):
+            obs = given  # the supervisor's observation: same frame, robot not moved since
             self.log("tool", tool="observation_reused", frame_id=obs.frame_id)
             self.ctx["obs"] = obs
             if not obs.marks:
                 return self._fail(state, "perception", "no objects measured on the table")
             return {"next": "LOCALIZING"}
-        p = self.tools.park_for_view(None)  # whole workspace: least-blocking pose
-        if not p["ok"]:
-            return self._fail(state, "perception", "no collision-free pose that leaves the table camera's view clear")
+        if self.ctx.pop("localization_failed", False):
+            blocked, total = self.tools.view_blockage()
+            self.log("tool", tool="clear_view_decision", reason="the required object was not localized",
+                     view_blocked=f"{blocked}/{total}", park=blocked > 0)
+            if blocked > 0:
+                p = self.tools.park_for_view(None)  # existing clear-view park: whole workspace, least-blocking pose
+                if not p["ok"]:
+                    return self._fail(state, "perception", "no collision-free pose that leaves the table camera's view clear")
         try:
             obs = self.tools.perceive("table")
             self.tools.describe(obs)  # every object (a one-image shortlist was benchmarked and rejected: 4/8 wrong)
@@ -222,6 +230,12 @@ class PickPlaceWorkflow:
         return mark, None
 
     def _localizing(self, state) -> dict:
+        upd = self._localize(state)
+        if (upd.get("recover") or upd.get("failure") or {}).get("cls") == "perception":
+            self.ctx["localization_failed"] = True  # the next observation may use the clear-view park (fallback)
+        return upd
+
+    def _localize(self, state) -> dict:
         obs, task = self.ctx["obs"], state["task"]
         if self.mode == "place":  # the object is the held one; only the destination is resolved
             m_ref, upd = self._resolve_one(state, obs, task["reference"], "reference")

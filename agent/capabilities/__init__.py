@@ -53,9 +53,8 @@ def _last_motion(req) -> bool:  # no later step moves the arm: this one ends at 
     return not any(s.get("safety") == "motion" for s in _later(req))
 
 
-def _clear_view(args, req) -> bool:  # an authorized object change follows: park the arm so it can reuse this view
-    return args["clear_view"] if "clear_view" in args else any(
-        s.get("effect") == "object_change" and s.get("authorized") for s in _later(req))
+def _clear_view(args, req) -> bool:  # park only when explicitly asked: observe from the current pose otherwise
+    return bool(args.get("clear_view", False))
 
 
 def _worker(name: str) -> str:

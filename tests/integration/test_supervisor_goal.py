@@ -115,10 +115,11 @@ def test_multi_step_plan_returns_home_once_at_the_end(tmp_path):
     assert [s["final_home"] for s in starts] == [False, True]
 
 
-def test_observe_then_manipulate_reuses_the_cleared_view_observation(tmp_path):
+def test_observe_then_manipulate_reuses_the_observation_without_parking_first(tmp_path):
     t = GoalTools([plan(("observe", {}), ("pick_place", PP))])
     r, ev = run(tmp_path, t)
-    assert r["status"] == "COMPLETED" and t.parks >= 1
+    assert r["status"] == "COMPLETED"
+    assert not any("park J1" in str(e) for e in ev)  # no pre-observation park (only the placement check's view pose)
     assert any(e["kind"] == "tool" and e.get("tool") == "observation_reused" for e in ev)
     assert t.perceived == 1  # the skill did not capture again (verification uses its own stub)
 
