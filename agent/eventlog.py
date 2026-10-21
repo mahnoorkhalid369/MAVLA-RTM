@@ -34,7 +34,11 @@ class EventLog:
             if ev is None and self.trace:
                 ev = format_trace(e)
             if ev is not None:
+                if ev.gap:
+                    print(flush=True)
                 print(str(ev), flush=True)
+                for d in ev.detail:
+                    print(" " * 27 + d, flush=True)
 
     def mark(self) -> int:
         return len(self.trail)

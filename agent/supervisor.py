@@ -175,7 +175,8 @@ class GoalSupervisor:
             return f"The robot's gripper is empty. The last instruction handled object #{t.last_referent}."
         return ""
 
-    def _add_steps(self, steps, origin: str, after: Step | None = None) -> list[Step]:
+    def _add_steps(self, steps, origin: str, after: Step | None = None, success=None, reason: str = "",
+                   seconds: float | None = None) -> list[Step]:
         """steps: [(operation, args, worker)] (Gemma's choice of worker) -> ledger Steps inserted after `after` (or
         appended). A step without a worker keeps "" (it is reported, never assigned by Python)."""
         nxt = max([s.index for s in self.ts.plan], default=0) + 1
@@ -191,7 +192,7 @@ class GoalSupervisor:
             rest = self.ts.remaining(after)
             keep = [s for s in self.ts.plan if s not in rest]
             self.ts.plan = keep + new + rest
-        self.log("goal_plan", goal=self.ts.goal, origin=origin, reason="",
+        self.log("goal_plan", goal=self.ts.goal, origin=origin, reason=reason, success=success or [], seconds=seconds,
                  steps=[{"index": s.index, "capability": s.capability, "args": s.args, "worker": s.worker} for s in new])
         return new
 
@@ -278,6 +279,10 @@ class GoalSupervisor:
         self.ts.authority = self.authority.to_dict()
         self.log("authority", request_kind=self.authority.kind, grants=list(self.authority.grants),
                  evidence=self.authority.evidence, source=self.authority.source, note=self.authority.note)
+        workers = {s.worker for s in self.specs.values() if s.implemented}
+        self.log("planning", request_kind=self.authority.kind, workers=len(workers),
+                 operations=sum(1 for s in self.specs.values() if s.implemented), context=self._context())
+        t_plan = time.monotonic()
         try:
             plan = self.tools.roles.plan_goal(state["instruction"], caps.planner_menu(self.specs), context=self._context())
         except VLMFailure as exc:
@@ -296,7 +301,8 @@ class GoalSupervisor:
         self.ts.original_goal = {"instruction": state["instruction"], "statement": plan.goal, "criteria": list(criteria),
                                  "source": "gemma" + (" + request" if self.authority.kind == "question" else "")}
         self.ts.unmet = [_cond(c) for c in criteria]
-        self._add_steps([(st.capability, st.args, st.worker) for st in plan.steps], "planner")
+        self._add_steps([(st.capability, st.args, st.worker) for st in plan.steps], "planner", success=criteria,
+                        reason=plan.reason, seconds=round(time.monotonic() - t_plan, 1))
         self.log("goal_conditions", goal=plan.goal, conditions=self.ts.conditions, origin="original goal")
         return {"next": "DISPATCHING"}
 
@@ -500,7 +506,7 @@ class GoalSupervisor:
             self.event_step.status = "replaced"  # the failed / doubtful subtask Gemma re-planned around
         for s in pending:
             s.status = "skipped"
-        self._add_steps([(st.capability, st.args, st.worker) for st in d.steps], "replan")
+        self._add_steps([(st.capability, st.args, st.worker) for st in d.steps], "replan", reason=d.reason)
         self._log_plan("re-planned by Gemma (the original goal is unchanged)")
         return {"next": "DISPATCHING"}
 

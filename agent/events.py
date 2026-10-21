@@ -21,6 +21,8 @@ class Line:
     component: str
     text: str
     level: str = "info"
+    detail: tuple = ()  # extra lines under it in the terminal (the viewer shows only the one-line text)
+    gap: bool = False  # a blank line before it in the terminal: starts a new block (instruction, plan, subtask, ...)
 
     def __str__(self) -> str:
         return f"[{self.wall}] [{self.component}]".ljust(26) + f" {self.text}"
@@ -46,9 +48,16 @@ STATE_TEXT = {
 
 
 def _args(a: dict) -> str:
-    if "object" in a:
-        return f"{(a.get('object') or {}).get('text')!r} {a.get('relation')} {(a.get('reference') or {}).get('text')!r}"
-    return ", ".join(f"{k}={v!r}" for k, v in a.items())
+    """Step arguments as short text: only what is given (no None placeholders)."""
+    parts = []
+    for k, v in (a or {}).items():
+        if isinstance(v, dict):
+            v = v.get("text")
+        if v in (None, "", [], "robot") and k in ("frame", "relation", "anchor", "near") or v in (None, "", []) \
+                or k == "clear_view":  # internal flag of the automatic observation
+            continue
+        parts.append(f"{k}={v}" if k not in ("object", "target") else repr(v))
+    return " ".join(parts)
 
 
 def _mm(v) -> str:
@@ -58,7 +67,11 @@ def _mm(v) -> str:
 def format_event(e: dict) -> Line | None:  # noqa: C901 (a flat dispatch on the event kind)
     k, w = e.get("kind"), e.get("wall", "--:--:--")
     if k == "instruction":
-        return Line(w, "USER", f"goal: {e.get('text')!r}")
+        return Line(w, "USER", f"goal: {e.get('text')!r}", gap=True)
+    if k == "planning":
+        return Line(w, "GEMMA", f"planning the task ({e.get('request_kind')} request): {e.get('workers')} workers, "
+                                f"{e.get('operations')} operations available" + (f"; context: {e.get('context')}" if e.get("context") else ""),
+                    gap=True)
     if k == "state":
         s = e.get("state")
         lvl = {"COMPLETED": "success", "FAILED": "error", "CANCELLED": "warn", "RECOVERING": "warn",
@@ -66,9 +79,16 @@ def format_event(e: dict) -> Line | None:  # noqa: C901 (a flat dispatch on the 
         who = "SUPERVISOR" if e.get("level") == "goal" else "SKILL"
         return Line(w, who, f"state {s}: {STATE_TEXT.get(s, '')}", lvl)
     if k == "goal_plan":
-        steps = "; ".join(f"{x['index']}. {x['capability']}" + (f" {_args(x['args'])}" if x.get("args") else "") for x in e.get("steps", []))
-        return Line(w, "GEMMA", f"goal: {e.get('goal')} | plan: {steps or '(none)'}" + (f" | {e.get('reason')}" if not e.get("steps") else ""),
-                    "info" if e.get("steps") else "warn")
+        steps = [f"{x['index']}. {(x.get('worker') or '?')} -> {x['capability']} {_args(x.get('args') or {})}".rstrip()
+                 for x in e.get("steps", [])]
+        origin = {"planner": "plan", "replan": "new plan", "decomposition": "decomposition"}.get(e.get("origin"), "plan")
+        took = f" ({e['seconds']} s)" if e.get("seconds") is not None else ""
+        if not steps:
+            return Line(w, "GEMMA", f"{origin}{took}: no steps — {e.get('reason') or 'no reason given'}", "warn", gap=True)
+        detail = ([f"goal:    {e.get('goal')}"] if e.get("goal") else []) + (
+            [f"success: {'; '.join(_cond(c) for c in e['success'])}"] if e.get("success") else []) + \
+            [f"step     {x}" for x in steps] + ([f"reason:  {e.get('reason')}"] if e.get("reason") else [])
+        return Line(w, "GEMMA", f"{origin}{took}: " + "; ".join(x.split(". ", 1)[1] for x in steps), detail=tuple(detail), gap=True)
     if k == "step":
         ev = e.get("event")
         if ev == "start":
@@ -105,10 +125,11 @@ def format_event(e: dict) -> Line | None:  # noqa: C901 (a flat dispatch on the 
         return Line(w, "SUPERVISOR", f"information-gathering subtask: {e.get('reason')}", "warn")
     if k == "gemma_decision":
         act = e.get("action")
-        steps = "; ".join(f"{x.get('capability')} {_args(x.get('args') or {})}".strip() for x in e.get("steps") or [])
+        steps = "; ".join(f"{x.get('worker') or '?'} -> {x.get('capability')} {_args(x.get('args') or {})}".rstrip()
+                          for x in e.get("steps") or [])
         extra = f" new steps: {steps};" if steps else (f" question: {e.get('question')!r};" if e.get("question") else "")
         return Line(w, "GEMMA", f"decision: {str(act).upper()} -{extra} reason: {e.get('reason') or '(none given)'}",
-                    "info" if act in ("continue", "finish") else "warn")
+                    "info" if act in ("continue", "finish") else "warn", gap=True)
     if k == "located":
         return Line(w, "PERCEPTION", f"{e.get('text')!r}: object {e.get('mark')} at {_mm(e.get('centre') or [])}, crop check {e.get('confirm')}")
     if k == "replan":
@@ -219,7 +240,7 @@ def format_event(e: dict) -> Line | None:  # noqa: C901 (a flat dispatch on the 
         return Line(w, "SUPERVISOR", f"recovering from {e.get('cls')} (retries {e.get('retries')})", "warn")
     if k == "report":
         lvl = {"COMPLETED": "success", "CANCELLED": "warn", "UNSUPPORTED": "warn"}.get(e.get("status"), "error")
-        return Line(w, "SUPERVISOR", f"{e.get('status')}: {e.get('message')}", lvl)
+        return Line(w, "SUPERVISOR", f"{e.get('status')}: {e.get('message')}", lvl, gap=True)
     if k == "error":
         return Line(w, "SUPERVISOR", f"internal error: {e.get('error')}", "error")
     return None
@@ -257,15 +278,11 @@ def format_trace(e: dict) -> Line | None:  # noqa: C901 (a flat dispatch on the 
         return Line(w, "SUPERVISOR", f"decide: step {e.get('index')} {e.get('capability')} -> {str(e.get('worker', '')).upper()} "
                                      f"({e.get('reason')})")
     if k == "delegate":
-        c = e.get("constraints") or {}
-        cons = ", ".join(f"{k2}={v}" for k2, v in c.items() if v not in (None, [], ""))
+        if e.get("worker") == "verification":  # its result line says what was checked
+            return None
         exp = "; ".join(_cond(x) for x in e.get("expected") or [])
-        ctx = e.get("context") or {}
-        held = ctx.get("held_object")
-        return Line(w, "SUPERVISOR", f"-> {str(e.get('worker', '')).upper()} [{e.get('task_id')}] {e.get('capability')}: "
-                                     f"sub-goal {e.get('objective')!r}; input {_short(e.get('args'), 120)}"
-                                     + (f"; expect {exp}" if exp else "") + (f"; constraints {cons}" if cons else "")
-                                     + (f"; holding #{held}" if held is not None else ""))
+        return Line(w, "SUPERVISOR", f"-> {str(e.get('worker', '')).upper()} [{e.get('task_id')}] {e.get('capability')} "
+                                     f"{_args(e.get('args') or {})}".rstrip() + (f"; expect {exp}" if exp else ""), gap=True)
     if k == "worker_result":
         ok = e.get("status") == "completed"
         m = e.get("metrics") or {}
@@ -287,8 +304,8 @@ def format_trace(e: dict) -> Line | None:  # noqa: C901 (a flat dispatch on the 
         plan = "; ".join(f"{p.get('index')}. {p.get('capability')} [{p.get('status')}]" for p in e.get("plan") or [])
         return Line(w, "SUPERVISOR", f"plan updated ({e.get('reason')}): {plan}")
     if k == "consult":
-        return Line(w, "SUPERVISOR", f"-> GEMMA: what next? ({_short(e.get('reason'), 240)}); decision {e.get('replans')}"
-                                     f"/{e.get('budget')}", "warn")
+        return Line(w, "SUPERVISOR", f"-> GEMMA: what next? (changes of course so far {e.get('replans')}/{e.get('budget')})",
+                    "warn", gap=True)
     if k == "authorization":
         if e.get("allowed", True):
             return None
