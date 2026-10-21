@@ -21,8 +21,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 # ---------------------------------------------------------------------------------------------- scene
-SCENARIO = "default"      # any scenario in scenarios/ (python -c "import scenarios; print(scenarios.available())"):
-                             # "default" (frozen cube scene), "laboratory", "ap_occlusion", "ap_categories", ...
+SCENARIO = "graspable_blocks"  # any scenario in scenarios/ (python -c "import scenarios; print(scenarios.available())"):
+                             # "graspable_blocks" (cube scene, every object fits the gripper), "default" (frozen cube
+                             # scene), "laboratory", "ap_occlusion", "ap_categories", ...
 DIFFICULTY = "easy"          # laboratory: "easy" | "medium" | "hard"
 SEED = 42                    # laboratory layout seed (42 = the Experiment 1 scene)
 
