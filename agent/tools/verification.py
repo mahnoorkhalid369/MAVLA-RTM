@@ -48,7 +48,8 @@ class VerificationTools:
             d = float(np.hypot(g["centre"][0] - plan.target_centre[0], g["centre"][1] - plan.target_centre[1]))
             if d < best_d:
                 best, best_d = k, d
-        v = {"check": "placement", "planned_centre_mm": [round(x * 1000, 1) for x in plan.target_centre],
+        v = {"check": "placement", "object_id": plan.object_id, "relation": plan.relation, "reference_id": plan.reference_id,
+             "planned_centre_mm": [round(x * 1000, 1) for x in plan.target_centre],
              "planned_top_mm": round(plan.target_top * 1000, 1), "frame_id": obs.frame_id}
         if best is None or best_d > 0.05:
             v.update({"pass": False, "reason": "no object measured within 50 mm of the planned place"})
@@ -60,6 +61,11 @@ class VerificationTools:
             v.update({"measured_centre_mm": [round(x * 1000, 1) for x in g["centre"]], "xy_error_mm": round(xy * 1000, 1),
                       "z_error_mm": round(dz * 1000, 1), "tilt_deg": None if tilt == float("inf") else round(tilt, 2),
                       "pass": xy <= self.tol.xy_m and abs(dz) <= self.tol.z_m and tilt <= self.tol.tilt_deg})
+            if v["pass"]:  # the measured top confirms the planned pose: the bottom is where it was put (the camera
+                # may see a stack as one object, whose bottom is the floor; live 2026-10-21)
+                support = plan.target_top - plan.held.height
+                g = dict(g, support_z=support, height=g["top_z"] - support)
+                g["centre"] = [g["centre"][0], g["centre"][1], support + g["height"] / 2]
             o.geometry, o.status = g, "on_surface"
         moved = self.update_world(obs)  # geometric check: no VLM calls (known objects keep their description)
         v["disturbed_neighbours"] = [m for m in moved if m["id"] != plan.object_id]

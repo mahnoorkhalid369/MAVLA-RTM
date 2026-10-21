@@ -141,7 +141,26 @@ class GoalEvaluator:
         dz = abs(a["support_z"] - b["top_z"])
         dxy = float(np.hypot(a["centre"][0] - b["centre"][0], a["centre"][1] - b["centre"][1]))
         ok = dz <= 0.010 and dxy <= max(b["footprint"]) / 2 + 0.010
-        return ok, "measured", f"support {dz * 1000:.0f} mm from the top, centre {dxy * 1000:.0f} mm from its centre"
+        why = f"support {dz * 1000:.0f} mm from the top, centre {dxy * 1000:.0f} mm from its centre"
+        if not ok and (p := self._placed(ids[0])) is not None and p.get("reference_id") == ids[1] and p.get("relation") == "on":
+            # the worker's own camera check of this placement passed (the measured top where it was planned); the
+            # world model's bottom of a stack can be wrong when the camera sees it as one object (live 2026-10-21)
+            return True, "measured", (f"placement check passed: {p.get('xy_error_mm')} mm from the planned spot, top "
+                                      f"{p.get('z_error_mm')} mm (frame {p.get('frame_id')}); world model: {why}")
+        return ok, "measured", why
+
+    def _placed(self, oid):
+        """The latest placement check of this object in this task, if it passed and the object was not picked up
+        again since (a later grasp would supersede it)."""
+        if oid is None or self.s is None or self.t.world.holding == oid:
+            return None
+        vs = list(getattr(self.s, "verified", []))
+        idx = [i for i, v in enumerate(vs) if v.get("check") == "placement" and v.get("object_id") == oid]
+        if not idx or not vs[idx[-1]].get("pass"):
+            return None
+        if any(v.get("check", "").startswith("contact") for v in vs[idx[-1] + 1:]):  # a grasp since: may have moved
+            return None
+        return vs[idx[-1]]
 
     def _relation(self, ids, c):
         a, b = (self._geom(i) for i in ids[:2])

@@ -83,7 +83,10 @@ class WorldModel:
         the support was then seen as a 60 mm sliver and the placed object's bottom 18 mm too high, so on() failed):
           covered     another object rests on the remembered one: its geometry is kept as it was
           bottom hid  same top, but the support appears higher than remembered: the lower part is hidden; the
-                      remembered support (and so the height) is kept, the new top and position are used"""
+                      remembered support (and so the height) is kept, the new top and position are used
+          merged      same top, but the support appears lower than remembered while another remembered object fills
+                      the gap below (its top at the remembered support): the camera saw the stack as one object;
+                      the remembered support is kept (live 2026-10-21: an object placed on a 101 mm support)"""
         oid = self.match(g)
         now = time.time()
         if oid is None:
@@ -95,8 +98,9 @@ class WorldModel:
             og = o.geometry
             if covered_by(og, [x for x in others if x is not g]):
                 g = og
-            elif og.get("support_z") is not None and g.get("support_z") is not None and \
-                    g["support_z"] > og["support_z"] + HIDDEN_TOL:
+            elif og.get("support_z") is not None and g.get("support_z") is not None and (
+                    g["support_z"] > og["support_z"] + HIDDEN_TOL
+                    or (g["support_z"] < og["support_z"] - HIDDEN_TOL and self._fills_gap(oid, og))):
                 g = dict(g, support_z=og["support_z"], height=g["top_z"] - og["support_z"])
                 g["centre"] = [g["centre"][0], g["centre"][1], og["support_z"] + g["height"] / 2]
             o.geometry, o.last_seen, o.times_seen, o.absent_count = g, now, o.times_seen + 1, 0
@@ -104,6 +108,14 @@ class WorldModel:
             if description:
                 o.description = description
         return oid
+
+    def _fills_gap(self, oid: int, og: dict) -> bool:
+        """Another remembered object stands right under og: its top at og's support, within og's footprint."""
+        reach = max(og["footprint"]) / 2 + HIDDEN_TOL
+        return any(o.id != oid and o.status != "held"
+                   and abs(o.geometry["top_z"] - og["support_z"]) <= 1.5 * HIDDEN_TOL
+                   and np.hypot(o.geometry["centre"][0] - og["centre"][0], o.geometry["centre"][1] - og["centre"][1]) < reach
+                   for o in self.objects.values())
 
     # cross-camera association (different viewpoints: no footprint gate, partial views differ in size)
     ASSOC_XY, ASSOC_TOP, AMBIGUOUS_RATIO = 0.03, 0.02, 1.5
