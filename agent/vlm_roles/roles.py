@@ -217,7 +217,7 @@ class Roles:
             if r.id is None and not r.ambiguous:
                 raise ValueError("id is null but ambiguous is false")
         desc = "\n".join(f"{d['id']}: {d.get('name', '')} ({d.get('colour', '')}, {d.get('shape', '')}, {d.get('material', '')})"
-                         for d in descriptions)
+                         + (f"; measured: {d['measured']}" if d.get("measured") else "") for d in descriptions)
         return self._call("resolve", Resolution, RESOLVE_PROMPT.format(descriptions=desc, text=text), image=som_image, check=check)
 
     def confirm(self, crop_image: np.ndarray, text: str) -> Confirmation:

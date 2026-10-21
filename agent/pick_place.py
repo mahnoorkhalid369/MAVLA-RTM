@@ -135,8 +135,9 @@ class PickPlaceWorkflow:
     # -------------------------------------------------------------------- states
     def _observing(self, state) -> dict:
         """Observe from the current pose. The existing clear-view park is a perception-recovery fallback only: it runs
-        when the previous localization could not find the required object AND the arm blocks part of the camera's
-        view now (otherwise moving cannot help). Generic workspace occlusion alone never moves the arm."""
+        when the previous localization found no object for the required reference (none matched, or the referenced
+        id is not in the view) AND the arm blocks part of the camera's view now (otherwise moving cannot help). A found
+        but rejected candidate, or generic workspace occlusion alone, never moves the arm."""
         given = self.ctx.pop("given_obs", None)
         if given is not None and self.tools.is_fresh(given):
             obs = given  # the supervisor's observation: same frame, robot not moved since
@@ -180,6 +181,7 @@ class PickPlaceWorkflow:
                          reason=f"world object {wid} ({'reference by id' if m else 'clarified by the user earlier'})")
                 return mark, None
             if m:
+                self.ctx["not_found"] = True  # the referenced object is not in this view
                 return None, self._fail(state, "perception", f"object {wid} is not measured in the current view", role=role)
         try:
             r = self.tools.resolve(obs, ref["text"])
@@ -190,6 +192,7 @@ class PickPlaceWorkflow:
         mark = r.id
         if r.id is None:
             if not r.candidates:
+                self.ctx["not_found"] = True  # no measured object matches: it may be hidden from this view
                 return None, self._fail(state, "perception", f"nothing matches {ref['text']!r}", role=role)
             question = f"Several objects could be {ref['text']!r}. Which one do you mean?"
             if len(self.ctx.get("questions", [])) >= self.budgets.max_questions:
@@ -230,10 +233,11 @@ class PickPlaceWorkflow:
         return mark, None
 
     def _localizing(self, state) -> dict:
+        self.ctx["not_found"] = False
         upd = self._localize(state)
-        if (upd.get("recover") or upd.get("failure") or {}).get("cls") == "perception":
-            self.ctx["localization_failed"] = True  # the next observation may use the clear-view park (fallback)
-        return upd
+        if self.ctx.pop("not_found", False) and (upd.get("recover") or upd.get("failure") or {}).get("cls") == "perception":
+            self.ctx["localization_failed"] = True  # not in view: the next observation may use the clear-view park
+        return upd  # a candidate that was found but rejected (crop check "no") is not a visibility problem
 
     def _localize(self, state) -> dict:
         obs, task = self.ctx["obs"], state["task"]

@@ -28,10 +28,28 @@ class ResolutionTools:
         on its crop by the caller."""
         pool = self.pool(obs, text)
         self.describe(obs, pool)  # no-op for objects already described
-        descs = [{"id": k, **obs.descriptions.get(k, {})} for k in pool]
+        descs = [{"id": k, **obs.descriptions.get(k, {}), "measured": self.measured_facts(obs, k)} for k in pool]
         r = self.roles.resolve(obs.som, descs, text, pool)
         self.log("tool", tool="resolve", text=text, id=r.id, ambiguous=r.ambiguous, candidates=r.candidates)
         return r
+
+    @staticmethod
+    def measured_facts(obs: Observation, mark: int) -> str:
+        """What the depth camera measured about one object, as text for Gemma: height, footprint, position in the
+        robot frame and the camera's average colour inside its mask (measurements, not a model's words)."""
+        g = (obs.measured or {}).get(mark) or {}
+        parts = []
+        if g.get("height") is not None:
+            parts.append(f"{g['height'] * 1000:.0f} mm tall")
+        if g.get("footprint"):
+            parts.append("footprint " + " x ".join(f"{v * 1000:.0f}" for v in g["footprint"][:2]) + " mm")
+        if g.get("centre"):
+            parts.append(f"at x {g['centre'][0] * 1000:+.0f}, y {g['centre'][1] * 1000:+.0f} mm")
+        mask, rgb = (obs.marks or {}).get(mark), getattr(obs, "rgb", None)
+        if mask is not None and rgb is not None and np.asarray(mask).any():
+            r, gr, b = np.median(np.asarray(rgb)[np.asarray(mask, bool)], axis=0)[:3]
+            parts.append(f"camera colour rgb({r:.0f}, {gr:.0f}, {b:.0f})")
+        return ", ".join(parts)
 
     def candidate_image(self, obs: Observation, marks: list[int]) -> str:
         """Picture for a clarification question: the candidates' isolated crops side by side, numbered."""

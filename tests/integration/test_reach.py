@@ -77,3 +77,41 @@ def test_a_grasp_reachable_from_above_keeps_the_planners_message(tmp_path):
     r = run_pick(tmp_path, FarTools({"from_above": True, "any_orientation": True, "tilt_deg": 0, "distance_m": 0.6,
                                      "bearing_deg": 0, "centre": [0.0, 0.6, 0.0]}))
     assert "out of reach" in r["failure"]["reason"] and "No possible" not in r["failure"]["reason"]
+
+
+def test_resolve_gives_gemma_the_measured_height_size_position_and_camera_colour():
+    """Live 2026-10-21: 'maroon tall block' was matched on words only ('Red Cube' for the 71 mm maroon block); the
+    shared resolve tool now adds what the depth camera measured to every candidate."""
+    from agent.tools.resolution import ResolutionTools
+    from agent.vlm_roles import Resolution
+    seen = {}
+
+    class T(ResolutionTools):
+        def pool(self, obs, text):
+            return list(obs.marks)
+
+        def describe(self, obs, marks=None):
+            pass
+
+        def log(self, *a, **k):
+            pass
+    t = T()
+    t.roles = SimpleNamespace(resolve=lambda som, descs, text, ids: (seen.update(d=descs), Resolution(id=8))[1])
+    rgb = np.zeros((4, 4, 3), np.uint8)
+    rgb[:2, :2] = (128, 26, 38)
+    mask = np.zeros((4, 4), bool)
+    mask[:2, :2] = True
+    obs = SimpleNamespace(marks={8: mask}, rgb=rgb, som=None, descriptions={8: {"name": "Cube", "colour": "Red"}},
+                          measured={8: {"height": 0.071, "footprint": [0.039, 0.039], "centre": [0.282, 0.797, 0.035]}})
+    assert t.resolve(obs, "maroon tall block").id == 8
+    m = seen["d"][0]["measured"]
+    assert "71 mm tall" in m and "footprint 39 x 39 mm" in m and "x +282, y +797 mm" in m and "rgb(128, 26, 38)" in m
+
+
+def test_the_resolve_prompt_carries_the_measured_facts():
+    import json as _json
+    from agent.vlm_roles import RecordedVLM, Roles
+    vlm = RecordedVLM([_json.dumps({"id": 8, "ambiguous": False, "candidates": [8], "reason": "tallest dark red"})])
+    Roles(vlm).resolve(np.zeros((4, 4, 3), np.uint8), [{"id": 8, "name": "Cube", "colour": "Red", "measured": "71 mm tall"}],
+                       "maroon tall block", [8])
+    assert "8: Cube (Red, , ); measured: 71 mm tall" in vlm.calls[0] and "reliable" in vlm.calls[0]

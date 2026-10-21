@@ -75,6 +75,9 @@ Describe that object as you see it. Answer with ONE JSON object only:
 
 RESOLVE_PROMPT = """The objects in the image are outlined and numbered. Their descriptions:
 {descriptions}
+The names and colours in brackets are a vision model's words and may be imprecise. The "measured" facts come from the
+depth camera and are reliable: height, footprint, position (x = the robot's right, y = forward from its base, in mm)
+and the camera's average colour as RGB. Use them for words about size, position, side or shade.
 Which ONE numbered object does the user mean by "{text}"?
 If exactly one object fits, give its number. If several fit equally well, or none fits, set "id" to null,
 "ambiguous" to true and list the numbers that could fit in "candidates". "id" is always ONE number or

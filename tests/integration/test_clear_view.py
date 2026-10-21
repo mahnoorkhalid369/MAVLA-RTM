@@ -110,3 +110,27 @@ def test_an_unblocked_view_is_not_parked_for_even_after_a_miss(tmp_path):
     t = ViewTools(unseen_first={"a"}, blocked=0)
     r, ev = run(tmp_path, t, "pick", PICK)
     assert pre_placement_parks(t) == [] and t.perceived == 2
+
+
+class RejectingTools(ViewTools):
+    """The target is found, but Gemma's crop check rejects the first candidate (live 2026-10-21: 'maroon tall
+    block' -> brown cube #1, crop check 'no')."""
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.rejections = 1
+
+    def confirm(self, obs, mark, text):
+        from agent.vlm_roles import Confirmation
+        self.confirmed.append((mark, text))
+        if self.rejections:
+            self.rejections -= 1
+            return Confirmation(match="no", reason="not that one")
+        return Confirmation(match="yes")
+
+
+def test_a_rejected_candidate_is_not_a_visibility_problem_no_park(tmp_path):
+    t = RejectingTools()
+    r, ev = run(tmp_path, t, "pick", PICK)
+    assert states(ev)[:6] == ["OBSERVING", "LOCALIZING", "RECOVERING", "OBSERVING", "LOCALIZING", "PLANNING_GRASP"]
+    assert pre_placement_parks(t) == [] and not any(e.get("tool") == "clear_view_decision" for e in ev)
