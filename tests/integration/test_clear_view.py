@@ -39,12 +39,12 @@ class ViewTools(StubTools):
         self.perceived += 1
         return super().perceive(camera)
 
-    def resolve(self, obs, text):
+    def resolve(self, obs, text, exclude=()):
         from agent.vlm_roles import Resolution
         if text in self.unseen_first and text not in self.missed:
             self.missed.add(text)
             return Resolution(id=None, ambiguous=False, candidates=[], reason="not in this view")
-        return super().resolve(obs, text)
+        return super().resolve(obs, text, exclude)
 
 
 def run(tmp_path, tools, mode, task):
@@ -134,3 +134,24 @@ def test_a_rejected_candidate_is_not_a_visibility_problem_no_park(tmp_path):
     r, ev = run(tmp_path, t, "pick", PICK)
     assert states(ev)[:6] == ["OBSERVING", "LOCALIZING", "RECOVERING", "OBSERVING", "LOCALIZING", "PLANNING_GRASP"]
     assert pre_placement_parks(t) == [] and not any(e.get("tool") == "clear_view_decision" for e in ev)
+
+
+class RememberingTools(RejectingTools):
+    """Records what resolve was told to leave out."""
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.excluded = []
+
+    def resolve(self, obs, text, exclude=()):
+        from agent.vlm_roles import Resolution
+        self.excluded.append(set(exclude))
+        return Resolution(id=3 if 1 in set(exclude) else 1)
+
+
+def test_a_rejected_candidate_is_left_out_of_the_next_attempt(tmp_path):
+    """Live 2026-10-21: the crop check rejected the brown cube for 'maroon tall block' and the next attempt picked it
+    again. A rejected object is left out of later attempts in the same task."""
+    t = RememberingTools()
+    r, ev = run(tmp_path, t, "pick", PICK)
+    assert t.excluded[:2] == [set(), {1}] and t.confirmed[:2] == [(1, "a"), (3, "a")]

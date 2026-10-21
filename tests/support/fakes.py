@@ -65,7 +65,7 @@ class StubTools:
     def update_world(self, obs):
         return []
 
-    def resolve(self, obs, text):
+    def resolve(self, obs, text, exclude=()):
         from agent.vlm_roles import Resolution
         if text in self.ambiguous:
             return Resolution(id=None, ambiguous=True, candidates=self.ambiguous[text])
@@ -259,7 +259,7 @@ class GoalTools(StubTools):
     def lexical_candidates(self, obs, text):
         return []
 
-    def resolve(self, obs, text):
+    def resolve(self, obs, text, exclude=()):
         from agent.vlm_roles import Resolution
         if text in self.ambiguous:
             return Resolution(id=None, ambiguous=True, candidates=self.ambiguous[text])

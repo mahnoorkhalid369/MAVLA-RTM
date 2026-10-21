@@ -22,11 +22,14 @@ def unit(v) -> np.ndarray:
 
 
 class ResolutionTools:
-    def resolve(self, obs: Observation, text: str):
+    def resolve(self, obs: Observation, text: str, exclude=()):
         """Gemma's resolution over the descriptions of the candidate objects (its shortlist, if any): one object, or
         ambiguous with candidates (the user is asked; the model never guesses). The chosen object is then confirmed
-        on its crop by the caller."""
-        pool = self.pool(obs, text)
+        on its crop by the caller. exclude: marks already rejected for this reference in this task."""
+        pool = [k for k in self.pool(obs, text) if k not in set(exclude)]
+        if not pool:
+            from agent.vlm_roles import Resolution
+            return Resolution(id=None, ambiguous=False, candidates=[], reason="every candidate was rejected")
         self.describe(obs, pool)  # no-op for objects already described
         descs = [{"id": k, **obs.descriptions.get(k, {}), "measured": self.measured_facts(obs, k)} for k in pool]
         r = self.roles.resolve(obs.som, descs, text, pool)

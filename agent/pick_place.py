@@ -184,7 +184,9 @@ class PickPlaceWorkflow:
                 self.ctx["not_found"] = True  # the referenced object is not in this view
                 return None, self._fail(state, "perception", f"object {wid} is not measured in the current view", role=role)
         try:
-            r = self.tools.resolve(obs, ref["text"])
+            rejected = self.ctx.setdefault("rejected", {}).get(ref["text"], set())  # world ids Gemma's crop check rejected
+            exclude = {k for k, v in obs.object_ids.items() if v in rejected}
+            r = self.tools.resolve(obs, ref["text"], exclude=exclude) if exclude else self.tools.resolve(obs, ref["text"])
         except VLMFailure as exc:
             return None, self._fail(state, "perception", str(exc))
         self.log("resolution", role=role, text=ref["text"], **r.model_dump())
@@ -221,7 +223,9 @@ class PickPlaceWorkflow:
         except VLMFailure as exc:
             return None, self._fail(state, "perception", str(exc))
         self.log("confirmation", role=role, mark=mark, text=ref["text"], **c.model_dump())
-        if c.match == "no":
+        if c.match == "no":  # not this one: later attempts in this task leave it out (by world id, stable across frames)
+            if obs.object_ids.get(mark) is not None:
+                self.ctx.setdefault("rejected", {}).setdefault(ref["text"], set()).add(obs.object_ids[mark])
             return None, self._fail(state, "perception", f"confirm_object said no for {ref['text']!r} (mark {mark})", role=role)
         if c.match == "unsure":
             question = f"Is object {mark} the {ref['text']!r}? I am not sure."

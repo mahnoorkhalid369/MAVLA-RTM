@@ -48,7 +48,7 @@ class SessionTools(GoalTools):
         self.roles, self.log, self.run_dir, self.bridge = roles, log, run_dir, bridge
         SessionTools.instances.append(self)
 
-    def resolve(self, obs, text):
+    def resolve(self, obs, text, exclude=()):
         from agent.vlm_roles import Resolution
         if text in self.ambiguous:
             return Resolution(id=None, ambiguous=True, candidates=self.ambiguous[text])
