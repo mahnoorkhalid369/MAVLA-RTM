@@ -444,6 +444,13 @@ class GoalSupervisor:
                                         f"{len(self.ts.unmet)} original criteria not yet shown")
         return {"next": "DECIDING"}
 
+    def _failed_operations(self) -> dict[str, str]:
+        """Operations that failed in this task (task memory), with how often and the last reason, for the menu."""
+        out: dict[str, list] = {}
+        for f in self.ts.failures:
+            out.setdefault(f["operation"], []).append(f.get("evidence", ""))
+        return {op: f"{len(ev)} time(s), last: {ev[-1][:120]}" for op, ev in out.items()}
+
     def _deciding(self, state) -> dict:
         """Gemma reads the task memory and decides the next subtask. Changes of course (replan / ask / finish / stop)
         are bounded by ExecutionControls.max_replans; "continue" is bounded by the delegation limit. A re-plan whose
@@ -452,7 +459,8 @@ class GoalSupervisor:
         pending = [s for s in self.ts.plan if s.status == "pending"]
         self.log("consult", reason=event, replans=self.ts.replans, budget=self.controls.max_replans)
         try:
-            d = self.tools.roles.decide(self.ts.instruction, self.ts.memory_text(), event, caps.planner_menu(self.specs),
+            d = self.tools.roles.decide(self.ts.instruction, self.ts.memory_text(), event,
+                                        caps.planner_menu(self.specs, self._failed_operations()),
                                         has_pending=bool(pending), context=self._context())
         except VLMFailure as exc:
             self.ts.consults.append({"reason": event, "action": None, "accepted": False, "why": str(exc)})

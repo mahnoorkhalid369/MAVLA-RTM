@@ -177,7 +177,7 @@ class GoalTools(StubTools):
             with nothing left, Gemma fails (VLMFailure)."""
             from agent.vlm_roles import Decision, VLMFailure, check_decision
             from tests.support.runners import scripted_step
-            tools.decide_calls.append({"event": event, "progress": progress, "context": context})
+            tools.decide_calls.append({"event": event, "progress": progress, "context": context, "menu": menu})
             ok = ", subtask achieved" in event or ", subtask done" in event
             if has_pending and ok and tools.continue_on_success:
                 d = Decision(action="continue", reason="the next planned subtask is still right")

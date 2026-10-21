@@ -42,10 +42,28 @@ def check_steps(steps: list[PlanStep], max_steps: int = 6) -> None:
     from agent.capabilities.specs import check_worker  # the operations' interfaces (lazy: no import cycle)
     for i, st in enumerate(steps, 1):
         try:
-            st.args
+            check_placeholders(st.args)
             check_worker(st.do, st.worker)
         except ValueError as exc:
             raise ValueError(f"step {i}: {exc}") from None
+
+
+_PLACEHOLDER = re.compile(r"<[^<>]{1,60}>")  # a template slot copied from a prompt, e.g. "<object_id>", "#<held id>"
+
+
+def check_placeholders(value) -> None:
+    """Gemma sometimes copies a prompt template's slot instead of filling it (live 2026-10-21: "#<held id>",
+    "<object_id>", "<the user's words in brackets>"); such an argument would be matched to an arbitrary object. Rejected, so the one
+    retry says what to write instead. Structural: no words are interpreted."""
+    if isinstance(value, dict):
+        for v in value.values():
+            check_placeholders(v)
+    elif isinstance(value, (list, tuple)):
+        for v in value:
+            check_placeholders(v)
+    elif isinstance(value, str) and _PLACEHOLDER.search(value):
+        raise ValueError(f"{value!r} is a template placeholder: write the user's own words for the object, or a #id "
+                         f"given in the context")
 
 
 # Roles that reason as the robot (what it is, what it can do, its directions) get IDENTITY_SYSTEM in front of their
@@ -109,6 +127,11 @@ class Roles:
         each capability needs (placeholder strings like "null" count as missing), step count, consistency rules."""
         def check(p: GoalPlan):
             check_steps(p.steps, max_steps)
+            for c in p.success:
+                try:
+                    check_placeholders(c.model_dump().get("args"))
+                except ValueError as exc:
+                    raise ValueError(f"success criterion {c.pred}: {exc}") from None
             if p.steps and not p.success:
                 raise ValueError("state the success criteria (\"success\"): the measurable conditions that are true "
                                  "when the user's goal is reached")

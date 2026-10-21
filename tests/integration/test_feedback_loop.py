@@ -408,3 +408,14 @@ def test_a_worker_named_by_its_menu_label_is_the_same_worker():
     check_worker("pick_place", "Manipulation")
     with pytest.raises(ValueError):
         check_worker("pick_place", "inspection worker")
+
+
+def test_after_a_failure_gemma_decides_from_a_menu_that_marks_the_failed_operation(tmp_path):
+    """Live 2026-10-21: decompose failed, Gemma chose decompose again (three times). The failure is now written next to
+    the operation in the menu Gemma decides from (nothing is blocked; the decision stays Gemma's)."""
+    t = tools([plan(PICK_A, PLACE_IT)], misplace=True)
+    run(tmp_path, t, instruction="Put a beside c.")
+    first = problems(t)[0]
+    place = next(x for x in first["menu"].splitlines() if x.strip().startswith("- place"))
+    assert "FAILED in this task: 1 time(s)" in place
+    assert "FAILED" not in next(x for x in first["menu"].splitlines() if x.strip().startswith("- pick"))

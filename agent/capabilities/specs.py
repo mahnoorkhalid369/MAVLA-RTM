@@ -227,14 +227,18 @@ def adapt_args(name: str, raw: dict) -> dict:
     return {k: v for k, v in raw.items() if not (isinstance(v, str) and _text(v) is None) and v is not None}
 
 
-def planner_menu(specs: dict[str, CapabilitySpec] | None = None) -> str:
-    """The workers, their responsibilities and the operations each one implements now, as Gemma sees them."""
+def planner_menu(specs: dict[str, CapabilitySpec] | None = None, failed: dict[str, str] | None = None) -> str:
+    """The workers, their responsibilities and the operations each one implements now, as Gemma sees them.
+    failed: operation -> what happened when it failed in this task (shown next to it, so the decision is informed;
+    nothing is removed or blocked)."""
     from agent.workers import RESPONSIBILITY
-    specs = SPECS if specs is None else specs
+    specs, failed = (SPECS if specs is None else specs), failed or {}
     out = []
     for w in dict.fromkeys(s.worker for s in specs.values()):
         out.append(f"{w} worker: {RESPONSIBILITY.get(w, '')}")
         out += [f"  - {s.name}: {s.summary}. args {s.args}" + ("" if s.implemented else " (not available yet)")
+                + (f" [FAILED in this task: {failed[s.name]}; it will fail again unless something changed: prefer "
+                   f"another operation, ask_user or stop]" if s.name in failed else "")
                 for s in specs.values() if s.worker == w]
     return "\n".join(out)
 
