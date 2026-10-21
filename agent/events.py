@@ -187,6 +187,10 @@ def format_event(e: dict) -> Line | None:  # noqa: C901 (a flat dispatch on the 
         names = e.get("names") or {}
         return Line(w, "GEMMA", f"described {len(names)} objects: " + ", ".join(f"{k}={v}" for k, v in list(names.items())[:8])
                     + (" ..." if len(names) > 8 else ""))
+    if k == "match":
+        return Line(w, "PERCEPTION", _match_text(e), "info" if e.get("id") is not None else "warn")
+    if k == "identity":
+        return Line(w, "PERCEPTION", f"{e.get('text')!r}: world object #{e.get('world_id')} {e.get('reason')}", "warn")
     if k == "resolution":
         if e.get("id") is None:
             return Line(w, "GEMMA", f"{e.get('role')} {e.get('text')!r}: ambiguous, candidates {e.get('candidates')}", "warn")
@@ -250,6 +254,34 @@ def _cond(c: dict) -> str:
     """A goal condition as text: pred(args), plus the direction of a viewing condition."""
     tail = f" along {c['direction']} ({c.get('frame', 'robot')} frame)" if c.get("direction") is not None else ""
     return f"{c.get('pred')}({', '.join(map(str, c.get('args', [])))}){tail}"
+
+
+def _match_text(e: dict) -> str:
+    """One line per matching decision: each stage's survivors (marks of this frame, world ids at the end)."""
+    if e.get("spec") is None:
+        return f"match {e.get('text')!r}: {e.get('reason')}"
+    parts = []
+    for st in e.get("stages") or []:
+        if st["stage"] == "side":
+            parts.append(f"side {st.get('direction')} ({st.get('frame')}): {st.get('inside')}"
+                         + (f", borderline {st['borderline']}" if st.get("borderline") else ""))
+        elif st["stage"] == "appearance":
+            parts.append(f"looks like {st.get('words')!r}: {st.get('matches')}"
+                         + (f", unsure {st['unsure']}" if st.get("unsure") else ""))
+        elif st["stage"] == "size":
+            vals = ", ".join(f"{k}={v}" for k, v in (st.get("values") or {}).items())
+            parts.append(f"{st.get('order')} {st.get('measure')}{' (approximate)' if st.get('approximate') else ''} "
+                         f"[{vals} {st.get('unit')}]: " + (f"{st['winner']}" if st.get("winner") is not None
+                                                            else f"too close {st.get('tied')}"))
+        else:
+            parts.append(f"{st['stage']}: {st.get('id') if st.get('id') is not None else st.get('candidates')}")
+    if e.get("id") is not None:
+        end = f"-> object {e['id']} (world #{e.get('world_id')})"
+    elif e.get("candidates"):
+        end = f"-> ask the user: {e.get('candidates')} ({e.get('reason')})"
+    else:
+        end = f"-> none ({e.get('reason')})"
+    return f"match {e.get('text')!r} in {e.get('frame_id')}: " + "; ".join(parts + [end])
 
 
 def _short(v, n: int = 160) -> str:

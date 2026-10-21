@@ -393,14 +393,16 @@ def test_resolution_only_sees_the_shortlist(tmp_path):
     obs = _obs_with(6)
     obs.shortlists = {"red cube": [2, 5]}
     obs.descriptions = {2: {"name": "cube", "colour": "red"}, 5: {"name": "cube", "colour": "dark red"}}
-    vlm = RecordedVLM(['{"id": 2}', '{"id": 2, "ambiguous": false, "candidates": [2]}'])
+    # the words are split (appearance only), then Gemma compares the shortlisted crops in one picture
+    vlm = RecordedVLM(['{"appearance": "red cube"}', '{"matches": [2], "unsure": []}'])
     t.roles = Roles(vlm)
     r = t.resolve(obs, "red cube")
-    assert r.id == 2 and "1:" not in vlm.calls[0] and "2:" in vlm.calls[0] and "5:" in vlm.calls[0]
-    vlm2 = RecordedVLM(['{"id": 4}', '{"id": null, "ambiguous": true, "candidates": [2]}',
-                        '{"id": null, "ambiguous": true, "candidates": [2, 5]}'])
+    assert r.id == 2 and (tmp_path / "images" / "table_001_appearance_2_5.jpg").exists()  # only the shortlist shown
+    t._reference_specs.clear()
+    vlm2 = RecordedVLM(['{"appearance": "red cube"}', '{"matches": [4]}', '{"matches": [2, 5]}'])
     t.roles = Roles(vlm2)
-    assert t.resolve(obs, "red cube").id is None  # an object outside the shortlist is rejected (retry asked)
+    r = t.resolve(obs, "red cube")  # an object outside the shortlist is rejected (retry asked); two fit -> the user
+    assert r.id is None and r.ambiguous and r.candidates == [2, 5] and "not in the picture" in vlm2.calls[2]
 
 
 def test_describe_many_batches_and_retries_invalid_items_once():

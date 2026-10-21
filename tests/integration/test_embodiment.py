@@ -37,7 +37,7 @@ def test_the_identity_is_put_in_front_of_every_embodied_role_once():
     r.answer("how many?", "facts", [1])
     assert all(s.startswith(IDENTITY_SYSTEM) and s.count(IDENTITY_SYSTEM) == 1 for s in vlm.systems)
     assert vlm.systems[1] != IDENTITY_SYSTEM  # the role's own instructions follow the identity
-    assert {"request", "plan", "decide", "decompose", "answer"} == EMBODIED_ROLES
+    assert {"request", "plan", "decide", "decompose", "answer", "reference"} == EMBODIED_ROLES  # "your right"
 
 
 def test_perception_roles_judge_images_without_the_identity():

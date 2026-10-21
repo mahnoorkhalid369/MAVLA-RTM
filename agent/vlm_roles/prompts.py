@@ -85,6 +85,27 @@ null, never a list. Answer with ONE JSON object only:
 {{"id": <number or null>, "ambiguous": <true|false>, "candidates": [<numbers>], "reason": "<short>"}}"""
 
 
+REFERENCE_PROMPT = """The user refers to one object as: "{text}"
+Split these words by how each part can be checked:
+- "appearance": the words about what the object looks like (kind, colour, shape, markings), copied from the user;
+  "" if there are none.
+- "size": only if the user compares sizes with the other objects. "measure" is "volume" (overall size), "height"
+  (tall / short), "footprint" (area on the floor) or "width" (wide / narrow); "order" is "largest" or "smallest".
+  null otherwise.
+- "side": only if the user names a side of you or of the camera picture: "direction" = [x, y, z] in "frame"
+  ("robot": x = your right, y = forward, z = up; "camera": the fixed camera's picture). null otherwise. A relation
+  to another object ("next to the <B>") is not a side.
+- "other": any remaining words that pick the object out (e.g. a relation to another object), copied; "" if none.
+Answer with ONE JSON object only:
+{{"appearance": "<words>", "size": {{"measure": "...", "order": "..."}} | null, "side": {{"direction": [<x>, <y>, <z>], "frame": "robot"}} | null, "other": "<words>"}}"""
+
+
+APPEARANCE_PROMPT = """The picture shows numbered objects, each in its own tile (the number is above the object).
+Which of them look like "{appearance}"? Judge only how they look (kind, colour, shape, markings), not their size or
+where they are. List every number that fits in "matches", and in "unsure" the numbers you cannot judge from the
+picture. Answer with ONE JSON object only: {{"matches": [<numbers>], "unsure": [<numbers>]}}"""
+
+
 CONFIRM_PROMPT = """Look at the object at full brightness in this picture (everything around it is dimmed). Is it "{text}"?
 Answer with ONE JSON object only: {{"match": "yes" | "no" | "unsure", "reason": "<short>"}}"""
 

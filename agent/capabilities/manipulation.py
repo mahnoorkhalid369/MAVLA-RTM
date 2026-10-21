@@ -39,6 +39,9 @@ def _skill(ctx: Context, mode: str, task: dict, final_home: bool, step_no: int) 
     from agent.pick_place import PickPlaceWorkflow
     # a fresh table-camera observation is reused as it is (no clear-view requirement: parking is a localization fallback)
     given = ctx.obs if ctx.tools.is_fresh(ctx.obs) and getattr(ctx.obs, "camera", "table") == "table" else None
+    bindings = ctx.state.bindings if ctx.state is not None else {}
+    task = {k: (dict(v, world_id=bindings[v["text"]]) if isinstance(v, dict) and bindings.get(v.get("text")) is not None
+                else v) for k, v in task.items()}  # identity: words this task already bound keep their object
     wf = PickPlaceWorkflow(ctx.tools, ctx.log, ctx.run_dir, ctx.responder, ctx.budgets, final_home=final_home, mode=mode)
     r = wf.run(ctx.state.instruction, task, observation=given, thread_id=f"{ctx.state.started:.0f}_step{step_no}_{mode}")
     ctx.state.verified.extend(r.get("verifications") or [])

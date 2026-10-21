@@ -96,7 +96,9 @@ def test_resolve_gives_gemma_the_measured_height_size_position_and_camera_colour
         def log(self, *a, **k):
             pass
     t = T()
-    t.roles = SimpleNamespace(resolve=lambda som, descs, text, ids: (seen.update(d=descs), Resolution(id=8))[1])
+    from agent.vlm_roles import ReferenceSpec
+    t.roles = SimpleNamespace(resolve=lambda som, descs, text, ids: (seen.update(d=descs), Resolution(id=8))[1],
+                              parse_reference=lambda text: ReferenceSpec())  # no split: the description path
     rgb = np.zeros((4, 4, 3), np.uint8)
     rgb[:2, :2] = (128, 26, 38)
     mask = np.zeros((4, 4), bool)

@@ -90,8 +90,9 @@ def test_library_scenario_registry_resolves():
 
 # --------------------------------------------------------------------------- agent: registry and prompts
 PROMPT_SHA256_16 = {  # deliberate prompt versions; 2026-10-20b: original goal (success criteria), worker choice,
-    # task memory in the decision prompt
+    # task memory in the decision prompt; 2026-10-21: reference split and appearance matching (shared matcher)
     "ANSWER_PROMPT": "c10ead90d926c631",
+    "APPEARANCE_PROMPT": "39ea1929409e4a75",
     "CONFIRM_PROMPT": "60d867c0f1984edf",
     "DECIDE_SYSTEM": "f78d797175d96fac",
     "DECOMPOSE_PROMPT": "54dcf878452029e6",
@@ -99,6 +100,7 @@ PROMPT_SHA256_16 = {  # deliberate prompt versions; 2026-10-20b: original goal (
     "DESCRIBE_PROMPT": "c76f8ba28b9ad381",
     "IDENTITY_SYSTEM": "a1f6423716b7a05b",
     "PLAN_SYSTEM": "8adf76d69875f553",
+    "REFERENCE_PROMPT": "cb3b88ff19ba1040",
     "REQUEST_SYSTEM": "03ac7b84cad87e6b",
     "RESOLVE_PROMPT": "4e86a24a869e7b81",
     "SHORTLIST_PROMPT": "32ae760793cc8575",

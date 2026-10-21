@@ -111,8 +111,9 @@ class PickPlaceWorkflow:
         image = None
         if hasattr(self.tools, "candidate_image"):
             image = self.tools.candidate_image(obs, list(marks))
-        q = Question(kind, text, role, self._candidates(obs, marks), image)
-        self.log("question", question=text, question_kind=kind, role=role, candidates=[c.mark for c in q.candidates], image=image)
+        q = Question(kind, text, role, self._candidates(obs, marks), image, visible=sorted(obs.marks))
+        self.log("question", question=text, question_kind=kind, role=role, candidates=[c.mark for c in q.candidates],
+                 visible=q.visible, frame_id=obs.frame_id, image=image)
         a = self.responder(q)
         rec = {"question": text, "question_kind": kind, "role": role, "candidates": [c.mark for c in q.candidates],
                "answer": a.kind, "mark": a.mark, "raw": a.raw, "source": a.source, "rejected": a.attempts}
@@ -173,18 +174,32 @@ class PickPlaceWorkflow:
         user already clarified in this session is reused while that object is still measured."""
         import re as _re
         m = _re.fullmatch(r"#(\d+)", ref["text"].strip())
-        wid = int(m.group(1)) if m else self.tools.resolved_refs.get(ref["text"].strip().lower())
+        rejected = self.ctx.setdefault("rejected", {}).get(ref["text"], set())  # world ids Gemma's crop check rejected
+        # identity: a world id already chosen for these words (by id, the user, this skill's earlier attempt, or this
+        # task's binding) is kept while the object is measured in the current frame (data association by the world
+        # model); marks are only this frame's labels
+        bound = self.ctx.setdefault("bound", {}).get(ref["text"])
+        wid, why = ((int(m.group(1)), "reference by id") if m else
+                    (self.tools.resolved_refs.get(ref["text"].strip().lower()), "clarified by the user earlier"))
+        if wid is None and bound is not None:
+            wid, why = bound, "chosen earlier in this step, kept by data association"
+        if wid is None and ref.get("world_id") is not None:
+            wid, why = ref["world_id"], "bound earlier in this task, kept by data association"
+        if wid is not None and not m and wid in rejected:
+            wid = None
         if wid is not None:
             mark = next((k for k, v in obs.object_ids.items() if v == wid), None)
             if mark is not None:
                 self.log("resolution", role=role, text=ref["text"], id=mark, ambiguous=False, candidates=[mark],
-                         reason=f"world object {wid} ({'reference by id' if m else 'clarified by the user earlier'})")
+                         world_id=wid, frame_id=obs.frame_id, reason=f"world object {wid} ({why}; mark {mark} in {obs.frame_id})")
+                self.ctx["bound"][ref["text"]] = wid
                 return mark, None
             if m:
                 self.ctx["not_found"] = True  # the referenced object is not in this view
                 return None, self._fail(state, "perception", f"object {wid} is not measured in the current view", role=role)
+            self.log("identity", text=ref["text"], world_id=wid, frame_id=obs.frame_id,
+                     reason="not measured in this frame: matching again")
         try:
-            rejected = self.ctx.setdefault("rejected", {}).get(ref["text"], set())  # world ids Gemma's crop check rejected
             exclude = {k for k, v in obs.object_ids.items() if v in rejected}
             r = self.tools.resolve(obs, ref["text"], exclude=exclude) if exclude else self.tools.resolve(obs, ref["text"])
         except VLMFailure as exc:
@@ -203,6 +218,8 @@ class PickPlaceWorkflow:
             a = self._question("choose", question, role, obs, r.candidates)
             if a.kind != "choice":
                 return None, self._cancelled(a, question)
+            if a.mark not in obs.marks or obs.object_ids.get(a.mark) is None:  # never a stale or unmeasured number
+                return None, self._fail(state, "asked", f"object {a.mark} is not in the current observation", role=role)
             mark, user_chosen = a.mark, True
             if obs.object_ids.get(mark) is not None:  # remember the clarification for retries / later steps
                 self.tools.resolved_refs[ref["text"].strip().lower()] = obs.object_ids[mark]
@@ -217,6 +234,7 @@ class PickPlaceWorkflow:
                               f"{ref['text']!r} is {ref['relation']} {ref['anchor']!r} from the measured positions"}}
         if user_chosen:  # the person's choice is the answer; the model does not re-judge it
             self.log("confirmation", role=role, mark=mark, text=ref["text"], match="user_selected", reason="chosen by the user")
+            self.ctx["bound"][ref["text"]] = obs.object_ids[mark]
             return mark, None
         try:
             c = self.tools.confirm(obs, mark, ref["text"])
@@ -231,9 +249,14 @@ class PickPlaceWorkflow:
             question = f"Is object {mark} the {ref['text']!r}? I am not sure."
             others = [k for k in r.candidates if k != mark]  # Gemma's own other candidates, if it gave any
             a = self._question("confirm", question, role, obs, [mark] + others)
-            if a.kind == "choice":  # the asked object's number confirms it; another number chooses that one
+            if a.kind == "choice":  # the asked object's number confirms it; another visible number chooses that one
+                if a.mark not in obs.marks or obs.object_ids.get(a.mark) is None:
+                    return None, self._fail(state, "asked", f"object {a.mark} is not in the current observation", role=role)
+                self.ctx["bound"][ref["text"]] = obs.object_ids[a.mark]
                 return a.mark, None
             return None, self._cancelled(a, question)
+        if obs.object_ids.get(mark) is not None:
+            self.ctx["bound"][ref["text"]] = obs.object_ids[mark]
         return mark, None
 
     def _localizing(self, state) -> dict:

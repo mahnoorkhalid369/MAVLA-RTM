@@ -13,9 +13,10 @@ from pydantic import ValidationError
 from agent.vlm_roles.gemma import VLM
 from agent.vlm_roles.prompts import (ANSWER_PROMPT, CONFIRM_PROMPT, DECIDE_SYSTEM, DECOMPOSE_PROMPT, DESCRIBE_ONE_PROMPT,
                                      DESCRIBE_PROMPT, IDENTITY_SYSTEM, PLAN_SYSTEM, REQUEST_SYSTEM, RESOLVE_PROMPT,
-                                     SHORTLIST_PROMPT)
-from agent.vlm_roles.schemas import (Confirmation, Decision, Descriptions, GoalPlan, ObjectDescription, PlanStep, RequestKind,
-                                     Resolution, SceneAnswer, Shortlist, SubPlan, VLMFailure)
+                                     SHORTLIST_PROMPT, REFERENCE_PROMPT, APPEARANCE_PROMPT)
+from agent.vlm_roles.schemas import (AppearanceMatch, Confirmation, Decision, Descriptions, GoalPlan, ObjectDescription,
+                                     PlanStep, ReferenceSpec, RequestKind, Resolution, SceneAnswer, Shortlist, SubPlan,
+                                     VLMFailure)
 
 
 def check_decision(d: Decision, has_pending: bool) -> None:
@@ -48,7 +49,7 @@ def check_steps(steps: list[PlanStep], max_steps: int = 6) -> None:
 
 # Roles that reason as the robot (what it is, what it can do, its directions) get IDENTITY_SYSTEM in front of their
 # system prompt. The perception roles (describe, shortlist, resolve, confirm) judge images only: no identity.
-EMBODIED_ROLES = {"request", "plan", "decide", "decompose", "answer"}
+EMBODIED_ROLES = {"request", "plan", "decide", "decompose", "answer", "reference"}  # "reference": frames
 
 
 def _json(text: str):
@@ -219,6 +220,24 @@ class Roles:
         desc = "\n".join(f"{d['id']}: {d.get('name', '')} ({d.get('colour', '')}, {d.get('shape', '')}, {d.get('material', '')})"
                          + (f"; measured: {d['measured']}" if d.get("measured") else "") for d in descriptions)
         return self._call("resolve", Resolution, RESOLVE_PROMPT.format(descriptions=desc, text=text), image=som_image, check=check)
+
+    def parse_reference(self, text: str) -> ReferenceSpec:
+        """The user's words for one object -> appearance (judged by Gemma on images), size and side (judged on
+        measured geometry). Schema-checked; a side must be a valid direction in a known frame."""
+        def check(r: ReferenceSpec):
+            if r.side is not None:
+                from agent.directions import direction_vector
+                direction_vector(r.side.direction, r.side.frame)  # ValueError -> one retry with the reason
+        return self._call("reference", ReferenceSpec, REFERENCE_PROMPT.format(text=text), check=check, max_new_tokens=160)
+
+    def match_appearance(self, grid_image: np.ndarray, appearance: str, ids: list[int]) -> AppearanceMatch:
+        """Gemma looks at close-up tiles of the candidates and lists those that look like the words."""
+        def check(m: AppearanceMatch):
+            bad = sorted((set(m.matches) | set(m.unsure)) - set(ids))
+            if bad:
+                raise ValueError(f"numbers {bad} are not in the picture; use only {sorted(ids)}")
+        return self._call("appearance", AppearanceMatch, APPEARANCE_PROMPT.format(appearance=appearance), image=grid_image,
+                          check=check, max_new_tokens=120)
 
     def confirm(self, crop_image: np.ndarray, text: str) -> Confirmation:
         return self._call("confirm", Confirmation, CONFIRM_PROMPT.format(text=text), image=crop_image)

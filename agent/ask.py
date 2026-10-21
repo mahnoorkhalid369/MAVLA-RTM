@@ -4,7 +4,9 @@ Only a person (TerminalResponder) or an explicitly configured script (ScriptedRe
 rehearsals) answers. Model output is never an answer. A "which object?" question has an explicit protocol, with no
 interpretation of words in Python:
 
-    "7" or "#7"      -> candidate 7 (must be one of the listed candidates; for "is it object 7?", 7 confirms it)
+    "7" or "#7"      -> object 7: a listed candidate, or any other object in the current view (its number in the
+                        picture); a number that is not an object of the current observation is refused
+                        (for "is it object 7?", 7 confirms it)
     an empty line    -> no choice: the step is cancelled (Gemma then decides what to do)
     anything else    -> explained, and the question is asked again
 
@@ -39,6 +41,7 @@ class Question:
     role: str  # "object" (to move) | "reference" (destination)
     candidates: list[Candidate]
     image: str | None = None  # picture of the candidates for the user
+    visible: list[int] = field(default_factory=list)  # every object number of the current observation (also valid)
 
 
 @dataclass
@@ -61,8 +64,10 @@ def parse_answer(text: str, q: Question) -> tuple[Answer | None, str]:
     if m is None:
         return None, f"answer with one of the numbers {sorted(marks)}, or an empty line for none"
     n = int(m.group(1))
-    if n in marks:
+    if n in marks or n in set(q.visible):
         return Answer("choice", n, raw=text), ""
+    if q.visible:
+        return None, f"{n} is not an object in the current view (objects: {sorted(set(q.visible) | marks)})"
     return None, f"{n} is not one of the candidates {sorted(marks)}"
 
 
@@ -73,11 +78,14 @@ def format_question(q: Question) -> str:
                      f"({c.distance_m:.2f} m from the robot), {c.size_mm[0]:.0f} x {c.size_mm[1]:.0f} x {c.size_mm[2]:.0f} mm")
     if q.image:
         lines.append(f"  picture of the candidates: {q.image}")
+    others = sorted(set(q.visible) - {c.mark for c in q.candidates})
+    if others:
+        lines.append(f"  other objects in view (numbers as in the camera picture): {', '.join(map(str, others))}")
     lines.append("  (x = robot's right, y = forward from the robot base)")
     if q.kind == "confirm":
         lines.append(f"  Type {q.candidates[0].mark} to confirm it, another object's number, or an empty line for none.")
     else:
-        lines.append("  Type one of the numbers, or an empty line for none.")
+        lines.append("  Type one of the numbers" + (" (or another object's number)" if others else "") + ", or an empty line for none.")
     return "\n".join(lines)
 
 

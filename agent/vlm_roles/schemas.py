@@ -151,6 +151,32 @@ class Shortlist(BaseModel):
     lists: dict[str, list[int]]
 
 
+class SizeSpec(BaseModel):
+    """A relative-size constraint, evaluated on measured geometry (never by eye)."""
+    measure: Literal["volume", "height", "footprint", "width"] = "volume"
+    order: Literal["largest", "smallest"]
+
+
+class SideSpec(BaseModel):
+    """A side of the robot (or of the fixed camera's picture), as a direction vector in an explicit frame."""
+    direction: list[float]
+    frame: Literal["robot", "camera"] = "robot"
+
+
+class ReferenceSpec(BaseModel):
+    """The user's words for one object, split by how each part is judged: appearance by Gemma on the images, size
+    and side on measured geometry."""
+    appearance: str = ""
+    size: SizeSpec | None = None
+    side: SideSpec | None = None
+    other: str = ""  # any other words that pick the object out (e.g. a relation to another object)
+
+
+class AppearanceMatch(BaseModel):
+    matches: list[int] = []  # numbers whose appearance fits
+    unsure: list[int] = []  # numbers that cannot be judged from the picture
+
+
 class Resolution(BaseModel):
     id: int | None
     ambiguous: bool = False
