@@ -74,6 +74,53 @@ class ManipulationTools:
         return PickPlan(object_id, hover, approach, lift, place, held, grasp,
                         list(map(float, target_centre)), float(target_top), relation, reference_id)
 
+    def grasp_reach(self, object_id: int) -> dict:
+        """After an out-of-reach grasp: can ANY gripper orientation reach this object? Kinematics only (joint limits,
+        no collisions), searched from seeds over the whole joint range: (1) the skill's grasp, gripper pointing down,
+        at every yaw, above the object and at its top; (2) the object's top in any orientation (position-only IK),
+        reporting the tilt that would be needed. {"from_above", "any_orientation", "tilt_deg", "distance_m",
+        "bearing_deg", "centre"}"""
+        from control.skills import grip_rotation
+        g = self.world.objects[object_id].geometry
+        c = np.asarray(g["centre"], float)
+        top = np.array([c[0], c[1], g["top_z"]])
+        kin, lo, hi = self.kin, self.kin.lower, self.kin.upper
+        seeds = [np.clip(np.array([j1, j2, j3, 0.0, j5, 0.0]), lo, hi)
+                 for j1 in np.linspace(lo[0], hi[0], 9) for j2, j3, j5 in ((-0.5, 0.5, -1.2), (0.6, 1.2, -1.2),
+                                                                            (-1.0, 2.0, 1.2), (-2.4, 2.5, -2.0))]
+        from_above = False
+        for yaw in (0.0, 45.0, 90.0, 135.0):
+            for s in seeds:
+                ok = all(kin.ik(p, grip_rotation(yaw), s, iterations=120)[1] for p in (top + [0, 0, 0.12], top))
+                if ok:
+                    from_above = True
+                    break
+            if from_above:
+                break
+        best = None
+        for s in seeds:  # position only: does the hand get there at all, and with which tilt?
+            q = s.copy()
+            for _ in range(150):
+                T = kin.fk(q)
+                e = top - T[:3, 3]
+                if np.linalg.norm(e) < 0.003:
+                    break
+                J = np.zeros((3, len(q)))
+                for i in range(len(q)):
+                    dq = q.copy()
+                    dq[i] += 1e-6
+                    J[:, i] = (kin.fk(dq)[:3, 3] - T[:3, 3]) / 1e-6
+                q = np.clip(q + J.T @ np.linalg.solve(J @ J.T + 1e-4 * np.eye(3), e), lo, hi)
+            T = kin.fk(q)
+            if np.linalg.norm(top - T[:3, 3]) < 0.005:
+                tilt = float(np.degrees(np.arccos(np.clip(-T[2, 2], -1.0, 1.0))))  # 0 = pointing straight down
+                best = tilt if best is None else min(best, tilt)
+        out = {"from_above": from_above, "any_orientation": best is not None,
+               "tilt_deg": None if best is None else round(best), "distance_m": round(float(np.hypot(*c[:2])), 2),
+               "bearing_deg": round(float(np.degrees(np.arctan2(c[0], c[1])))), "centre": [round(float(v), 3) for v in c]}
+        self.log("tool", tool="grasp_reach", object_id=object_id, **out)
+        return out
+
     DETERMINISTIC = ("out of reach", "too narrow", "fits at most", "no free, reachable", "top face is not visible",
                      "only ", "mm of the pads")  # PlanningError texts that re-observing cannot change
 

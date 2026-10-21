@@ -265,6 +265,25 @@ class PickPlaceWorkflow:
                  object=self.tools.world.objects[oid].geometry, reference=self.tools.world.objects[rid].geometry)
         return {"next": "PLANNING_GRASP", "object_id": oid, "reference_id": rid}
 
+    def _unreachable_reason(self, state, error: str) -> str | None:
+        """For an out-of-reach grasp: one clear statement when no gripper orientation the arm can take picks the
+        object up (Tools.grasp_reach, kinematics over the whole joint range); None to keep the planner's own message
+        (e.g. the object is reachable and the destination is not)."""
+        oid = state.get("object_id")
+        if "out of reach" not in error or oid is None or self.mode == "place" or not hasattr(self.tools, "grasp_reach"):
+            return None
+        r = self.tools.grasp_reach(oid)
+        if r["from_above"]:
+            return None
+        b = r["bearing_deg"]  # robot frame: 0 = straight ahead, + = to the right
+        side = "ahead" if abs(b) <= 45 else "behind the base" if abs(b) >= 135 else ("to the right" if b > 0 else "to the left")
+        where = (f"object #{oid} at x {r['centre'][0] * 1000:+.0f}, y {r['centre'][1] * 1000:+.0f} mm "
+                 f"({r['distance_m']:.2f} m from the base, {side})")
+        if not r["any_orientation"]:
+            return f"No possible gripper orientation can pick up {where}: it is outside the arm's range."
+        return (f"No possible gripper orientation can pick up {where}: the gripper reaches it only tilted "
+                f"{r['tilt_deg']} deg from vertical, and grasps are made from above.")
+
     def _planning_grasp(self, state) -> dict:
         task = state["task"]
         try:
@@ -278,8 +297,9 @@ class PickPlaceWorkflow:
                                                   task.get("frame", "robot"), q)
         except PlanningError as exc:
             if self.tools.deterministic(str(exc)):  # re-observing cannot change it: no retry, report it as such
-                self.log("failure", cls="infeasible", reason=str(exc), used=0, budget=0)
-                return {"next": "FAILED", "failure": {"cls": "infeasible", "reason": str(exc)}}
+                reason = self._unreachable_reason(state, str(exc)) or str(exc)
+                self.log("failure", cls="infeasible", reason=reason, used=0, budget=0)
+                return {"next": "FAILED", "failure": {"cls": "infeasible", "reason": reason}}
             return self._fail(state, "planning", str(exc))
         self.ctx["plan"] = plan
         summary = {"grasp": plan.grasp, "target_centre_mm": [round(v * 1000, 1) for v in plan.target_centre],
