@@ -219,14 +219,13 @@ class Viewer:
                 out.setdefault(int(k), (CAND_C, "?"))
         return out
 
-    def draw_image(self, canvas) -> None:
-        cam = self.active_camera()
+    def annotated(self, cam: str) -> np.ndarray | None:
+        """Latest frame of `cam` with the masks / ids of the latest perception result on it (if it is from this
+        camera and size); None before the first frame. Also used by agent/dashboard.py."""
         with self.lock:
             fr = self.frames.get(cam)
         if fr is None:
-            canvas[0:IMG_H, 0:IMG_W] = (20, 20, 20)
-            cv2.putText(canvas, f"waiting for the {cam} camera ...", (40, IMG_H // 2), FONT, 0.8, MUTED, 2)
-            return
+            return None
         img = fr[0].copy()
         h, w = img.shape[:2]
         perc = self.perc or {}
@@ -245,13 +244,28 @@ class Viewer:
                 tag = f"{k}" + (f" {name}" if name and name != "?" else "")
                 cv2.rectangle(img, (x, max(0, y - 22)), (x + 12 * len(tag) + 6, y), (0, 0, 0), -1)
                 cv2.putText(img, tag, (x + 3, y - 5), FONT, 0.55, col if name else (255, 255, 255), 1 + bool(name), cv2.LINE_AA)
-        canvas[0:IMG_H, 0:IMG_W] = cv2.resize(img, (IMG_W, IMG_H), interpolation=cv2.INTER_AREA)
+        return img
+
+    def camera_caption(self, cam: str) -> str:
+        """One line under the image: frame rate and age of the shown detections."""
+        perc = self.perc or {}
         now = time.time()
         f = self.fps[cam]
         fps = (len(f) - 1) / (f[-1] - f[0]) if len(f) > 1 and f[-1] > f[0] else 0.0
         age = f"{now - perc['time']:.0f} s ago" if perc.get("time") else "none yet"
         txt = (f"{cam} camera live {fps:4.1f} fps | detections: frame {perc.get('frame_id', '-')} ({age}, "
                f"{len(self.perc_updates)} updates this run) | YOLO runs only when the agent observes")
+        return txt
+
+    def draw_image(self, canvas) -> None:
+        cam = self.active_camera()
+        img = self.annotated(cam)
+        if img is None:
+            canvas[0:IMG_H, 0:IMG_W] = (20, 20, 20)
+            cv2.putText(canvas, f"waiting for the {cam} camera ...", (40, IMG_H // 2), FONT, 0.8, MUTED, 2)
+            return
+        canvas[0:IMG_H, 0:IMG_W] = cv2.resize(img, (IMG_W, IMG_H), interpolation=cv2.INTER_AREA)
+        txt = self.camera_caption(cam)
         cv2.rectangle(canvas, (0, IMG_H - 26), (IMG_W, IMG_H), (0, 0, 0), -1)
         cv2.putText(canvas, txt, (8, IMG_H - 8), FONT, 0.45, (220, 220, 220), 1, cv2.LINE_AA)
 
@@ -273,8 +287,9 @@ class Viewer:
                 (f"  {d.get('colour', '')} {d.get('name', '')}"[:44], FG),
                 (f"  at x {c[0] * 1000:+.0f}, y {c[1] * 1000:+.0f}, z {c[2] * 1000:.0f} mm" + (f", conf {s:.2f}" if s else ""), MUTED)]
 
-    def draw_panel(self, canvas) -> None:
-        x, y = PANEL_X, 28
+    def draw_panel(self, canvas, x0: int = PANEL_X, y0: int = 0, y_end: int = IMG_H) -> None:
+        """Task / state / target panel from x0, y0; its colour legend sits just above y_end."""
+        x, y = x0, y0 + 28
         rs = self.rs
 
         def put(t, col=FG, scale=0.55, th=1, dy=24):
@@ -310,20 +325,19 @@ class Viewer:
             put("QUESTION (answer in the terminal):", CAND_C, 0.5, 2)
             put(rs.question[0][:46], CAND_C, 0.45, 1, 20)
             put(f"candidates: {rs.question[1]}", CAND_C, 0.45, 1, 20)
-        lx, ly = x, IMG_H - 20  # legend: a coloured swatch before each word
+        lx, ly = x, y_end - 20  # legend: a coloured swatch before each word
         for word, col in (("TARGET", TARGET_C), ("DESTINATION", DEST_C), ("question candidates", CAND_C)):
             cv2.rectangle(canvas, (lx, ly - 11), (lx + 22, ly - 3), col, -1)
             cv2.putText(canvas, word, (lx + 28, ly), FONT, 0.45, FG, 1, cv2.LINE_AA)
             lx += 40 + cv2.getTextSize(word, FONT, 0.45, 1)[0][0]
 
-    def draw_logs(self, canvas) -> None:
-        y0, y1 = LOG_Y0, H - STATUS_H - 4
-        cv2.putText(canvas, "LIVE AGENT LOGS" + ("  (scrolled: End to follow)" if self.scroll else ""), (10, y0 + 14), FONT, 0.5, MUTED, 1)
+    def draw_logs(self, canvas, y0: int = LOG_Y0, y1: int = H - STATUS_H - 4, x0: int = 10, chars: int = 190) -> None:
+        cv2.putText(canvas, "LIVE AGENT LOGS" + ("  (scrolled: End to follow)" if self.scroll else ""), (x0, y0 + 14), FONT, 0.5, MUTED, 1)
         n = (y1 - y0 - 24) // 19
         lines = list(self.rs.lines)
         end = max(0, len(lines) - self.scroll)
         for i, ln in enumerate(lines[max(0, end - n):end]):
-            cv2.putText(canvas, str(ln)[:190], (10, y0 + 38 + 19 * i), FONT, 0.45, LEVEL_COLOUR.get(ln.level, FG), 1, cv2.LINE_AA)
+            cv2.putText(canvas, str(ln)[:chars], (x0, y0 + 38 + 19 * i), FONT, 0.45, LEVEL_COLOUR.get(ln.level, FG), 1, cv2.LINE_AA)
 
     def draw_status(self, canvas) -> None:
         rs = self.rs

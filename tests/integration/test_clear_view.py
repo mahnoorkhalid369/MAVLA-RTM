@@ -39,7 +39,7 @@ class ViewTools(StubTools):
         self.perceived += 1
         return super().perceive(camera)
 
-    def resolve(self, obs, text, exclude=()):
+    def resolve(self, obs, text, exclude=(), choose=True):
         from agent.vlm_roles import Resolution
         if text in self.unseen_first and text not in self.missed:
             self.missed.add(text)
@@ -143,7 +143,7 @@ class RememberingTools(RejectingTools):
         super().__init__(**kw)
         self.excluded = []
 
-    def resolve(self, obs, text, exclude=()):
+    def resolve(self, obs, text, exclude=(), choose=True):
         from agent.vlm_roles import Resolution
         self.excluded.append(set(exclude))
         return Resolution(id=3 if 1 in set(exclude) else 1)

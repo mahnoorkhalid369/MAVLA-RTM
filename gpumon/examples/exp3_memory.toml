@@ -1,0 +1,40 @@
+# Experiment 3: memory-reduction settings on E4B, one setting changed at a time from the baseline.
+name = "exp3_memory"
+repeats = 3
+hz = 10
+timeout_s = 2400
+cooldown_s = 20
+torch_hook = true
+launcher = "launch/agent.sh"
+launcher_args = ["--headless", "--motion", "real", "--ask", "scripted",
+                 "--scenario", "workcell", "--difficulty", "hard", "--seed", "42"]
+instructions = [
+    "Take a look at your surroundings.",
+    "Put the red cube on the green cube.",
+]
+env = { VLM_THINKING = "1" }   # applies to every configuration below (a config's own env wins)
+
+[[config]]
+label = "baseline_4bit_offload"
+gemma = "models/gemma-4-E4B-it"
+env = { VLM_QUANTIZATION = "4bit", VLM_EMBEDDINGS_ON_CPU = "1" }
+
+[[config]]                      # quantization: 8-bit instead of 4-bit
+label = "8bit_offload"
+gemma = "models/gemma-4-E4B-it"
+env = { VLM_QUANTIZATION = "8bit", VLM_EMBEDDINGS_ON_CPU = "1" }
+
+[[config]]                      # CPU offload off: embedding table stays in VRAM
+label = "4bit_no_offload"
+gemma = "models/gemma-4-E4B-it"
+env = { VLM_QUANTIZATION = "4bit", VLM_EMBEDDINGS_ON_CPU = "0" }
+
+[[config]]                      # shorter input: smaller camera images
+label = "4bit_offload_img640"
+gemma = "models/gemma-4-E4B-it"
+env = { VLM_QUANTIZATION = "4bit", VLM_EMBEDDINGS_ON_CPU = "1", VLM_IMAGE_MAX_SIDE = "640" }
+
+[[config]]                      # shorter output: smaller reasoning budget
+label = "4bit_offload_think1536"
+gemma = "models/gemma-4-E4B-it"
+env = { VLM_QUANTIZATION = "4bit", VLM_EMBEDDINGS_ON_CPU = "1", VLM_THINKING_TOKENS = "1536" }

@@ -16,12 +16,12 @@ Every name is importable from agent.vlm_roles, as before the split.
 """
 
 from agent.vlm_roles.gemma import VLM, GemmaVLM, RecordedVLM
-from agent.vlm_roles.prompts import (ANSWER_PROMPT, CONFIRM_PROMPT, DECIDE_SYSTEM, DECOMPOSE_PROMPT, DESCRIBE_ONE_PROMPT,
+from agent.vlm_roles.prompts import (ANSWER_PROMPT, CLARIFY_SYSTEM, CONFIRM_PROMPT, DECIDE_SYSTEM, DECOMPOSE_PROMPT, DESCRIBE_ONE_PROMPT,
                                      DESCRIBE_PROMPT, IDENTITY_SYSTEM, PLAN_SYSTEM, REQUEST_SYSTEM, RESOLVE_PROMPT,
                                      SHORTLIST_PROMPT, REFERENCE_PROMPT, APPEARANCE_PROMPT,
                                      APPEARANCE_ONE_PROMPT)
 from agent.vlm_roles.roles import EMBODIED_ROLES, Roles, _json, check_decision, check_steps
-from agent.vlm_roles.schemas import (AppearanceMatch, ReferenceSpec, SideSpec, SizeSpec, Condition, Confirmation, Decision, Description, Descriptions, GoalPlan,
+from agent.vlm_roles.schemas import (AppearanceMatch, Clarification, ReferenceSpec, SideSpec, SizeSpec, Condition, Confirmation, Decision, Description, Descriptions, GoalPlan,
                                      ObjectDescription, PlanStep, RequestKind, Resolution, SceneAnswer, Shortlist, SubPlan,
                                      VLMFailure)
 
@@ -30,4 +30,4 @@ __all__ = ["VLM", "GemmaVLM", "RecordedVLM", "ANSWER_PROMPT", "CONFIRM_PROMPT", 
            "SHORTLIST_PROMPT", "EMBODIED_ROLES", "Roles", "_json", "check_decision", "check_steps", "Condition",
            "Confirmation", "Decision", "Description", "Descriptions", "GoalPlan", "ObjectDescription", "PlanStep",
            "RequestKind", "Resolution", "SceneAnswer", "Shortlist", "SubPlan", "VLMFailure", "REFERENCE_PROMPT",
-           "APPEARANCE_PROMPT", "APPEARANCE_ONE_PROMPT", "AppearanceMatch", "ReferenceSpec", "SideSpec", "SizeSpec"]
+           "APPEARANCE_PROMPT", "APPEARANCE_ONE_PROMPT", "CLARIFY_SYSTEM", "Clarification", "AppearanceMatch", "ReferenceSpec", "SideSpec", "SizeSpec"]

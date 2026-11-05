@@ -29,15 +29,17 @@ def test_the_identity_is_put_in_front_of_every_embodied_role_once():
                           json.dumps({"goal": "g", "success": [{"pred": "seen"}], "steps": [{"worker": "perception", "do": "observe"}],
                                       "reason": "r"}),
                           json.dumps({"action": "stop", "reason": "r"}),
-                          json.dumps({"answer": "two", "object_ids": [1]})])
+                          json.dumps({"answer": "two", "object_ids": [1]}),
+                          json.dumps({"status": "clear", "request": "look", "reason": "r"})])
     r = Roles(vlm)
     r.classify_request("look")
     r.plan_goal("look", "menu")
     r.decide("g", "", "e", "menu", has_pending=False)
     r.answer("how many?", "facts", [1])
+    r.clarify("look", [])  # 2026-10-26: understanding a request reasons as the robot ("your gripper")
     assert all(s.startswith(IDENTITY_SYSTEM) and s.count(IDENTITY_SYSTEM) == 1 for s in vlm.systems)
     assert vlm.systems[1] != IDENTITY_SYSTEM  # the role's own instructions follow the identity
-    assert {"request", "plan", "decide", "decompose", "answer", "reference"} == EMBODIED_ROLES  # "your right"
+    assert {"request", "clarify", "plan", "decide", "decompose", "answer", "reference"} == EMBODIED_ROLES  # "your right"
 
 
 def test_perception_roles_judge_images_without_the_identity():

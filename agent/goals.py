@@ -11,6 +11,7 @@ Predicates (reusable building blocks, not a list of supported sentences):
   holding(x)              the gripper holds x: world says so AND the fingers are stalled on it now
   not_holding()           nothing in the gripper (finger feedback)
   on(x, y)                x rests on y's top (measured after the action)
+  in(x, y)                x is inside container y (tray, bin): within its outline, no higher than its rim
   next_to / left_of / right_of / in_front_of / behind (x, y)   deterministic relation check (agent.tools)
   located(x)              x is bound to a measured object
   observed(x, camera)     x has a measurement from that camera (e.g. wrist) in this task
@@ -30,12 +31,21 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-PREDICATES = ("holding", "not_holding", "on", "next_to", "left_of", "right_of", "in_front_of", "behind", "located",
+PREDICATES = ("holding", "not_holding", "on", "in", "next_to", "left_of", "right_of", "in_front_of", "behind", "located",
               "observed", "ordered", "answered", "reported", "at_home", "viewing", "seen")
-RELATIONS = ("next_to", "left_of", "right_of", "in_front_of", "behind")
+RELATIONS = ("in", "next_to", "left_of", "right_of", "in_front_of", "behind")  # "in": inside a container's outline
 OBJECT_ARGS = ("holding", "on", "located", "observed") + RELATIONS  # predicates whose arguments name objects
 # objects of these may be grounded for the goal check: binding alone never satisfies them (located would be circular)
 GROUNDABLE = ("holding", "on", "observed") + RELATIONS
+# the fewest arguments each predicate needs (live 2026-11-04: "holding()" from a decomposition -> IndexError)
+MIN_ARGS = {"holding": 1, "on": 2, "located": 1, "observed": 1, "ordered": 1, **{r: 2 for r in RELATIONS}}
+# how many arguments each predicate takes (None: any number); the line parser splits a condition's text by it, so the
+# user's words may contain commas (live 2026-11-04: holding(<words>, <more words>) became two arguments)
+ARITY = {**{p: 0 for p in ("not_holding", "seen", "viewing", "reported", "at_home")},
+         **{p: 1 for p in ("holding", "located", "observed", "answered")}, "on": 2, **{r: 2 for r in RELATIONS},
+         "ordered": None}
+# conditions on where objects are: only an operation that changes an object (pick / place / ...) can make them true
+OBJECT_STATE = ("holding", "on", "ordered") + RELATIONS
 # capabilities that move the arm (= agent.capabilities.specs MOTION; kept here so this module needs no pydantic;
 # tests/unit/test_structure.py checks they agree)
 ARM_MOTION = frozenset({"pick", "place", "pick_place", "return_home", "inspect", "explore", "look"})
@@ -101,12 +111,22 @@ class GoalEvaluator:
 
     @staticmethod
     def _id(ref, bindings: dict):
-        """A condition argument -> world id: an int, a "#<id>" reference, or a text bound by a worker's result."""
+        """A condition argument -> world id: an int, a "#<id>" reference, or a text bound by a worker's result; a fixed
+        region's id ("R<n>", config/layout.py) stays that id (its own namespace: never a world id)."""
+        from config import layout
         if isinstance(ref, int) or ref is None:
             return ref
         if isinstance(ref, str) and ref.startswith("#") and ref[1:].isdigit():
             return int(ref[1:])
+        r = layout.region(ref)
+        if r is not None:
+            return r.id
         return bindings.get(ref)
+
+    @staticmethod
+    def _region(i):
+        from config import layout
+        return layout.region(i) if isinstance(i, str) else None
 
     def evaluate(self, cond: dict, bindings: dict) -> ConditionResult:
         p, args = cond.get("pred"), list(cond.get("args") or [])
@@ -115,6 +135,8 @@ class GoalEvaluator:
         fn = getattr(self, f"_{p}", None)
         if fn is None or p not in PREDICATES:
             return ConditionResult(cond, None, "none", f"no evaluator for {p!r}", bound)
+        if len(args) < MIN_ARGS.get(p, 0):
+            return ConditionResult(cond, None, "none", f"malformed: {p} needs {MIN_ARGS[p]} argument(s), got {len(args)}", bound)
         try:
             ok, conf, why = fn(ids, cond)
         except Exception as exc:  # an evaluation error is "unknown", never "true"
@@ -135,6 +157,8 @@ class GoalEvaluator:
         return (self.t.world.holding is None and f <= self.t.OPEN_FINGER_DEG), "measured", f"finger {f:.1f} deg"
 
     def _on(self, ids, c):
+        if any(self._region(i) for i in ids[:2]):
+            return None, "none", "on a fixed region is not measured (only in(<object>, <region>))"
         a, b = (self._geom(i) for i in ids[:2])
         if a is None or b is None:
             return None, "none", "objects not identified"
@@ -150,7 +174,8 @@ class GoalEvaluator:
         model can disagree when the camera sees a stack as one object (live 2026-10-21). A check of another object,
         relation or destination proves nothing, and a later grasp makes it stale."""
         p = None if ok else self._placed(ids[0])
-        if p is not None and p.get("reference_id") == ids[1] and p.get("relation") == c.get("pred"):
+        dest = None if p is None else (p.get("reference_region") or p.get("reference_id"))
+        if p is not None and dest == ids[1] and p.get("relation") == c.get("pred"):
             return True, "measured", (f"the worker's placement check passed: {p.get('xy_error_mm')} mm from the planned "
                                       f"spot, top {p.get('z_error_mm')} mm (frame {p.get('frame_id')}); world model: {why}")
         return ok, "measured", why
@@ -169,6 +194,8 @@ class GoalEvaluator:
         return vs[idx[-1]]
 
     def _relation(self, ids, c):
+        if any(self._region(i) for i in ids[:2]):
+            return None, "none", f"{c['pred']} a fixed region is not measured (only in(<object>, <region>))"
         a, b = (self._geom(i) for i in ids[:2])
         if a is None or b is None:
             return None, "none", "objects not identified"
@@ -177,6 +204,28 @@ class GoalEvaluator:
         return self._worker_placed(ids, c, ok, f"centres {d * 1000:.0f} mm apart, on the floor: {a['support_z'] <= 0.010}")
 
     _next_to = _left_of = _right_of = _in_front_of = _behind = _relation
+
+    def _in(self, ids, c):
+        """x inside container y: x's centre within y's measured outline and x resting no higher than y's rim
+        (agent.tools relation_holds "in"); not required to stand on the table (it stands on the container's floor).
+        y a fixed region (config/layout.py): x's whole measured footprint inside its calibrated outline and x resting on
+        its surface (Tools.in_region)."""
+        region = self._region(ids[1])
+        if region is not None:
+            a = self._geom(ids[0])
+            if a is None:
+                return None, "none", "object not identified"
+            r = self.t.in_region(a, region)
+            why = (f"footprint {r['margin_mm']:+.0f} mm inside the outline of {region.id} ({region.name}) at its worst "
+                   f"point, resting {r['resting_mm']:.0f} mm above the region's surface")
+            return self._worker_placed(ids, c, r["inside"], why)
+        a, b = (self._geom(i) for i in ids[:2])
+        if a is None or b is None:
+            return None, "none", "objects not identified"
+        ok = bool(self.t.relation_holds(a, b, "in"))
+        d = float(np.hypot(a["centre"][0] - b["centre"][0], a["centre"][1] - b["centre"][1]))
+        why = f"centre {d * 1000:.0f} mm from the container's centre, resting {a['support_z'] * 1000:.0f} mm up (rim {b['top_z'] * 1000:.0f} mm)"
+        return self._worker_placed(ids, c, ok, why)
 
     def _located(self, ids, c):
         return (ids[0] is not None and ids[0] in self.t.world.objects), "measured", "bound to a measured object" if ids[0] else "not found"
@@ -213,7 +262,10 @@ class GoalEvaluator:
         return False, "measured", "no answer was produced for this question (a scene report is not an answer)"
 
     def _reported(self, ids, c):
-        n = len(getattr(self.s, "reports", []) or [])
+        reports = getattr(self.s, "reports", []) or []
+        if reports and all("reply" in r for r in reports):  # only Gemma's own reply (a finish with ANSWER)
+            return True, "model", "Gemma's reply to the user (from the measured object list; not verified)"
+        n = len(reports)
         return n > 0, "measured", (f"{n} scene report(s) of measured objects given this task" if n
                                    else "no scene report was given this task")
 

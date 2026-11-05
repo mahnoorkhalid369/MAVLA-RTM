@@ -19,6 +19,7 @@ Library scenes also write their ground-truth metadata to out/scenarios/live/<id>
 from __future__ import annotations
 
 import argparse
+import os
 import json
 import sys
 from pathlib import Path
@@ -33,9 +34,11 @@ ap.add_argument("--difficulty", default="easy", help="library scenes: easy | med
 ap.add_argument("--seed", type=int, default=0, help="library scenes: random seed (deterministic layout)")
 args, rest = ap.parse_known_args()
 sys.path.insert(0, str(ROOT))
-from scenarios import available, kind, scene_file  # noqa: E402  (pure data)
+from scenarios import available, kind, scene_file, table_camera  # noqa: E402  (pure data)
 
 KIND = kind(args.scenario)
+# the scenario's table-camera mount, before anything imports control/robot.py (the agent gets the same via agent.sh)
+os.environ["TABLE_CAMERA"] = table_camera(args.scenario)
 if KIND is None:
     sys.exit(f"[run_scenario] unknown scenario {args.scenario!r}; available: {sorted(available())}")
 LIBRARY = KIND == "procedural"

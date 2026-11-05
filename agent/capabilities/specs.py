@@ -11,6 +11,7 @@ collision-checked and verified). Effect classes (agent/authority.py): none | sen
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field, replace
 from typing import Callable
 
@@ -31,6 +32,7 @@ class CapabilitySpec:
     worker: str = ""  # the worker that implements it
     needs_view: bool = False  # needs a fresh measured observation first (the supervisor takes one)
     verify_after: bool = False  # its effect is measurable: the verification worker checks it right after the step
+    gripper: str = ""  # "empty" | "holding": the gripper state it needs ("": either); the menu notes it against the state now
 
 
 @dataclass
@@ -45,8 +47,8 @@ NULLS = {"", "null", "none"}  # "not given", as a small model sometimes writes J
 FRAMES = ("robot", "camera")  # coordinate frames the geometry can express (agent/directions.py)
 # relations the validated placement planner and the measured relation check compute (agent/tools/manipulation.py,
 # agent/tools/resolution.py relation_holds); "in" only as a location constraint on a reference
-PLACE_RELATIONS = ("on", "next_to", "left_of", "right_of", "in_front_of", "behind")
-LOCATION_RELATIONS = PLACE_RELATIONS + ("in",)
+PLACE_RELATIONS = ("in", "on", "next_to", "left_of", "right_of", "in_front_of", "behind")  # "in": inside a container
+LOCATION_RELATIONS = PLACE_RELATIONS
 
 
 def _text(v):
@@ -73,11 +75,43 @@ def _relation(op: str, v, allowed) -> str:
     return r
 
 
+def _id(v):
+    """An object reference: a bare number is a measured object's id, the same as "#<n>" (live 2026-10-26: Gemma wrote
+    "4" for #4; the held-object check did not recognise it and the step was refused as unsafe)."""
+    t = _text(v)
+    return f"#{t}" if t is not None and t.isdigit() else t
+
+
+def _region_id(op: str, t):
+    """A destination given as a region id: the canonical id of a region in the calibrated layout (config/layout.py);
+    an id the layout does not have is invalid, with the ids it has. Anything else is returned as it is (an object).
+    Structural: the id's form and the layout's ids, never the region's name."""
+    from config import layout
+    if not layout.is_region_id(t):
+        return t
+    r = layout.region(t)
+    if r is None:
+        have = ", ".join(layout.REGIONS) or "none"
+        raise ValueError(f"{op}: {t} is not a region of this work cell (its regions: {have})")
+    return r.id
+
+
 def _ref(op: str, raw: dict, key: str) -> dict:
+    from config import layout
     rel, anchor = _text(raw.get("object_relation")), _text(raw.get("object_anchor"))
     if bool(rel) != bool(anchor):
         raise ValueError(f"{op}: object_relation and object_anchor go together")
-    return {"text": _text(raw.get(key)), "relation": _relation(op, rel, LOCATION_RELATIONS) if rel else None, "anchor": anchor}
+    text = _id(raw.get(key))
+    if layout.is_region_id(text):  # a fixed region is a place on the table, never a thing to move or find
+        raise ValueError(f"{op}: {text} is a fixed region of the work cell, not an object; a region can only be a "
+                         f"destination (\"target\")")
+    return {"text": text, "relation": _relation(op, rel, LOCATION_RELATIONS) if rel else None,
+            "anchor": _region_id(op, _id(anchor))}
+
+
+def _dest(op: str, raw: dict) -> dict:
+    """A placement destination: a measured object (the user's words or "#<id>") or a fixed region ("R<n>")."""
+    return {"text": _region_id(op, _id(raw.get("target"))), "relation": None, "anchor": None}
 
 
 def _none(op):
@@ -99,15 +133,15 @@ def _pick(raw):
 
 def _place(raw):
     _need("place", raw, "relation", "target")
-    return {"object": {"text": _text(raw.get("object")), "relation": None, "anchor": None},
+    return {"object": {"text": _id(raw.get("object")), "relation": None, "anchor": None},
             "relation": _relation("place", raw.get("relation"), PLACE_RELATIONS),
-            "reference": {"text": _text(raw.get("target")), "relation": None, "anchor": None}, "frame": _frame("place", raw)}
+            "reference": _dest("place", raw), "frame": _frame("place", raw)}
 
 
 def _pick_place(raw):
     _need("pick_place", raw, "object", "relation", "target")
     return {"object": _ref("pick_place", raw, "object"), "relation": _relation("pick_place", raw.get("relation"), PLACE_RELATIONS),
-            "reference": {"text": _text(raw.get("target")), "relation": None, "anchor": None}, "frame": _frame("pick_place", raw)}
+            "reference": _dest("pick_place", raw), "frame": _frame("pick_place", raw)}
 
 
 def _answer(raw):
@@ -152,30 +186,35 @@ _SPECS = [
     CapabilitySpec("pick", "grasp ONE object and hold it (no destination)", '{"do": "pick", "object": "<words>"}', "motion",
                    "gripper empty; object resolvable and graspable", "the object is held (lifted)",
                    "not found / ambiguous / too wide / out of reach / no contact / lost while lifting",
-                   "finger contact at the grasp and retention after the lift (finger stall)"),
-    CapabilitySpec("place", "put the object the robot is HOLDING onto or next to another object",
-                   '{"do": "place", "object": "#<held id>", "relation": "on" | "next_to" | "left_of" | "right_of" | "in_front_of" | '
-                   '"behind", "target": "<destination object>"}', "motion",
+                   "finger contact at the grasp and retention after the lift (finger stall)", gripper="empty"),
+    CapabilitySpec("place", "put down the object the robot is HOLDING, at a destination (no object argument: it is the held "
+                   "one). After a pick, or whenever the context says the robot is holding something, this is the operation",
+                   '{"do": "place", "relation": "in" | "on" | "next_to" | "left_of" | "right_of" | "in_front_of" | '
+                   '"behind", "target": "<destination object>"}  ("in": inside a container such as a tray or bin; "on": on '
+                   'top of a solid object)', "motion",
                    "an object is held; destination resolvable", "the held object stands at the destination; arm at HOME",
                    "nothing held / destination not found / no free reachable spot / collision / placement out of tolerance",
-                   "contact during the carry, camera placement check, HOME joints"),
-    CapabilitySpec("decompose", "plan a multi-object goal over the measured objects", '{"do": "decompose", "goal": "<the goal>"}',
+                   "contact during the carry, camera placement check, HOME joints", gripper="holding"),
+    CapabilitySpec("decompose", "plan a goal that moves SEVERAL objects, over the measured objects (one object to one "
+                   "place is a single pick_place, or place when it is held; no decompose needed)",
+                   '{"do": "decompose", "goal": "<the goal>"}',
                    "read_only", "a fresh observation (taken automatically)", "concrete steps on #ids + final conditions",
                    "invalid plan / not achievable with the available steps", "references must be measured objects"),
-    CapabilitySpec("pick_place", "move ONE object onto or next to another object",
-                   '{"do": "pick_place", "object": "<object to move>", "relation": "on" | "next_to" | "left_of" | '
+    CapabilitySpec("pick_place", "grasp ONE object that is NOT held yet and move it onto or next to another object, in one "
+                   "step (never after a pick, never while holding: use place)",
+                   '{"do": "pick_place", "object": "<object to move>", "relation": "in" | "on" | "next_to" | "left_of" | '
                    '"right_of" | "in_front_of" | "behind", "target": "<destination object>"}',
                    "motion", "gripper empty; object and destination resolvable (asks the user if ambiguous)",
                    "the object stands at the destination; arm at HOME after the last motion step",
                    "not found / ambiguous / out of reach / collision / no contact / placement out of tolerance / safety reject",
-                   "finger contact, camera placement check (xy 10 mm, z 5 mm, tilt 5 deg), HOME joints (1.5 deg)"),
+                   "finger contact, camera placement check (xy 10 mm, z 5 mm, tilt 5 deg), HOME joints (1.5 deg)", gripper="empty"),
     CapabilitySpec("return_home", "move the arm to its safe home pose", '{"do": "return_home"}', "motion",
                    "nothing held; gripper open", "arm at HOME", "holding; path collides; execution failure",
-                   "HOME joints within 1.5 deg (joint feedback)"),
+                   "HOME joints within 1.5 deg (joint feedback)", gripper="empty"),
     CapabilitySpec("inspect", "move the wrist camera closer to look at one visible object in detail",
                    '{"do": "inspect", "object": "<words>"}', "motion",
                    "object visible and confirmed; nothing held", "close-up position / size / description (wrist camera); arm back at HOME",
-                   "object not found / no safe viewpoint / move failed", "viewpoint reached (joint feedback), wrist measurement associated"),
+                   "object not found / no safe viewpoint / move failed", "viewpoint reached (joint feedback), wrist measurement associated", gripper="empty"),
     CapabilitySpec("look", "point your wrist camera along a direction and see what is there (the arm moves only to aim "
                    "the camera, and stays there). direction = [x, y, z] in the frame: \"robot\" = your own axes; \"camera\" "
                    "only when the user means directions in the fixed camera's picture",
@@ -183,7 +222,7 @@ _SPECS = [
                    "motion", "nothing held", "the wrist camera points that way (arm stays there); wrist observation in the world model",
                    "no safe viewpoint that way / move not executed / viewpoint not reached / holding an object",
                    "camera direction measured from joint feedback (forward kinematics): the looked-at floor point within 30 deg of "
-                   "the direction (a vertical direction: axis within 15 deg)"),
+                   "the direction (a vertical direction: axis within 15 deg)", gripper="empty"),
     CapabilitySpec("explore", "look for something the fixed camera cannot see (e.g. behind another object)",
                    '{"do": "explore", "object": "<words>", "near": "<words for an object it may be behind, or null>"}', "motion",
                    "nothing held", "wrist observations of hidden regions in the world model; arm back at HOME",
@@ -227,16 +266,46 @@ def adapt_args(name: str, raw: dict) -> dict:
     return {k: v for k, v in raw.items() if not (isinstance(v, str) and _text(v) is None) and v is not None}
 
 
-def planner_menu(specs: dict[str, CapabilitySpec] | None = None, failed: dict[str, str] | None = None) -> str:
+def gripper_note(spec: CapabilitySpec, held: int | None) -> str:
+    """What the gripper's state now means for an operation (live 2026-10-26: place was planned with an empty gripper,
+    Gemma's own reason assuming it still held the block); "" when it is possible."""
+    if spec.gripper == "holding" and held is None:
+        return " [needs an object in the gripper; it is EMPTY now: only after a pick]"
+    if spec.gripper == "empty" and held is not None:
+        return f" [needs an empty gripper; it HOLDS #{held} now: only after placing it]"
+    return ""
+
+
+_ARG = re.compile(r'"(\w+)":\s*("[^"]*"(?:\s*\|\s*"[^"]*")*|\[[^\]]*\]|null)')
+
+
+def line_args(spec: CapabilitySpec) -> str:
+    """An operation's argument shape in Gemma's line protocol ("| key=value"), from its JSON shape: alternatives as
+    "a or b", placeholders written plainly (no quotes, no angle brackets for Gemma to copy into its answer)."""
+    out = []
+    for key, val in _ARG.findall(spec.args):
+        if key == "do":
+            continue
+        alts = [a.strip().strip('"') for a in re.split(r'"\s*\|\s*"', val)] if val.startswith('"') else [val]
+        v = " or ".join(alts).replace("<", "").replace(">", "")
+        out.append(f"{key}={v}")
+    return "".join(f" | {x}" for x in out)
+
+
+def planner_menu(specs: dict[str, CapabilitySpec] | None = None, failed: dict[str, str] | None = None,
+                 held: int | None | bool = False) -> str:
     """The workers, their responsibilities and the operations each one implements now, as Gemma sees them.
     failed: operation -> what happened when it failed in this task (shown next to it, so the decision is informed;
-    nothing is removed or blocked)."""
+    nothing is removed or blocked). held: the held object's id or None (empty gripper), to note against each operation
+    what the gripper's state allows now (as a condition, so a sequence such as pick then place still reads right); False =
+    not stated (a decomposition plans from the state it is given in its context)."""
     from agent.workers import RESPONSIBILITY
     specs, failed = (SPECS if specs is None else specs), failed or {}
     out = []
     for w in dict.fromkeys(s.worker for s in specs.values()):
         out.append(f"{w} worker: {RESPONSIBILITY.get(w, '')}")
-        out += [f"  - {s.name}: {s.summary}. args {s.args}" + ("" if s.implemented else " (not available yet)")
+        out += [f"  - {s.name}: {s.summary}. STEP: {w} | {s.name}{line_args(s)}" + ("" if s.implemented else " (not available yet)")
+                + (gripper_note(s, held) if held is not False else "")
                 + (f" [FAILED in this task: {failed[s.name]}; it will fail again unless something changed: prefer "
                    f"another operation, ask_user or stop]" if s.name in failed else "")
                 for s in specs.values() if s.worker == w]

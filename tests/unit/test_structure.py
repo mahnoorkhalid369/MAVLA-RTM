@@ -42,7 +42,7 @@ def test_reach_ring_and_tolerance_have_one_source():
     from config.agent import REACH_MAX_M, REACH_MIN_M, REACH_TOLERANCE_DEG
     from perception.viewpoints import REACH_TOL_DEG
     from scenarios.core import REACH_MAX, REACH_MIN
-    assert (REACH_MIN, REACH_MAX) == (REACH_MIN_M, REACH_MAX_M) == (0.45, 0.90)
+    assert (REACH_MIN, REACH_MAX) == (REACH_MIN_M, REACH_MAX_M) == (0.38, 0.90)
     assert REACH_TOL_DEG == REACH_TOLERANCE_DEG == 1.5
 
 
@@ -83,7 +83,7 @@ def test_required_untracked_assets_are_present():
 
 def test_library_scenario_registry_resolves():
     import scenarios
-    assert scenarios.SCENARIOS == {"laboratory": "scenarios.laboratory"}
+    assert scenarios.SCENARIOS == {"laboratory": "scenarios.laboratory", "workcell": "scenarios.workcell"}
     sc = scenarios.generate("laboratory", "easy", 42)
     assert sc.id == "laboratory" and sc.metadata()["objects"]
 
@@ -94,14 +94,15 @@ PROMPT_SHA256_16 = {  # deliberate prompt versions; 2026-10-20b: original goal (
     "ANSWER_PROMPT": "c10ead90d926c631",
     "APPEARANCE_ONE_PROMPT": "6832f93c2be7d8d9",
     "APPEARANCE_PROMPT": "edc7fff72e75a09a",
+    "CLARIFY_SYSTEM": "8c949bcf36a21656",  # 2026-11-04f: binds the settled object
     "CONFIRM_PROMPT": "60d867c0f1984edf",
-    "DECIDE_SYSTEM": "f78d797175d96fac",
-    "DECOMPOSE_PROMPT": "54dcf878452029e6",
+    "DECIDE_SYSTEM": "a5f5e0cd80005f4d",  # 2026-11-04h: finish carries Gemma's own reply (ANSWER)
+    "DECOMPOSE_PROMPT": "4c8bf20b8f992647",  # 2026-11-04e: established bindings; multi-STEP example
     "DESCRIBE_ONE_PROMPT": "30e7f4389ba0ab9c",
     "DESCRIBE_PROMPT": "c76f8ba28b9ad381",
     "IDENTITY_SYSTEM": "a1f6423716b7a05b",
-    "PLAN_SYSTEM": "8adf76d69875f553",
-    "REFERENCE_PROMPT": "449c59a6572ef680",
+    "PLAN_SYSTEM": "d47508780bbf75a7",  # 2026-11-04c: measurable conditions one per line
+    "REFERENCE_PROMPT": "d7771459705fa274",  # 2026-10-26: the object's kind stays in appearance
     "REQUEST_SYSTEM": "03ac7b84cad87e6b",
     "RESOLVE_PROMPT": "4e86a24a869e7b81",
     "SHORTLIST_PROMPT": "32ae760793cc8575",

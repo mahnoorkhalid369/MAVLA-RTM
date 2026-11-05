@@ -53,6 +53,7 @@ class Tools(HeldObjectState, PerceptionTools, ResolutionTools, ManipulationTools
         self.resolved_refs: dict[str, int] = {}  # reference text -> world id chosen by the user (clarifications)
         self.unconfirmed_grasp = None  # (plan, close target) of a grasp the lift check could not confirm (re-checked next)
         self.last_referent: int | None = None  # world id of the object the last instruction acted on
+        self.held_words: dict[str, int] = {}  # the words that named the held object in earlier instructions -> its id
         self.view_cleared_at = -1  # motion_count right after the last successful park_for_view
         self.world = WorldModel()
         self.kin = Kinematics()

@@ -191,7 +191,7 @@ def test_planner_keeps_unknown_operations_and_checks_known_operations_arguments(
         assert p.steps[0].capability == "pick_place" and len(vlm.calls) == 2  # one retry with the error
         assert p.steps[0].args == {"object": {"text": "a", "relation": None, "anchor": None}, "relation": "on",
                                    "reference": {"text": "b", "relation": None, "anchor": None}, "frame": "robot"}
-    p = Roles(RecordedVLM(['{"goal": "g", "success": [{"pred": "moved"}], "steps": [{"do": "move_hand", "offset": [-0.1, 0, 0], '
+    p = Roles(RecordedVLM(['{"goal": "g", "success": [{"pred": "at_home"}], "steps": [{"do": "move_hand", "offset": [-0.1, 0, 0], '
                            '"frame": "robot"}]}'])).plan_goal("x", "m")
     assert p.steps[0].capability == "move_hand" and p.steps[0].args == {"offset": [-0.1, 0, 0], "frame": "robot"}
 
@@ -261,13 +261,34 @@ def test_replan_that_drops_the_objective_cannot_complete_the_goal(tmp_path, expl
     t = GoalTools([plan(("observe", {}), ("locate", {"object": "banana"})), plan(("observe", {}))],
                   ambiguous={"banana": [1, 2, 3]})
     r, ev = run(tmp_path, t)
-    assert r["status"] == "FAILED" and any("located(banana)" in u for u in r["unmet"])
+    assert r["status"] != "COMPLETED" and any("located(banana)" in u for u in r["unmet"])
     assert any(c["condition"]["pred"] == "located" and not c["satisfied"] for c in r["goal_check"])
+    # 2026-10-26: observing again into an unchanged scene is refused as a repeat (it looped live), not run
+    assert [s["capability"] for s in r["plan"]].count("observe") == 1
+    assert any(e["kind"] == "replan" and not e["accepted"] for e in ev)
 
 
 def test_arguments_flat_or_nested_are_the_same_step():
-    """JSON shape only (measured 2026-10-20: Gemma nested the arguments under "arguments" after the prompt cleanup)."""
+    """JSON shape only (measured 2026-10-20: Gemma nested the arguments under "arguments" after the prompt cleanup;
+    live 2026-10-25: under "argument", so every decompose step lost its goal)."""
     from agent.vlm_roles import PlanStep
     flat = PlanStep.model_validate({"do": "locate", "object": "the <A>"})
-    for key in ("arguments", "args"):
+    for key in ("arguments", "argument", "args"):
         assert PlanStep.model_validate({"do": "locate", key: {"object": "the <A>"}}).args == flat.args
+
+
+def test_a_finish_with_gemmas_own_reply_answers_the_question(tmp_path):
+    """live 2026-11-04: "how many cubes are on the table" was planned as only observe; Gemma chose finish three times
+    with no way to say the count. A finish now carries Gemma's reply: it is the answer, marked not verified."""
+    t = GoalTools([plan(("observe", {}))])
+    t.request_kind = "question"
+    t.decisions = [{"action": "finish", "answer": "There are 4 cubes on the table.", "reason": "counted"}]
+    r, _ = run(tmp_path, t, instruction="How many cubes are on the table?")
+    assert r["status"] == "COMPLETED" and r["message"].startswith("There are 4 cubes on the table.")
+    assert "not independently verified" in r["message"]
+
+
+def test_the_answer_line_is_read_from_gemmas_decision():
+    vlm = RecordedVLM(["ACTION: finish\nANSWER: There are 4 cubes:\n#3, #5, #10 and #12.\nREASON: counted"])
+    d = Roles(vlm).decide("how many cubes", "", "", "", has_pending=False)
+    assert d.action == "finish" and d.answer == "There are 4 cubes: #3, #5, #10 and #12."

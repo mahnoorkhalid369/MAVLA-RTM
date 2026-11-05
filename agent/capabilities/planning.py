@@ -4,8 +4,10 @@ final conditions (Gemma; the supervisor filters the steps by the request's autho
 from __future__ import annotations
 
 from agent.capabilities.perception import _ensure_described
-from agent.capabilities.specs import Context, StepResult, planner_menu
+from agent.capabilities.specs import SPECS, Context, StepResult, planner_menu
 from agent.vlm_roles import VLMFailure
+from agent.planning import bindings_text
+from config import layout
 
 
 def world_facts(ctx: Context) -> tuple[str, list[int]]:
@@ -24,13 +26,26 @@ def world_facts(ctx: Context) -> tuple[str, list[int]]:
     return "\n".join(lines), ids
 
 
+SENSING = ("observe", "describe_scene", "locate", "inspect", "look", "answer", "explore")  # read-only / views only
+
+
 def run_decompose(ctx: Context, args: dict) -> StepResult:
     """Planning worker: the goal over the measured objects -> concrete steps (#ids) + final conditions."""
     _ensure_described(ctx)
     facts, ids = world_facts(ctx)
+    if layout.regions_text():  # the calibrated fixed regions, by id, next to the measured objects
+        facts = f"{facts}\n{layout.regions_text()}"
     held = f"The gripper holds #{ctx.tools.held_object}." if ctx.tools.held_object else "The gripper is empty."
+    bound = bindings_text(getattr(getattr(ctx, "state", None), "bindings", None) or {})  # identity continuity
+    if bound:
+        held = f"{held}\n{bound}"
     try:
-        sp = ctx.tools.roles.decompose(args["goal"], facts, ids, context=held, menu=planner_menu())
+        # the operations a decomposition may use: those that advance the task, not decompose itself (offering it made
+        # Gemma decompose into another decompose, live 2026-10-26) and not the sensing ones: it plans over objects
+        # already measured (offered observe, it planned only observe in six live runs, 2026-11-04)
+        menu = planner_menu({k: v for k, v in SPECS.items() if k != "decompose" and k not in SENSING})
+        sp = ctx.tools.roles.decompose(args["goal"], facts, ids, context=held, menu=menu,
+                                       task_preds=[c.get("pred") for c in getattr(getattr(ctx, "state", None), "conditions", None) or []])
     except VLMFailure as exc:
         return StepResult("failed", f"could not plan the goal over the measured objects: {exc}")
     if not sp.steps:

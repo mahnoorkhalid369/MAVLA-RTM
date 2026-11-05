@@ -14,7 +14,7 @@ from dataclasses import asdict, dataclass
 import cv2
 import numpy as np
 
-from config.perception import (ABOVE_SUPPORT, FIXTURE_INFLATE, FIXTURES, GROUND_Z, ROBOT_BASE_EXCLUSION, MASK_ERODE_PX, MIN_POINTS, ROBOT_INFLATE,
+from config.perception import (ABOVE_SUPPORT, FIXTURE_INFLATE, FIXTURES, GROUND_Z, ROBOT_BASE_EXCLUSION, MASK_ERODE_PX, MIN_ABOVE_FRACTION, MIN_POINTS, ROBOT_INFLATE,
                                SUPPORT_SNAP, TOP_LAYER, UP_NORMAL)
 from perception.grounding import footprint_yaw, grasp_pose
 
@@ -139,6 +139,8 @@ def measure(mask: np.ndarray, depth: np.ndarray, K, T: np.ndarray, robot: RobotV
     keep = ~(rob | fix)
     pts, nz = pts[keep], nz[keep]
     above = pts[:, 2] > GROUND_Z + ABOVE_SUPPORT
+    if len(pts) and above.mean() < MIN_ABOVE_FRACTION and above.sum() >= MIN_POINTS:
+        return None, f"mostly the support surface ({1 - above.mean():.0%} of its points)"
     pts, nz = pts[above], nz[above]
     if len(pts) < MIN_POINTS:
         return None, "no points above the support"

@@ -30,7 +30,8 @@ RGB-D cameras measure. The cameras are a table camera on a stand and a wrist cam
 | scene | `SCENARIO`, `DIFFICULTY`, `SEED` |
 | execution | `TARGET`, `MOTION` |
 | models | `GEMMA_MODEL`, `YOLO_WEIGHTS` |
-| windows | `ISAAC_WINDOW`, `DEMO_VIEWER`, `CAMERA_WINDOWS` |
+| windows | `ISAAC_WINDOW`, `DASHBOARD` (one window: cameras, YOLO masks, task, logs, GPU), `DEMO_VIEWER`, `CAMERA_WINDOWS` (older separate windows) |
+| GPU recording | `GPU_MONITOR` (gpumon, see `gpumon/README.md`) |
 | Gemma decisions per instruction | `MAX_GEMMA_DECISIONS` |
 | tracing | `TRACE` |
 | outputs | `OUTPUT_DIR` … |

@@ -74,6 +74,8 @@ class TaskState:
     finalized: bool = False  # True once the instruction ended (COMPLETED / FAILED / CANCELLED / UNSUPPORTED)
     goal_check: list = field(default_factory=list)  # evaluation of the conditions (satisfied, confidence, evidence)
     attempted: list = field(default_factory=list)  # (capability, args) already tried and failed (no identical retry)
+    # goal words several measured objects fit (text -> world ids), shown to Gemma until it BINDs one (2026-11-04)
+    candidates: dict = field(default_factory=dict)
     authority: dict = field(default_factory=dict)  # RequestAuthority of this instruction (from the user's words only)
     refused: list = field(default_factory=list)  # steps refused for lack of authority (never executed)
     workers: dict = field(default_factory=dict)  # registry snapshot at the end

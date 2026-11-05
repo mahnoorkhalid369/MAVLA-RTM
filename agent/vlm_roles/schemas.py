@@ -17,9 +17,9 @@ class PlanStep(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def flat(cls, v):  # JSON shape only: arguments given flat or nested under "arguments" / "args" are the same
+    def flat(cls, v):  # JSON shape only: arguments given flat or nested under "arguments" / "argument" / "args" are the same
         if isinstance(v, dict):
-            for key in ("arguments", "args"):
+            for key in ("arguments", "argument", "args"):
                 if isinstance(v.get(key), dict):
                     v = {**{k: x for k, x in v.items() if k != key}, **{k: x for k, x in v[key].items() if k != "do"}}
         return v
@@ -46,12 +46,36 @@ class PlanStep(BaseModel):
         return adapt_args(self.do, self.raw)
 
 
+class Bind(BaseModel):
+    """Gemma settles which measured object the user's words in the goal mean: text -> "#<id>" (one of the candidates
+    it was shown; Roles.decide checks that). The supervisor keeps it as the task's binding of those words."""
+    text: str
+    id: str
+
+
 class Decision(BaseModel):
     """Gemma's next decision in the closed loop (Roles.decide), executed by the supervisor after validation."""
-    action: Literal["continue", "replan", "ask_user", "finish", "stop"]
+    action: Literal["continue", "replan", "ask_user", "finish", "stop", "new_goal"]
     steps: list[PlanStep] = []  # replan: the remaining steps (they replace the pending ones)
     question: str | None = None  # ask_user: one short question for the user
+    request: str | None = None  # new_goal: the user's new request (their words): it replaces the goal
+    answer: str | None = None  # finish: Gemma's reply to the user in its own words (a question, a description)
+    binds: list[Bind] = []  # optional: goal words -> the measured candidate Gemma chose for them (BIND lines)
     reason: str = ""
+
+
+class Clarification(BaseModel):
+    """Gemma's reading of a request before any plan (Roles.clarify): clear (restated completely) or one question."""
+    status: Literal["clear", "ask"]
+    question: str | None = None
+    request: str = ""
+    binds: list[Bind] = []  # clear: the user's words for an object -> the measured #id the conversation settled
+    reason: str = ""
+
+    @field_validator("request", "reason", mode="before")
+    @classmethod
+    def _null_is_empty(cls, v):  # an "ask" leaves the request open: Gemma writes null (live 2026-10-26, twice)
+        return "" if v is None else v
 
 
 def _notation(text: str):
@@ -77,7 +101,7 @@ class Condition(BaseModel):
     def notation(cls, v):
         if isinstance(v, str):
             parsed = _notation(v)
-            return {"pred": parsed[0], "args": parsed[1]} if parsed else {"pred": v.strip()}
+            v = {"pred": parsed[0], "args": parsed[1]} if parsed else {"pred": v.strip()}
         if isinstance(v, dict):
             v = dict(v)
             parsed = _notation(v.get("pred", ""))
@@ -94,6 +118,8 @@ class Condition(BaseModel):
                 v["direction"], v["args"] = list(args), []
             elif isinstance(args, list):
                 v["args"] = [x if isinstance(x, str) else str(x) for x in args]
+            if isinstance(v.get("args"), list):  # a bare number names a measured object, the same as "#<n>"
+                v["args"] = [f"#{x.strip()}" if isinstance(x, str) and x.strip().isdigit() else x for x in v["args"]]
         return v
     by: Literal["size", "height", "width"] | None = None
     axis: Literal["x", "y"] | None = None

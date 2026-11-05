@@ -8,12 +8,14 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from config import layout
 from config.agent import REACH_MAX_M, REACH_MIN_M
 from config.perception import FIXTURES
 from control.collision import Box, CollisionChecker
 from control.motion import PlanningError, joint_move
 from control.robot import ARM_HOME, ARM_SPEED, table_camera_pose
 from control.skills import Held, SkillPlanner
+from safety.joint_limits import forbidden_on_path
 
 
 @dataclass
@@ -29,6 +31,7 @@ class PickPlan:
     target_top: float
     relation: str
     reference_id: int | None
+    reference_region: str | None = None  # a fixed region of the calibrated layout (config/layout.py) as the destination
 
 
 class ManipulationTools:
@@ -46,9 +49,8 @@ class ManipulationTools:
                 return f"obj_{o.id}"
         return None
 
-    def _plan_grasp(self, object_id: int, q_start: np.ndarray, yaw_offset_deg: float):
-        """The grasp part shared by plan_pick and plan_pick_place: hover, descend + close, lift, on the measured
-        geometry (its top face must be visible). Returns (planner, geometry, hover, approach, lift, q, held, grasp)."""
+    def _grasp_inputs(self, object_id: int):
+        """(planner, geometry, top centre, width, length) for a grasp on the measured geometry (top face visible)."""
         g = self.world.objects[object_id].geometry
         if g["tilt_deg"] is None:
             raise PlanningError(f"object {object_id}: its top face is not visible, so its pose is not measured well enough")
@@ -59,20 +61,38 @@ class ManipulationTools:
         length = fp[0] if abs(fp[1] - width) <= abs(fp[0] - width) else fp[1]
         planner.check_width(width)
         top = np.array([g["centre"][0], g["centre"][1], g["top_z"]])
+        return planner, g, top, width, length
+
+    def _plan_grasp(self, object_id: int, q_start: np.ndarray, yaw_offset_deg: float):
+        """The top-down grasp shared by plan_pick and plan_pick_place: hover, descend + close, lift, on the measured
+        geometry (its top face must be visible). Returns (planner, geometry, hover, approach, lift, q, held, grasp)."""
+        planner, g, top, width, length = self._grasp_inputs(object_id)
         hover, q, yaw = planner.hover(q_start, top, g["grasp_yaw_deg"] + yaw_offset_deg, g["symmetry_deg"])
         approach, lift, q, held = planner.grasp(q, top, yaw, f"obj_{object_id}", width, length, self._support_name(g), g["height"])
-        grasp = {"yaw_deg": round(yaw, 1), "width_mm": round(width * 1000, 1), "height_mm": round(g["height"] * 1000, 1)}
+        grasp = {"method": "top_down", "yaw_deg": round(yaw, 1), "tilt_deg": 0.0, "width_mm": round(width * 1000, 1),
+                 "height_mm": round(g["height"] * 1000, 1)}
         return planner, g, hover, approach, lift, q, held, grasp
 
+    def _plan_tilted_grasp(self, object_id: int, q_start: np.ndarray, yaw_offset_deg: float):
+        """The bounded tilted grasp (SkillPlanner.tilted_pick): same object, same pick, another physical way to do
+        it. Returns (g, hover, approach, lift, held, grasp, candidates); PlanningError carries .candidates."""
+        planner, g, top, width, length = self._grasp_inputs(object_id)
+        hover, approach, lift, _, held, cands = planner.tilted_pick(
+            q_start, top, g["grasp_yaw_deg"] + yaw_offset_deg, g["symmetry_deg"], f"obj_{object_id}", width, length,
+            self._support_name(g), g["height"])
+        grasp = {"method": "tilted", "yaw_deg": round(held.yaw_deg, 1), "tilt_deg": round(held.tilt_deg, 1),
+                 "width_mm": round(width * 1000, 1), "height_mm": round(g["height"] * 1000, 1)}
+        return g, hover, approach, lift, held, grasp, cands
+
     def plan_pick_place(self, object_id: int, relation: str, reference_id: int | None, frame: str,
-                        q_start: np.ndarray, yaw_offset_deg: float = 0.0) -> PickPlan:
-        for oid in (object_id, reference_id if relation == "on" else None):
+                        q_start: np.ndarray, yaw_offset_deg: float = 0.0, region: str | None = None) -> PickPlan:
+        for oid in (object_id, reference_id if relation in ("on", "in") else None):
             if oid is not None and self.world.objects[oid].geometry["tilt_deg"] is None:
                 raise PlanningError(f"object {oid}: its top face is not visible, so its pose is not measured well enough")
         planner, g, hover, approach, lift, q, held, grasp = self._plan_grasp(object_id, q_start, yaw_offset_deg)
-        place, target_centre, target_top = self._plan_place(planner, q, held, g, relation, reference_id, frame)
+        place, target_centre, target_top = self._plan_place(planner, q, held, g, relation, reference_id, frame, region)
         return PickPlan(object_id, hover, approach, lift, place, held, grasp,
-                        list(map(float, target_centre)), float(target_top), relation, reference_id)
+                        list(map(float, target_centre)), float(target_top), relation, reference_id, region)
 
     def grasp_reach(self, object_id: int) -> dict:
         """After an out-of-reach grasp: can ANY gripper orientation reach this object? Kinematics only (joint limits,
@@ -122,30 +142,212 @@ class ManipulationTools:
         return out
 
     DETERMINISTIC = ("out of reach", "too narrow", "fits at most", "no free, reachable", "top face is not visible",
-                     "only ", "mm of the pads")  # PlanningError texts that re-observing cannot change
+                     "only ", "mm of the pads", "held with a tilted grasp", "does not fit inside",
+                     "no free spot inside", "at any free spot", "is not a region of", "a fixed planar region")  # PlanningError texts that re-observing cannot change
 
     @classmethod
     def deterministic(cls, reason: str) -> bool:
         return any(k in reason for k in cls.DETERMINISTIC)
 
     def plan_pick(self, object_id: int, q_start: np.ndarray, yaw_offset_deg: float = 0.0) -> PickPlan:
-        """Grasp-only plan (hover, descend + close, lift) with the same checks as plan_pick_place."""
-        _, g, hover, approach, lift, _, held, grasp = self._plan_grasp(object_id, q_start, yaw_offset_deg)
+        """Grasp-only plan (hover, descend + close, lift) with the same checks as plan_pick_place.
+
+        Top-down first (the default). Only if it fails: the bounded tilted grasp of the SAME object, an alternative
+        physical way to do the same delegated pick, with the same checks (IK, joint limits, collisions, table and
+        finger clearance, approach, grasp, lift). Nothing else changes: the object, the operation and what happens
+        next stay the supervisor's. Both failing raises the top-down PlanningError, with a note that the tilted
+        grasps failed too (their reasons are in the grasp_select log event)."""
+        top_down = {"method": "top_down", "ok": True, "reason": ""}
+        try:
+            _, g, hover, approach, lift, _, held, grasp = self._plan_grasp(object_id, q_start, yaw_offset_deg)
+        except PlanningError as exc:
+            if any(k in str(exc) for k in ("fits at most", "top face is not visible")):
+                raise  # tilting cannot change the object's width or make its top face measured
+            if not any(k in str(exc) for k in ("out of reach", "no IK solution")):
+                # the tilted grasp is for REACH only: dodging a neighbour by tilting gave a hold that cannot be placed
+                # (live 2026-10-26: top-down collided with a neighbour by 0.7 mm, the block was taken tilted, and the
+                # next "put it in the tray" was refused)
+                raise
+            top_down = {"method": "top_down", "ok": False, "reason": str(exc)}
+            try:
+                g, hover, approach, lift, held, grasp, cands = self._plan_tilted_grasp(object_id, q_start, yaw_offset_deg)
+            except PlanningError as tilted:
+                cands = getattr(tilted, "candidates", [])
+                self.log("tool", tool="grasp_select", object_id=object_id, selected=None, top_down=top_down,
+                         tilted=cands, max_tilt_deg=SkillPlanner(self.kin).p.max_tilt_deg)
+                raise PlanningError(f"{exc}; {tilted}") from None
+            self.log("tool", tool="grasp_select", object_id=object_id, selected="tilted", top_down=top_down, tilted=cands,
+                     tilt_deg=grasp["tilt_deg"], yaw_deg=grasp["yaw_deg"], max_tilt_deg=SkillPlanner(self.kin).p.max_tilt_deg)
+        else:
+            self.log("tool", tool="grasp_select", object_id=object_id, selected="top_down", top_down=top_down, tilted=[],
+                     yaw_deg=grasp["yaw_deg"])
         return PickPlan(object_id, hover, approach, lift, [], held, grasp,
                         [float(g["centre"][0]), float(g["centre"][1]), float(g["centre"][2])], float(g["top_z"]), "hold", None)
 
-    def plan_place_held(self, relation: str, reference_id: int | None, frame: str, q_start: np.ndarray) -> PickPlan:
+    def plan_place_held(self, relation: str, reference_id: int | None, frame: str, q_start: np.ndarray,
+                        region: str | None = None) -> PickPlan:
         """Placement plan for the object already in the gripper (carry, lower, open, retreat)."""
         if self.held is None or self.held_object is None:
             raise PlanningError("nothing is held")
+        if self.held.tilt_deg:  # placement plans only top-down holds; this change does not modify placement
+            raise PlanningError(f"the object is held with a tilted grasp ({self.held.tilt_deg:+.0f} deg); "
+                                "placement is planned only for objects picked top-down")
         planner = SkillPlanner(self.kin, collision=CollisionChecker(self.obstacles()))
-        place, target_centre, target_top = self._plan_place(planner, q_start, self.held, self.held_geom, relation, reference_id, frame)
+        place, target_centre, target_top = self._plan_place(planner, q_start, self.held, self.held_geom, relation,
+                                                            reference_id, frame, region)
         return PickPlan(self.held_object, [], [], [], place, self.held,
                         {"yaw_deg": round(self.held.yaw_deg, 1), "width_mm": round(self.held.width * 1000, 1),
                          "height_mm": round(self.held.height * 1000, 1)},
-                        list(map(float, target_centre)), float(target_top), relation, reference_id)
+                        list(map(float, target_centre)), float(target_top), relation, reference_id, region)
 
-    def _plan_place(self, planner, q, held: Held, g: dict, relation: str, reference_id: int | None, frame: str):
+    CONTAINER_WALL_M = 0.008  # container wall thickness assumed inside its measured outline (the planner's walls)
+
+    def _container_floor(self, g: dict) -> float:
+        """A container's inside floor: its lowest visible point, when the camera sees down into it (between what it
+        stands on and 10 mm below its rim); otherwise 5 mm above what it stands on."""
+        b, base, top = g.get("visible_bottom_z"), g["support_z"], g["top_z"]
+        return float(b) if b is not None and base < b < top - 0.01 else base + 0.005
+
+    def _container_boxes(self, rid: int) -> list[Box]:
+        """A container (the destination of "in") as four walls and a floor slab inside its measured outline, so the
+        gripper may go down inside it; every part keeps the container's obstacle name."""
+        g = self.world.objects[rid].geometry
+        a = np.radians(g["yaw_deg"] or 0.0)
+        R = np.array([[np.cos(a), -np.sin(a), 0.0], [np.sin(a), np.cos(a), 0.0], [0.0, 0.0, 1.0]])
+        (ex, ey), t = g["extents"], self.CONTAINER_WALL_M
+        base, top, floor = g["support_z"], g["top_z"], self._container_floor(g)
+        c, h, name = np.array([g["centre"][0], g["centre"][1], (base + top) / 2]), (top - base) / 2, f"obj_{rid}"
+        boxes = [Box(name, c + R @ [s * (ex / 2 - t / 2), 0.0, 0.0], R, np.array([t / 2, ey / 2, h])) for s in (-1, 1)]
+        boxes += [Box(name, c + R @ [0.0, s * (ey / 2 - t / 2), 0.0], R, np.array([ex / 2, t / 2, h])) for s in (-1, 1)]
+        if floor - base > 0.001:
+            boxes.append(Box(name, np.array([c[0], c[1], (base + floor) / 2]), R, np.array([ex / 2, ey / 2, (floor - base) / 2])))
+        return boxes
+
+    def _container_contents(self, rid: int, g: dict) -> list:
+        """(centre xy, radius) of the measured objects standing inside a container's outline (not the container itself)."""
+        a = np.radians(g["yaw_deg"] or 0.0)
+        out = []
+        for o in self.world.objects.values():
+            og = o.geometry
+            if o.id == rid or o.status not in ("on_surface", "occluded") or og["centre"] is None:
+                continue
+            d = np.asarray(og["centre"][:2]) - np.asarray(g["centre"][:2])
+            u, v = d[0] * np.cos(a) + d[1] * np.sin(a), -d[0] * np.sin(a) + d[1] * np.cos(a)
+            if abs(u) < g["extents"][0] / 2 and abs(v) < g["extents"][1] / 2:
+                out.append((np.asarray(og["centre"][:2]), max(og["footprint"]) / 2))
+        return out
+
+    def _free_spots(self, rid: int, held: Held) -> tuple[list, int]:
+        """(candidate centres, objects inside) on a container's floor for the held object, nearest its centre first: inside
+        the walls, and clear of the objects already in it (their footprint plus the placement gap)."""
+        g = self.world.objects[rid].geometry
+        a = np.radians(g["yaw_deg"] or 0.0)
+        half = max(held.width or 0.0, held.length or held.width or 0.0) / 2 + 0.004
+        lim = [e / 2 - self.CONTAINER_WALL_M - half for e in g["extents"]]
+        step = self.rel.search_step_m * 2
+        us, vs = (step * np.arange(-np.floor(max(m, 0.0) / step), np.floor(max(m, 0.0) / step) + 1) for m in lim)  # through the centre
+        contents = self._container_contents(rid, g)
+        c = np.asarray(g["centre"][:2])
+        spots = []
+        for u in us:
+            for v in vs:
+                xy = c + np.array([u * np.cos(a) - v * np.sin(a), u * np.sin(a) + v * np.cos(a)])
+                if all(np.hypot(*(xy - oc)) >= half + r + self.rel.gap_m for oc, r in contents):
+                    spots.append(xy)
+        spots.sort(key=lambda xy: np.hypot(*(xy - c)))
+        return spots, len(contents)
+
+    MAX_CONTAINER_SPOTS = 12  # free spots tried (nearest the centre first) before reporting no collision-free way
+
+    def _plan_in(self, q, held: Held, reference_id: int):
+        """Put the held object down INSIDE a container (tray, bin): on a free spot of the container's floor (the
+        centre when it is empty; beside what is already in it otherwise), the gripper turned so its open fingers fit
+        between the walls and the contents; every motion collision-checked against the walls, the floor and the
+        contents."""
+        r = self.world.objects[reference_id].geometry
+        inside = [e - 2 * self.CONTAINER_WALL_M for e in r["extents"]]
+        size = sorted([held.width or 0.0, held.length or held.width or 0.0], reverse=True)
+        if size[0] > max(inside) or size[1] > min(inside):
+            raise PlanningError(f"the held object ({size[0] * 1000:.0f} x {size[1] * 1000:.0f} mm) does not fit inside the "
+                                f"container ({max(inside) * 1000:.0f} x {min(inside) * 1000:.0f} mm inside)")
+        spots, n_inside = self._free_spots(reference_id, held)
+        if not spots:
+            raise PlanningError(f"no free spot inside the container for the held object ({n_inside} object(s) already in it)")
+        obstacles = [b for b in self.obstacles() if b.name != f"obj_{reference_id}"] + self._container_boxes(reference_id)
+        planner = SkillPlanner(self.kin, collision=CollisionChecker(obstacles))
+        floor = self._container_floor(r)
+        yaw_c, last = float(r["yaw_deg"] or 0.0), None
+        for xy in spots[:self.MAX_CONTAINER_SPOTS]:
+            support = np.array([xy[0], xy[1], floor])
+            for yaw in (yaw_c - 90.0, yaw_c, held.yaw_deg):  # fingers closing along the long side first (they open wide)
+                try:
+                    place, _ = planner.place(q, held, support, yaw_deg=yaw)
+                    return place, [support[0], support[1], floor + held.height / 2], floor + held.height
+                except PlanningError as exc:
+                    last = exc
+        raise PlanningError(f"no collision-free way to lower the object into the container at any free spot "
+                            f"({n_inside} object(s) already in it; {last})")
+
+    REGION_EDGE_M = 0.010  # a spot in a fixed region keeps the placed object this far inside the outline
+    MAX_REGION_SPOTS = 20  # free spots tried (nearest the region's centre first) before reporting none
+
+    def region_spots(self, region, held: Held, g: dict) -> list:
+        """Candidate centres for the held object inside a fixed planar region, nearest the region's centre first: the
+        object's circumscribed circle (any gripper yaw) at least REGION_EDGE_M inside the outline, on the reliable
+        reach ring, and clear of every measured object (its footprint plus the placement gap)."""
+        r = float(np.hypot(held.width or 0.0, held.length or held.width or 0.0)) / 2
+        lim = [e / 2 - r - self.REGION_EDGE_M for e in region.size]
+        step = self.rel.search_step_m * 2
+        us, vs = (step * np.arange(-np.floor(m / step), np.floor(m / step) + 1) if m >= 0 else np.array([]) for m in lim)
+        spots = []
+        for u in us:
+            for v in vs:
+                xy = region.world((u, v))
+                if REACH_MIN_M <= np.hypot(*xy) <= REACH_MAX_M and not self._too_close(xy, g, exclude=None):
+                    spots.append(xy)
+        c = np.asarray(region.centre[:2], float)
+        spots.sort(key=lambda xy: float(np.hypot(*(xy - c))))
+        return spots
+
+    def _plan_region(self, planner, q, held: Held, g: dict, relation: str, region_id: str):
+        """Put the held object down INSIDE a fixed planar region of the calibrated layout (config/layout.py): on a free
+        spot of the table within its outline, the centre first when it is free; each candidate's carry, lowering and
+        retreat collision-checked by the planner. Only "in" is computed for a region; nothing else is substituted."""
+        region = layout.region(region_id)
+        if region is None:
+            raise PlanningError(f"{region_id} is not a region of this work cell")
+        if relation != "in":
+            raise PlanningError(f"{region.id} ({region.name}) is a fixed planar region: placing {relation!r} it is not "
+                                f"computed (only 'in')")
+        spots = self.region_spots(region, held, g)
+        tried, last = [], None
+        for xy in spots[:self.MAX_REGION_SPOTS]:
+            support = np.array([xy[0], xy[1], float(region.centre[2])])
+            for yaw in (None, held.yaw_deg + 90.0):  # the yaw it was picked with first
+                try:
+                    place, _ = planner.place(q, held, support, yaw_deg=yaw)
+                except PlanningError as exc:
+                    last = exc
+                    tried.append({"xy_mm": [round(float(v) * 1000) for v in xy], "ok": False, "reason": str(exc)[:120]})
+                    continue
+                self.log("tool", tool="region_place", region=region.id, name=region.name,
+                         region_centre_mm=[round(float(v) * 1000) for v in region.centre[:2]],
+                         candidate_mm=[round(float(v) * 1000) for v in xy], inside=True, reachable=True,
+                         collision_free=True, edge_margin_mm=round(self.REGION_EDGE_M * 1000), candidates=len(spots),
+                         tried=tried)
+                return place, [support[0], support[1], support[2] + held.height / 2], support[2] + held.height
+        self.log("tool", tool="region_place", region=region.id, name=region.name, candidates=len(spots), tried=tried, ok=False)
+        if not spots:
+            raise PlanningError(f"no free spot inside {region.id} ({region.name}) for the held object: none is clear of "
+                                f"the objects there, {self.REGION_EDGE_M * 1000:.0f} mm inside the outline and in reach")
+        raise PlanningError(f"no free, reachable, collision-free spot inside {region.id} ({region.name}) ({last})")
+
+    def _plan_place(self, planner, q, held: Held, g: dict, relation: str, reference_id: int | None, frame: str,
+                    region: str | None = None):
+        if region is not None:
+            return self._plan_region(planner, q, held, g, relation, region)
+        if relation == "in":
+            return self._plan_in(q, held, reference_id)
         if relation == "on":
             r = self.world.objects[reference_id].geometry
             if min(r["extents"]) < self.tol.min_support_width_m:
@@ -201,9 +403,9 @@ class ManipulationTools:
         o.geometry, o.status = g, "on_surface"
         self.clear_held()  # released: nothing is held any more, whatever the verification says
 
-    # ARM_HOME turned about J1; kept >= 10 deg inside the J1 limits (+-170): a goal AT the limit can be
-    # measured a hair beyond it and the safety layer then (correctly) rejects the next trajectory
-    PARK_J1_DEG = (160.0, 135.0, -135.0, 90.0, -90.0, -160.0, 45.0, -45.0, 0.0)
+    # ARM_HOME turned about J1, out to 2 deg inside the J1 limits (+-170): a goal AT the limit can be measured a hair
+    # beyond it (up to the 1.5 deg reach tolerance) and the safety layer then (correctly) rejects the next trajectory
+    PARK_J1_DEG = (168.0, 135.0, -135.0, 90.0, -90.0, -168.0, 45.0, -45.0, 0.0)
 
     @staticmethod
     def workspace_points() -> list:
@@ -251,6 +453,7 @@ class ManipulationTools:
                                           {(p, f"obj_{self.held_object}") for p in [x.name for x in checker.parts] + ["palm", "pads", "linkages", "held"]}).ok
             else:
                 free = checker.check_path(traj.positions).ok
+            free = free and forbidden_on_path(traj.positions) is None  # Epson's J1/J2/J3 combinations, every sample
             tried.append({"j1": j1, "blocked": blocked, "path_free": free})
             if free and (best is None or blocked < best[0]):
                 best = (blocked, j1, traj)
@@ -284,8 +487,11 @@ class ManipulationTools:
             q0 = self.bridge.q()
             traj = joint_move(self.kin, q0, np.array(ARM_HOME, float), ARM_SPEED)
             res = CollisionChecker(self.obstacles()).check_path(traj.positions)
+            zone = forbidden_on_path(traj.positions)
             if not res.ok:
                 out = {"ok": False, "reason": "HOME path collides: " + "; ".join(map(str, res.contacts[:3]))}
+            elif zone:
+                out = {"ok": False, "reason": f"HOME path: {zone}"}
             else:
                 self.log("tool", tool="return_home", ok=True, planned_s=round(float(traj.duration), 1))
                 r = self.execute([MoveStep(traj, "return HOME")], "return HOME")

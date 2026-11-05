@@ -59,8 +59,9 @@ def test_side_in_the_robot_frame_with_a_borderline_band():
 class Matcher(ResolutionTools):
     """ResolutionTools over a scripted scene; Gemma's parts are scripted (split and appearance)."""
 
-    def __init__(self, tmp_path, measured, spec, looks_like, unsure=(), best=None):
-        self.run_dir, self.events, self.shown, self.compared = tmp_path, [], [], []
+    def __init__(self, tmp_path, measured, spec, looks_like, unsure=(), best=None, final=None):
+        """final: Gemma's final choice when several remain (2026-10-26); None = it cannot decide either."""
+        self.run_dir, self.events, self.shown, self.compared, self.finals = tmp_path, [], [], [], []
         (tmp_path / "images").mkdir(exist_ok=True)
 
         def each(crops, words):
@@ -70,7 +71,13 @@ class Matcher(ResolutionTools):
         def joint(img, words, ids):
             self.compared.append(sorted(ids))
             return AppearanceMatch(matches=[k for k in ids if best is None or k in best])
-        self.roles = SimpleNamespace(parse_reference=lambda text: spec, appearance_each=each, match_appearance=joint)
+        def resolve(som, descs, text, ids, allowed=None):
+            from agent.vlm_roles import Resolution
+            self.finals.append(sorted(ids))
+            return Resolution(id=final, candidates=[final]) if final is not None else \
+                Resolution(id=None, ambiguous=True, candidates=sorted(ids), reason="cannot tell")
+        self.roles = SimpleNamespace(parse_reference=lambda text: spec, appearance_each=each, match_appearance=joint,
+                                     resolve=resolve)
         rgb = np.zeros((60, 200, 3), np.uint8)
         marks = {}
         for i, k in enumerate(measured):
@@ -82,6 +89,9 @@ class Matcher(ResolutionTools):
 
     def pool(self, obs, text):
         return list(obs.marks)
+
+    def describe(self, obs, marks=None):  # Gemma's descriptions: not needed by the scripted final choice
+        pass
 
     def log(self, kind, **kw):
         self.events.append({"kind": kind, **kw})
@@ -128,7 +138,9 @@ def test_several_clear_matches_are_compared_jointly(tmp_path):
     assert t.resolve(t.obs, "the maroon block").id == 12 and t.compared == [[5, 12]]
     t2 = Matcher(tmp_path, SCENE, ReferenceSpec(appearance="maroon block"), looks_like={5, 12})  # no difference
     r = t2.resolve(t2.obs, "the maroon block")
-    assert r.id is None and sorted(r.candidates) == [5, 12]
+    assert r.id is None and sorted(r.candidates) == [5, 12] and t2.finals == [[5, 12]]  # Gemma could not decide either
+    t3 = Matcher(tmp_path, SCENE, ReferenceSpec(appearance="maroon block"), looks_like={5, 12}, final=5)
+    assert t3.resolve(t3.obs, "the maroon block").id == 5  # 2026-10-26: Gemma's final choice, nobody asked
 
 
 def test_no_joint_comparison_when_size_decides(tmp_path):
@@ -213,7 +225,7 @@ class RenumberingTools(StubTools):
         return SimpleNamespace(marks={m: None for m in ids}, measured={m: self.OBJECTS[k][0] for m, k in enumerate(order, 1)},
                                object_ids=ids, descriptions={}, frame_id=f"table_{self.frames:03d}")
 
-    def resolve(self, obs, text, exclude=()):
+    def resolve(self, obs, text, exclude=(), choose=True):
         self.resolves.append(obs.frame_id)
         return Resolution(id=len(self.resolves))  # a different mark each time
 

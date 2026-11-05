@@ -202,10 +202,19 @@ class CollisionChecker:
         return [_Part("palm", "tool0", *palm), _Part("pads", "tool0", *cat(pads)), _Part("linkages", "tool0", *cat(links))]
 
     @staticmethod
-    def held_box_in_tool(size, grip_depth: float, tcp_offset: float = 0.1337, yaw_offset_deg: float = 0.0) -> tuple[np.ndarray, np.ndarray]:
-        """Pose (4x4 in tool0) and full size of an object held by the pads: its top is grip_depth above the TCP."""
+    def held_box_in_tool(size, grip_depth: float, tcp_offset: float = 0.1337, yaw_offset_deg: float = 0.0,
+                         tilt_deg: float = 0.0) -> tuple[np.ndarray, np.ndarray]:
+        """Pose (4x4 in tool0) and full size of an object held by the pads: its top is grip_depth above the TCP.
+        tilt_deg: the gripper was tilted by this angle about its closing axis (tool0 X) when it grasped the upright
+        object, so in tool0 the object is turned back by -tilt_deg about X, about the TCP."""
         T = _rot_z(yaw_offset_deg)
         T[2, 3] = tcp_offset - grip_depth + size[2] / 2
+        if tilt_deg:
+            a = np.radians(-tilt_deg)
+            Rx = np.array([[1.0, 0.0, 0.0], [0.0, np.cos(a), -np.sin(a)], [0.0, np.sin(a), np.cos(a)]])
+            tcp = np.array([0.0, 0.0, tcp_offset])
+            T[:3, :3] = Rx @ T[:3, :3]
+            T[:3, 3] = tcp + Rx @ (T[:3, 3] - tcp)
         return T, np.asarray(size, float)
 
     def link_poses(self, q: np.ndarray) -> dict[str, np.ndarray]:

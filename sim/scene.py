@@ -5,6 +5,7 @@ Import this only AFTER creating the SimulationApp (Isaac Sim modules require it)
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import isaacsim.core.experimental.utils.stage as stage_utils
@@ -225,6 +226,26 @@ def add_microphone() -> str:
     return frame.GetPath().pathString
 
 
+NO_GO_PATH = "/World/NoGoZone"
+NO_GO_COLOR = (0.44, 0.34, 0.39)  # sRGB: a little darker than the floor, rose-tinted, where the arm cannot pick
+
+
+def add_no_go_zone() -> str:
+    """Shade the floor outside the arm's measured pick envelope (control/workspace.py): the hole round the base, the
+    slice behind it and the band beyond the reach. Visual only: no collision, 0.4 mm above the floor."""
+    from control.workspace import no_go_mesh
+    stage = stage_utils.get_current_stage()
+    points, counts, idx = no_go_mesh()
+    mesh = UsdGeom.Mesh.Define(stage, NO_GO_PATH)
+    mesh.CreatePointsAttr([Gf.Vec3f(*map(float, p)) for p in points])
+    mesh.CreateFaceVertexCountsAttr(counts)
+    mesh.CreateFaceVertexIndicesAttr(idx)
+    mesh.CreateDoubleSidedAttr(True)
+    mesh.CreateDisplayColorAttr([Gf.Vec3f(*srgb_to_linear(NO_GO_COLOR))])
+    UsdShade.MaterialBindingAPI.Apply(mesh.GetPrim()).Bind(_matte_material("NoGoZone", NO_GO_COLOR))
+    return NO_GO_PATH
+
+
 async def setup_scene(block_masses: dict[str, float] | None = None) -> None:
     """Build the scene. block_masses overrides a block's mass (kg) by name."""
     stage_utils.create_new_stage(template="default stage")
@@ -236,6 +257,8 @@ async def setup_scene(block_masses: dict[str, float] | None = None) -> None:
     attach_gripper()
     add_microphone()
     GroundPlane("/World/GroundPlane")
+    if os.environ.get("NO_GO_ZONE", "1") != "0":  # NO_GO_ZONE=0 leaves the floor plain
+        add_no_go_zone()
     DomeLight("/World/DomeLight").set_intensities(np.array([1000.0]))
 
     material = _grip_material()

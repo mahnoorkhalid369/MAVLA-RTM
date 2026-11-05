@@ -46,7 +46,7 @@ class Question:
 
 @dataclass
 class Answer:
-    kind: str  # "choice" | "cancel" | "eof" | "timeout"
+    kind: str  # "choice" | "text" (the person answered in words) | "cancel" | "eof" | "timeout"
     mark: int | None = None
     raw: str = ""
     source: str = "terminal"  # "terminal" (a person) | "scripted" (configured rehearsal answer)
@@ -54,15 +54,17 @@ class Answer:
 
 
 def parse_answer(text: str, q: Question) -> tuple[Answer | None, str]:
-    """(Answer, "") for a valid answer, or (None, why it is not valid). Only the protocol above: a listed number,
-    or an empty line (no choice)."""
+    """(Answer, "") for a valid answer, or (None, why it is not valid): a listed number, words, or an empty line (no
+    choice). Words are the person's own answer ("you already have it in your grasp"): they are passed on as typed for
+    the supervisor (Gemma) to understand, never rejected (live 2026-10-26: such an answer was refused as "not a
+    number")."""
     t = text.strip()
-    if not t:
+    if not t or t.lower() in ("cancel", "none", "stop"):
         return Answer("cancel", raw=text), ""
     m = re.fullmatch(r"#?\s*(\d+)", t)
     marks = {c.mark for c in q.candidates}
     if m is None:
-        return None, f"answer with one of the numbers {sorted(marks)}, or an empty line for none"
+        return Answer("text", raw=t), ""
     n = int(m.group(1))
     if n in marks or n in set(q.visible):
         return Answer("choice", n, raw=text), ""
@@ -83,9 +85,11 @@ def format_question(q: Question) -> str:
         lines.append(f"  other objects in view (numbers as in the camera picture): {', '.join(map(str, others))}")
     lines.append("  (x = robot's right, y = forward from the robot base)")
     if q.kind == "confirm":
-        lines.append(f"  Type {q.candidates[0].mark} to confirm it, another object's number, or an empty line for none.")
+        lines.append(f"  Type {q.candidates[0].mark} to confirm it, another object's number, answer in your own words, or an "
+                     "empty line for none.")
     else:
-        lines.append("  Type one of the numbers" + (" (or another object's number)" if others else "") + ", or an empty line for none.")
+        lines.append("  Type one of the numbers" + (" (or another object's number)" if others else "") + ", answer in your "
+                     "own words, or an empty line for none.")
     return "\n".join(lines)
 
 

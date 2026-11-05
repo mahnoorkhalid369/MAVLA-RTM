@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from control.robot import TABLE_CAMERA_POSITION
+from control.robot import SCENARIO_CELL, TABLE_CAMERA_POSITION
 
 GROUND_Z = 0.0  # m: the support surface (floor) of the work cell
 ABOVE_SUPPORT = 0.003  # m: depth points closer than this to the floor inside a mask edge are floor
@@ -18,6 +18,8 @@ UP_NORMAL = 0.9  # |normal z| above this (< ~25 deg from vertical) = an upward-f
 TOP_LAYER = 0.012  # m: points this close below the top count as the top face
 MASK_ERODE_PX = 2  # pixels removed at mask edges (depth bleeding)
 MIN_POINTS = 30  # depth points needed to measure an object
+MIN_ABOVE_FRACTION = 0.5  # a mask with fewer of its depth points above the support is a region of the support surface
+#   (a patch of table the detector outlined, perhaps clipping a tray rim), not an object: an object's mask is mostly object
 ROBOT_INFLATE = 0.01  # m: robot collision spheres are inflated by this for exclusion
 FIXTURE_INFLATE = 0.01
 
@@ -34,6 +36,8 @@ class FixtureBox:
 
 
 def _fixtures() -> list[FixtureBox]:
+    if SCENARIO_CELL:  # the frozen cell's props are hidden there (visual only in the simulator): nothing to exclude
+        return []
     x, y, z = TABLE_CAMERA_POSITION
     mx, my, _ = MIC_POSITION
     return [FixtureBox("camera_stand_pole", (x, y, z / 2), (0.015, 0.015, z / 2)),

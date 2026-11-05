@@ -96,10 +96,12 @@ def side_split(centres: dict[int, list], direction, frame: str) -> dict:
 
 
 class ResolutionTools:
-    def resolve(self, obs: Observation, text: str, exclude=()):
+    def resolve(self, obs: Observation, text: str, exclude=(), choose: bool = True):
         """The shared matcher (see the module docstring): one object, or ambiguous with candidates (the caller asks
         the user), or none. exclude: marks already rejected for this reference in this task. Every stage is logged
-        ("match") with marks (this frame's labels) and world ids (persistent identities)."""
+        ("match") with marks (this frame's labels) and world ids (persistent identities). choose=False: when several
+        candidates fit the words equally, they are returned as candidates instead of a final choice among them (the
+        goal check: Gemma, as the master, chooses with BIND, 2026-11-04)."""
         from agent.vlm_roles import Resolution, VLMFailure
         pool = [k for k in self.pool(obs, text) if k not in set(exclude)]
         if not pool:
@@ -125,7 +127,9 @@ class ResolutionTools:
             if m:  # an object Gemma could not judge matters only when none clearly fits
                 u = []
             sure, unsure = [k for k in sure if k in m], sorted(set(u) | {k for k in unsure if k in m})
-            if len(sure) > 1 and spec.size is None and len(sure) <= APPEARANCE_TILES:  # joint comparison, when needed
+            # joint comparison, when needed; not when other words remain: it judges the appearance words alone and would
+            # narrow out the object the remaining words point to (live 2026-10-26: "red" kept two cubes, the tray was lost)
+            if len(sure) > 1 and spec.size is None and not spec.other.strip() and len(sure) <= APPEARANCE_TILES:
                 best = self.compare_appearance(obs, spec.appearance, sure)
                 stages.append({"stage": "joint appearance", "words": spec.appearance, "compared": sure, "matches": best})
                 if best:
@@ -142,11 +146,16 @@ class ResolutionTools:
             else:
                 sure, unsure = [k for k in rk["tied"] if k in sure], [k for k in rk["tied"] if k in unsure]
         rest = sure + unsure
-        if spec.other.strip() and len(rest) > 1:  # words that are none of the three: Gemma over its descriptions
+        if len(rest) > 1 and (choose or spec.other.strip()):  # several remain: Gemma makes the final choice from the whole numbered picture, its
+            # descriptions and the measured facts (any numbered object may be its answer); only if Gemma itself cannot
+            # decide is the user asked (live 2026-10-26: two trays left after the look check went straight to the user)
             r = self._resolve_described(obs, text, rest)
-            stages.append({"stage": "other words", "words": spec.other, "id": r.id, "candidates": r.candidates})
+            stages.append({"stage": "final choice" if not spec.other.strip() else "other words", "words": spec.other or text,
+                           "id": r.id, "candidates": r.candidates})
             if r.id is not None:
                 sure, unsure, rest = [r.id], [], [r.id]
+            elif r.candidates:
+                sure, unsure, rest = list(r.candidates), [], list(r.candidates)
         if len(sure) == 1 and not unsure:
             r = Resolution(id=sure[0], reason="; ".join(_stage_text(s) for s in stages) or "the only candidate")
         elif rest:
@@ -189,7 +198,10 @@ class ResolutionTools:
         return best if 0 < len(best) < len(marks) else []
 
     def _resolve_described(self, obs: Observation, text: str, pool: list[int]):
-        """Gemma's resolve over its descriptions and the measured facts of the pool."""
+        """Gemma's resolve over its descriptions and the measured facts of the pool: it chooses AMONG the pool (live
+        2026-10-26: allowed to name any object in the whole picture, it picked neighbours of the right object; measured
+        4 of 13 correct on the whole picture). The pool keeps every object the words could mean: the earlier look
+        check judges the whole words (kind included) and no longer narrows by part of them."""
         self.describe(obs, pool)  # no-op for objects already described
         descs = [{"id": k, **obs.descriptions.get(k, {}), "measured": self.measured_facts(obs, k)} for k in pool]
         return self.roles.resolve(obs.som, descs, text, pool)

@@ -173,7 +173,7 @@ def label_texture(lb: Label) -> Path:
 def populate(sc: Scenario) -> dict:
     """Replace the frozen setup's placeholder objects; add fixtures, decor, labels and lights. Returns prim paths."""
     import isaacsim.core.experimental.utils.stage as stage_utils
-    from pxr import Gf, PhysxSchema, UsdGeom, UsdLux, UsdPhysics
+    from pxr import Gf, PhysxSchema, Usd, UsdGeom, UsdLux, UsdPhysics, UsdShade
 
     stage = stage_utils.get_current_stage()
     b = _Builder(stage)
@@ -204,6 +204,32 @@ def populate(sc: Scenario) -> dict:
             for i, lb in enumerate(f.labels):
                 b.label(path, i, lb)
             paths[group.lower()].append(path)
+    if sc.view.get("table"):  # a work cell on a table: the frozen floor plane stays the physics support at z = 0
+        # (the table top) but is hidden, the room floor is drawn below; the frozen camera stand is replaced by the
+        # scenario's frame (the camera itself stays where control/robot.py TABLE_CAMERA puts it)
+        ground = stage.GetPrimAtPath("/World/GroundPlane")
+        if ground.IsValid():
+            for prim in Usd.PrimRange(ground):
+                if prim.IsA(UsdGeom.Gprim) and not prim.HasAPI(UsdPhysics.CollisionAPI):
+                    UsdGeom.Imageable(prim).MakeInvisible()
+        for path in ("/World/TableCamera/pole", "/World/TableCamera/foot", "/World/Microphone"):  # not on this table
+            prim = stage.GetPrimAtPath(path)  # (the microphone's box stays a planning obstacle: config/perception.py)
+            if prim.IsValid():
+                UsdGeom.Imageable(prim).MakeInvisible()
+        nogo = UsdGeom.Mesh(stage.GetPrimAtPath("/World/NoGoZone"))
+        if nogo.GetPrim().IsValid():  # the shaded no-go floor ends at the table edge
+            from control.workspace import no_go_clipped
+            (cx, cy), (L, W) = sc.view["table"]["centre"], sc.view["table"]["size"]
+            pts, counts, idx = no_go_clipped(cx - L / 2, cx + L / 2, cy - W / 2, cy + W / 2, z=0.0009)
+            nogo.GetPointsAttr().Set([Gf.Vec3f(*map(float, p)) for p in pts])
+            nogo.GetFaceVertexCountsAttr().Set(counts)
+            nogo.GetFaceVertexIndicesAttr().Set(idx)
+            tint = sc.view["table"].get("no_go_color")
+            shader = UsdShade.Shader(stage.GetPrimAtPath("/World/Looks/NoGoZone/Shader"))
+            if tint and shader.GetPrim().IsValid():  # a tint of the table, not a colour block the detector reads as a thing
+                linear = Gf.Vec3f(*[c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4 for c in tint])
+                shader.GetInput("diffuseColor").Set(linear)
+                nogo.GetDisplayColorAttr().Set([linear])
     for i, lt in enumerate(sc.lights):
         path = f"/World/Scenario/Lights/l{i}"
         if lt.kind == "rect":

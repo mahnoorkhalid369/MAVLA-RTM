@@ -30,6 +30,8 @@ MAX_GRIP_WIDTH = 0.080  # m (2F-85 opens 85 mm; skills keep 5 mm margin)
 # Kept clear for the frozen scene's props (sim/scene_objects.py): microphone and the table-camera stand
 KEEP_CLEAR = [((-0.45, 0.35), 0.09), ((1.5, 0.25), 0.20)]
 DECOR_MIN_RADIUS = 1.15  # m: decor must be beyond the arm's reach (with gripper) everywhere
+DECOR_MAX_REACH_Z = 1.50  # m: decor wholly above this (frame beams) or below the table top (z < 0) is out of the arm's way
+#   (wrist centre at most 1.232 m high, Epson manual; plus the 214 mm hand pointing up)
 
 
 @dataclass

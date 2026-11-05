@@ -40,18 +40,30 @@ class HeldObjectState:
         if self.held_object is None:
             ev["held"] = "none"
             pending = getattr(self, "unconfirmed_grasp", None)  # a grasp the last lift check could not confirm
+            self.unknown_held = None
+            if finger > self.OPEN_FINGER_DEG:  # fingers not open: the wrist camera looks between them first
+                wrist = self.wrist_sees_held() if hasattr(self, "wrist_sees_held") else {"held": None}
+                ev["wrist"] = wrist
             if finger > self.OPEN_FINGER_DEG and pending is not None:
                 plan, target = pending
-                look = self.look_in_gripper(plan.object_id)  # the table camera looks (no Gemma)
-                ev["camera"] = look
-                if look["in_gripper"] and look["old_spot"] == "empty":
+                look = None
+                if not ev["wrist"].get("held"):
+                    look = self.look_in_gripper(plan.object_id)  # the table camera looks (no Gemma)
+                    ev["camera"] = look
+                if ev["wrist"].get("held") or (look["in_gripper"] and look["old_spot"] == "empty"):
                     self.set_held(plan, target)
-                    ev.update(held="recovered", held_object=plan.object_id,
-                              note=f"the table camera sees #{plan.object_id} in the gripper and its old spot empty")
+                    by = "the wrist camera sees an object between the fingers" if ev["wrist"].get("held") else \
+                        "the table camera sees it in the gripper and its old spot empty"
+                    ev.update(held="recovered", held_object=plan.object_id, note=f"#{plan.object_id} is held: {by}")
                 else:
-                    ev["note"] = "gripper not open, nothing recorded as held, and the camera could not confirm an object in it"
+                    ev["note"] = "gripper not open, nothing recorded as held, and no camera sees an object in it"
+            elif finger > self.OPEN_FINGER_DEG and ev["wrist"].get("held"):
+                # something is between the fingers, but no grasp record says what: never open the gripper on it unasked
+                self.unknown_held = {"finger_deg": round(finger, 2)}
+                ev.update(held="unknown", note="the wrist camera sees an object between the fingers that no grasp in this "
+                                               "session recorded (fingers at %.0f deg)" % finger)
             elif finger > self.OPEN_FINGER_DEG:
-                ev["note"] = "gripper not open, but nothing is recorded as held"
+                ev["note"] = "gripper not open, but nothing is recorded as held and the wrist camera sees nothing in it"
             self.unconfirmed_grasp = None
         else:
             v = self.confirm_held(self.held_close_target, self.held_object, "held_state") if hasattr(self, "confirm_held") \

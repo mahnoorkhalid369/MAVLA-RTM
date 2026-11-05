@@ -70,7 +70,8 @@ def format_event(e: dict) -> Line | None:  # noqa: C901 (a flat dispatch on the 
         return Line(w, "USER", f"goal: {e.get('text')!r}", gap=True)
     if k == "planning":
         return Line(w, "GEMMA", f"planning the task ({e.get('request_kind')} request): {e.get('workers')} workers, "
-                                f"{e.get('operations')} operations available" + (f"; context: {e.get('context')}" if e.get("context") else ""),
+                                f"{e.get('operations')} operations available" + (f"; context: {e.get('context')}" if e.get("context") else "")
+                                + (f"; fixed regions given: {', '.join(e['regions'])}" if e.get("regions") else ""),
                     gap=True)
     if k == "state":
         s = e.get("state")
@@ -128,6 +129,7 @@ def format_event(e: dict) -> Line | None:  # noqa: C901 (a flat dispatch on the 
         steps = "; ".join(f"{x.get('worker') or '?'} -> {x.get('capability')} {_args(x.get('args') or {})}".rstrip()
                           for x in e.get("steps") or [])
         extra = f" new steps: {steps};" if steps else (f" question: {e.get('question')!r};" if e.get("question") else "")
+        extra = "".join(f" bind {b.get('text')!r} = {b.get('id')};" for b in e.get("binds") or []) + extra
         return Line(w, "GEMMA", f"decision: {str(act).upper()} -{extra} reason: {e.get('reason') or '(none given)'}",
                     "info" if act in ("continue", "finish") else "warn", gap=True)
     if k == "located":
@@ -145,9 +147,20 @@ def format_event(e: dict) -> Line | None:  # noqa: C901 (a flat dispatch on the 
     if k == "vlm":
         if e.get("valid"):
             return None  # valid answers are reported by the event that uses them
-        return Line(w, "GEMMA", f"{e.get('role')}: invalid answer (attempt {e.get('attempt')}): {e.get('error')}", "warn")
+        pe = e.get("parse_error")
+        detail = [f"GEMMA RAW OUTPUT attempt {e.get('attempt')}:"] + str(e.get("answer") or "").strip().splitlines()
+        if pe and "line" not in pe:  # the line protocol: the message names the line
+            detail += [f"GEMMA LINE FORMAT ERROR: {pe['message']}"]
+        elif pe:  # where the JSON parser failed, in what it read
+            detail += [f"GEMMA JSON PARSE ERROR: {pe['message']}, line {pe['line']} column {pe['column']} "
+                       f"(character {pe['offset']})"] + pe["context"].splitlines() + ([pe["mismatch"]] if pe.get("mismatch") else [])
+        return Line(w, "GEMMA", f"{e.get('role')}: invalid answer (attempt {e.get('attempt')}): {e.get('error')}", "warn",
+                    detail=tuple(detail))
     if k == "tool":
         t = e.get("tool")
+        if t == "wrist_held_check":
+            return Line(w, "VERIFICATION", f"wrist camera between the fingers: {'object seen' if e.get('held') else 'empty'} "
+                                           f"({e.get('fraction')} of depth pixels at the fingers)")
         if t == "perceive":
             ex = len(e.get("excluded") or [])
             return Line(w, "PERCEPTION", f"{e.get('camera')} camera, frame {e.get('frame_id')}: YOLO {e.get('detections')} masks, "
@@ -156,12 +169,31 @@ def format_event(e: dict) -> Line | None:  # noqa: C901 (a flat dispatch on the 
             return Line(w, "GEMMA", f"{e.get('text')!r} -> object {e.get('id')}" if e.get("id") is not None
                         else f"{e.get('text')!r}: no single object (candidates {e.get('candidates')})",
                         "info" if e.get("id") is not None else "warn")
+        if t == "region_place":
+            if e.get("ok") is False:
+                return Line(w, "MANIPULATION", f"place target {e.get('region')} ({e.get('name')}): no spot worked "
+                                               f"({len(e.get('tried') or [])} tried of {e.get('candidates')} free)", "warn")
+            return Line(w, "MANIPULATION", f"place target {e.get('region')} ({e.get('name')}): region centre "
+                                           f"{tuple(e.get('region_centre_mm') or [])} mm, candidate {tuple(e.get('candidate_mm') or [])} mm "
+                                           f"(inside: yes, {e.get('edge_margin_mm')} mm from the edge; reachable: yes; "
+                                           f"collision-free: yes; {len(e.get('tried') or [])} earlier candidate(s) failed)")
         if t == "execute_start":
             return Line(w, "EXECUTION", f"{e.get('label')}: " + " -> ".join(e.get("steps") or []))
         if t == "execute":
             if e.get("ok"):
                 return Line(w, "EXECUTION", f"{e.get('label')}: done in {e.get('seconds')} s")
             return Line(w, "EXECUTION", f"{e.get('label')}: FAILED at {e.get('failed_step')!r}: {e.get('reason')}", "error")
+        if t == "grasp_select":
+            td, tilted = e.get("top_down") or {}, e.get("tilted") or []
+            passed = sum(1 for c in tilted if c.get("ok"))
+            tried = f"top-down {'ok' if td.get('ok') else 'failed'}" + (
+                f", tilted {passed}/{len(tilted)} candidates passed (up to {e.get('max_tilt_deg'):.0f} deg)" if tilted else "")
+            if e.get("selected") == "tilted":
+                return Line(w, "MANIPULATION", f"grasp: {tried}; selected tilted {e.get('tilt_deg'):+.0f} deg at yaw "
+                                               f"{e.get('yaw_deg')} deg", "warn")
+            if e.get("selected") is None:
+                return Line(w, "MANIPULATION", f"grasp: {tried}; no physical grasp method passed", "error")
+            return None  # top-down selected: the default, reported by the plan line
         if t == "park_for_view" and not e.get("ok"):
             return Line(w, "MANIPULATION", "no collision-free pose with a clear camera view", "error")
         if t == "observation_reused":
@@ -211,13 +243,33 @@ def format_event(e: dict) -> Line | None:  # noqa: C901 (a flat dispatch on the 
             return Line(w, who, f"answered Gemma's question {e.get('question')!r}: {e.get('raw')!r}" if e.get("raw")
                         else f"no answer to Gemma's question {e.get('question')!r}", "question")
         return Line(w, who, f"answer: {a} ({e.get('raw')!r})", "warn")
+    if k == "localized" and e.get("reference_region"):
+        o, r = e.get("object") or {}, e.get("reference") or {}
+        what = f"object {e.get('object_mark')}" if e.get("object_mark") is not None else f"#{e.get('object_id')} (held)"
+        return Line(w, "PERCEPTION", f"target = {what} at {_mm(o.get('centre', []))}, destination = region "
+                                    f"{e.get('reference_region')} ({e.get('region_name')}) at {_mm(r.get('centre', []))} "
+                                    f"(calibrated layout)")
+    if k == "region_reference":
+        return Line(w, "SUPERVISOR", f"canonical {'destination' if e.get('where') == 'step' else 'condition region'}: "
+                                     f"{e.get('region')} ({e.get('name')}), "
+                                     + (f"step {e.get('at')}" if e.get("where") == "step" else f"in {e.get('at')}(...)"))
     if k == "localized":
         o, r = e.get("object") or {}, e.get("reference") or {}
         return Line(w, "PERCEPTION", f"target = object {e.get('object_mark')} at {_mm(o.get('centre', []))}, "
                                     f"destination = object {e.get('reference_mark')} at {_mm(r.get('centre', []))}")
+    if k == "clarify":  # understanding a request before planning (2026-10-26)
+        if e.get("status") == "clear":
+            return Line(w, "GEMMA", f"understood the request: {e.get('request')}")
+        if e.get("status") == "ask":
+            return Line(w, "GEMMA", f"needs to know before planning: {e.get('question')}", "question")
+        return Line(w, "GEMMA", f"understanding step skipped ({e.get('reason')}): planning the request as given", "warn")
+    if k == "new_goal":
+        return Line(w, "SUPERVISOR", f"new request from the user replaces the goal: {e.get('request')!r} "
+                                     f"(was {e.get('previous')!r})", "warn")
     if k == "plan":
         g = e.get("grasp") or {}
-        return Line(w, "MANIPULATION", f"grasp yaw {g.get('yaw_deg')} deg, width {g.get('width_mm')} mm, height {g.get('height_mm')} mm; "
+        tilt = f", tilted {g.get('tilt_deg'):+.0f} deg" if g.get("method") == "tilted" else ""
+        return Line(w, "MANIPULATION", f"grasp yaw {g.get('yaw_deg')} deg{tilt}, width {g.get('width_mm')} mm, height {g.get('height_mm')} mm; "
                                        f"place at {e.get('target_centre_mm')} mm; every motion collision-checked")
     if k == "verification":
         c = e.get("check")
@@ -357,6 +409,11 @@ def format_trace(e: dict) -> Line | None:  # noqa: C901 (a flat dispatch on the 
     if k == "decomposed":
         steps = "; ".join(f"{s.get('capability')} {_short(s.get('args'), 60)}" for s in e.get("steps") or [])
         return Line(w, "GEMMA", f"decomposed {e.get('goal')!r}: {steps or '(no steps)'}")
+    if k == "candidates":
+        return Line(w, "PERCEPTION", f"{e.get('text')!r}: several measured objects fit: "
+                                    f"{', '.join(f'#{x}' for x in e.get('world_ids') or [])} (shown to Gemma to settle)", "warn")
+    if k == "budget":
+        return Line(w, "SUPERVISOR", f"one more change of course allowed ({e.get('reason')})")
     if k == "binding":
         return Line(w, "PERCEPTION", f"{e.get('text')!r} -> #{e.get('world_id')} ({e.get('reason')})")
     if k == "task_memory":

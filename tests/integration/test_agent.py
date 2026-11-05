@@ -232,10 +232,20 @@ def test_describe_one_per_isolated_crop():
 
 
 def test_park_poses_stay_inside_joint_limits():
+    """Out to the J1 limit, but further inside it than the reach tolerance: a pose measured a hair beyond its goal must
+    still be inside the limit, or the safety layer rejects the next trajectory. No forbidden J1/J2/J3 combination."""
+    from config.agent import REACH_TOLERANCE_DEG
     from control.kinematics import Kinematics
+    from control.robot import ARM_HOME
+    from safety.joint_limits import forbidden_combination
     k = Kinematics()
+    margin = np.radians(REACH_TOLERANCE_DEG)
     for j1 in Tools.PARK_J1_DEG:
-        assert k.lower[0] + np.radians(5) < np.radians(j1) < k.upper[0] - np.radians(5)
+        assert k.lower[0] + margin < np.radians(j1) < k.upper[0] - margin
+        q = np.array(ARM_HOME, float)
+        q[0] = np.radians(j1)
+        assert forbidden_combination(q) is None
+    assert max(abs(j) for j in Tools.PARK_J1_DEG) >= 168.0  # the full J1 range is used
 
 
 def test_resolve_retry_names_the_wrong_field():
@@ -400,13 +410,20 @@ def test_resolution_only_sees_the_shortlist(tmp_path):
     assert r.id == 2 and len(vlm.calls) == 3  # split + the two shortlisted crops only
     t._reference_specs.clear()
     # both fit on their own -> one joint comparison of the two; an object outside them is rejected (retry asked);
-    # no difference -> the user
+    # no difference -> Gemma's final choice over the numbered picture (2026-10-26); only if Gemma cannot decide either,
+    # the user
     vlm2 = RecordedVLM(['{"appearance": "red cube"}', '{"match": "yes"}', '{"match": "yes"}', '{"matches": [4]}',
-                        '{"matches": [2, 5]}'])
+                        '{"matches": [2, 5]}', '{"id": null, "ambiguous": true, "candidates": [2, 5], "reason": "same"}'])
     t.roles = Roles(vlm2)
     r = t.resolve(obs, "red cube")
     assert r.id is None and r.ambiguous and r.candidates == [2, 5] and "not in the picture" in vlm2.calls[4]
+    assert 'mean by "red cube"' in vlm2.calls[5]  # the final choice was Gemma's to make
     assert (tmp_path / "images" / "table_001_appearance_2_5.jpg").exists()
+    t._reference_specs.clear()
+    vlm3 = RecordedVLM(['{"appearance": "red cube"}', '{"match": "yes"}', '{"match": "yes"}', '{"matches": [2, 5]}',
+                        '{"id": 5, "ambiguous": false, "candidates": [5], "reason": "darker"}'])
+    t.roles = Roles(vlm3)
+    assert t.resolve(obs, "red cube").id == 5  # Gemma decided: nobody is asked
 
 
 def test_describe_many_batches_and_retries_invalid_items_once():

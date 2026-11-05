@@ -1,0 +1,30 @@
+# Experiment 2: model size. E2B (the model of the proposal) vs E4B (the current default), same settings.
+# The bf16 / no-offload E4B row is the stress case: expect a load failure or OOM, which is a feasibility result.
+name = "exp2_model_size"
+repeats = 3
+hz = 10
+timeout_s = 2400
+cooldown_s = 20
+torch_hook = true
+launcher = "launch/agent.sh"
+launcher_args = ["--headless", "--motion", "real", "--ask", "scripted",
+                 "--scenario", "workcell", "--difficulty", "hard", "--seed", "42"]
+instructions = [
+    "Take a look at your surroundings.",
+    "Put the red cube on the green cube.",
+]
+
+[[config]]
+label = "e2b_4bit_offload"
+gemma = "models/gemma-4-E2B-it"
+env = { VLM_QUANTIZATION = "4bit", VLM_EMBEDDINGS_ON_CPU = "1" }
+
+[[config]]
+label = "e4b_4bit_offload"
+gemma = "models/gemma-4-E4B-it"
+env = { VLM_QUANTIZATION = "4bit", VLM_EMBEDDINGS_ON_CPU = "1" }
+
+[[config]]
+label = "e4b_bf16_gpu"
+gemma = "models/gemma-4-E4B-it"
+env = { VLM_QUANTIZATION = "none", VLM_EMBEDDINGS_ON_CPU = "0" }

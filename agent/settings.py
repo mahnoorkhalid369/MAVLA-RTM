@@ -21,11 +21,12 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 # ---------------------------------------------------------------------------------------------- scene
-SCENARIO = "graspable_blocks"  # any scenario in scenarios/ (python -c "import scenarios; print(scenarios.available())"):
+SCENARIO = "workcell"        # any scenario in scenarios/ (python -c "import scenarios; print(scenarios.available())"):
+                             # "workcell" (table, pickup area, arrangement mat, three trays; overhead front camera),
                              # "graspable_blocks" (cube scene, every object fits the gripper), "default" (frozen cube
                              # scene), "laboratory", "ap_occlusion", "ap_categories", ...
-DIFFICULTY = "easy"          # laboratory: "easy" | "medium" | "hard"
-SEED = 42                    # laboratory layout seed (42 = the Experiment 1 scene)
+DIFFICULTY = "hard"          # workcell / laboratory: "easy" | "medium" | "hard"
+SEED = 42                    # workcell / laboratory layout seed (laboratory 42 = the Experiment 1 scene)
 
 # ----------------------------------------------------------------------------------------- execution
 TARGET = "isaac_sim"         # the only supported target. Physical-robot execution is NOT part of this launcher.
@@ -35,15 +36,20 @@ MOTION = "real"              # "real": planned motions are executed in Isaac Sim
 ROS_DOMAIN_ID = 42           # keeps this session apart from other ROS 2 sessions on the machine
 
 # -------------------------------------------------------------------------------------------- models
-GEMMA_MODEL = str(ROOT / "models" / "gemma-4-E2B-it")   # local Gemma 4 E2B-it (4-bit, see vlm/config.py)
+GEMMA_MODEL = str(ROOT / "models" / "gemma-4-E4B-it")   # local Gemma 4 E4B-it (4-bit, see vlm/config.py); the smaller
+                                                        # models/gemma-4-E2B-it still works (set it here to compare)
 YOLO_WEIGHTS = str(_models.YOLO_WEIGHTS)                # YOLO11s-seg, class-agnostic instance masks
 YOLO_IMAGE_SIZE = _models.DETECTOR_IMGSZ
 YOLO_CONFIDENCE = _models.DETECTOR_CONF
 
 # ----------------------------------------------------------------------------------- windows and I/O
 ISAAC_WINDOW = True          # show the Isaac Sim window (False: headless, faster)
-DEMO_VIEWER = True           # the agent viewer: live camera, detections, supervisor state, logs
-CAMERA_WINDOWS = True        # raw wrist and table RGB-D windows
+DASHBOARD = True             # ONE window: main camera + YOLO masks / ids, the other camera (RGB or depth), task
+                             # panel, live logs, GPU monitor panel (agent/dashboard.py)
+GPU_MONITOR = True           # record GPU / RAM / VLM latency for the session with gpumon (separate process; shown in
+                             # the dashboard; saved to out/gpumon/record/<date>_<time>/ with a summary + timeline)
+DEMO_VIEWER = False          # the older separate windows: agent viewer (camera, detections, state, logs) ...
+CAMERA_WINDOWS = False       # ... and raw wrist and table RGB-D windows
 ASK = "terminal"             # who answers clarification questions: "terminal" (you) | "scripted" (always cancel)
 MAX_GEMMA_DECISIONS = 3      # per instruction: how often Gemma may decide again after its first plan (failure,
                              # uncertain result, goal not shown); 0 = stop at the first problem
@@ -71,7 +77,7 @@ def validate(values: dict | None = None) -> list[str]:
     """Problems with the settings (empty = valid). `values` overrides the module values (tests)."""
     v = {k: globals()[k] for k in ("SCENARIO", "DIFFICULTY", "SEED", "TARGET", "START_SIMULATOR", "MOTION", "ROS_DOMAIN_ID",
                                    "GEMMA_MODEL", "YOLO_WEIGHTS", "YOLO_IMAGE_SIZE", "YOLO_CONFIDENCE", "ISAAC_WINDOW",
-                                   "DEMO_VIEWER", "CAMERA_WINDOWS", "ASK", "MAX_GEMMA_DECISIONS", "TRACE", "OUTPUT_DIR",
+                                   "DASHBOARD", "GPU_MONITOR", "DEMO_VIEWER", "CAMERA_WINDOWS", "ASK", "MAX_GEMMA_DECISIONS", "TRACE", "OUTPUT_DIR",
                                    "LIVE_DIR", "LOG_DIR")}
     v.update(values or {})
     errors = []
@@ -102,7 +108,7 @@ def validate(values: dict | None = None) -> list[str]:
     m = v["MAX_GEMMA_DECISIONS"]
     if not isinstance(m, int) or isinstance(m, bool) or not 0 <= m <= 10:
         errors.append(f"MAX_GEMMA_DECISIONS={m!r}: an integer 0-10")
-    for k in ("START_SIMULATOR", "ISAAC_WINDOW", "DEMO_VIEWER", "CAMERA_WINDOWS", "TRACE"):
+    for k in ("START_SIMULATOR", "ISAAC_WINDOW", "DASHBOARD", "GPU_MONITOR", "DEMO_VIEWER", "CAMERA_WINDOWS", "TRACE"):
         if not isinstance(v[k], bool):
             errors.append(f"{k}={v[k]!r}: True or False")
     for k in ("OUTPUT_DIR", "LIVE_DIR", "LOG_DIR"):
@@ -117,8 +123,8 @@ def summary() -> str:
     scene = f"{SCENARIO} ({DIFFICULTY}, seed {SEED})" if k == "procedural" else f"{SCENARIO} ({k} scene)"
     motion = {"real": "REAL - planned motions are executed in Isaac Sim (authorization, collision checks, joint limits apply)",
               "dry_run": "DRY RUN - planned and logged, never sent", "blocked": "BLOCKED - nothing is sent to the robot"}[MOTION]
-    windows = ", ".join(n for n, on in (("Isaac Sim window", ISAAC_WINDOW), ("demo viewer", DEMO_VIEWER),
-                                        ("camera windows", CAMERA_WINDOWS)) if on) or "none (headless)"
+    windows = ", ".join(n for n, on in (("Isaac Sim window", ISAAC_WINDOW), ("dashboard", DASHBOARD),
+                                        ("demo viewer", DEMO_VIEWER), ("camera windows", CAMERA_WINDOWS)) if on) or "none (headless)"
     return "\n".join([
         "[settings] agent/settings.py",
         f"[settings]   scene      {scene}",
@@ -127,6 +133,7 @@ def summary() -> str:
         f"[settings]   models     Gemma {Path(GEMMA_MODEL).name} | YOLO {Path(YOLO_WEIGHTS).parent.parent.name} "
         f"(imgsz {YOLO_IMAGE_SIZE}, conf {YOLO_CONFIDENCE})",
         f"[settings]   windows    {windows}",
+        f"[settings]   gpu        {'gpumon records this session (out/gpumon/record/)' if GPU_MONITOR else 'not recorded'}",
         f"[settings]   gemma      decides the plan, and again up to {MAX_GEMMA_DECISIONS} time(s) per instruction",
         f"[settings]   tracing    {'every agent handoff in the terminal' if TRACE else 'progress lines only'}; full trace in "
         f"{OUTPUT_DIR}/<date>/live_<time>/<nn>/events.jsonl",
@@ -144,9 +151,17 @@ def run_defaults() -> dict:
 
 def shell() -> str:
     """Values the launcher needs before Python starts the agent (eval'd by launch/agent.sh)."""
+    import shlex
     flag = {True: "1", False: "0"}  # the window switches can be overridden for one run: DEMO_VIEWER=0 ./launch/agent.sh
+    import scenarios
     return "\n".join([f"ROS_DOMAIN_ID={ROS_DOMAIN_ID}", f": ${{DEMO_VIEWER:={flag[DEMO_VIEWER]}}}",
-                      f": ${{CAMERA_WINDOWS:={flag[CAMERA_WINDOWS]}}}", f"LIVE_DIR={LIVE_DIR}", f"LOG_DIR={LOG_DIR}"])
+                      f": ${{DASHBOARD:={flag[DASHBOARD]}}}", f": ${{GPU_MONITOR:={flag[GPU_MONITOR]}}}",
+                      f"OUTPUT_DIR={OUTPUT_DIR}",
+                      f": ${{CAMERA_WINDOWS:={flag[CAMERA_WINDOWS]}}}", f"LIVE_DIR={LIVE_DIR}", f"LOG_DIR={LOG_DIR}",
+                      # the scenario's table-camera mount, for the agent's perception (control/robot.py)
+                      f"export TABLE_CAMERA={scenarios.table_camera(SCENARIO)}",
+                      # the scenario's calibrated fixed regions, for the agent (config/layout.py)
+                      f"export WORKCELL_LAYOUT={shlex.quote(scenarios.layout(SCENARIO))}"])
 
 
 if __name__ == "__main__":  # python -m agent.settings [--shell]: validate, then print the summary (or shell values)

@@ -33,6 +33,7 @@ REQ_PICK = '{"kind": "action", "evidence": "Pick up"}'
 REQ_PUT = '{"kind": "action", "evidence": "Put it"}'
 REQ_LOOK = '{"kind": "description", "evidence": "Take a look"}'
 REQ_DANCE = '{"kind": "action", "evidence": "Do a dance"}'
+CLEAR = '{"status": "clear", "request": "as the user asked", "reason": "the request is clear"}'
 NAMES = {"a": 1, "sample A1": 1, "c": 3, "processing rack": 2}
 
 
@@ -48,7 +49,7 @@ class SessionTools(GoalTools):
         self.roles, self.log, self.run_dir, self.bridge = roles, log, run_dir, bridge
         SessionTools.instances.append(self)
 
-    def resolve(self, obs, text, exclude=()):
+    def resolve(self, obs, text, exclude=(), choose=True):
         from agent.vlm_roles import Resolution
         if text in self.ambiguous:
             return Resolution(id=None, ambiguous=True, candidates=self.ambiguous[text])
@@ -66,6 +67,8 @@ def new_session(monkeypatch, tmp_path):
         def finger():  # mock gripper: closed on the object while the stub holds one, open otherwise
             return 0.4 if SessionTools.instances and SessionTools.instances[-1].held_object is not None else 0.0
         bridge = SimpleNamespace(q=lambda: np.zeros(6), finger=finger)
+        # 2026-10-26: each instruction is first understood (Gemma's clarify step) before it is classified and planned
+        answers = [x for a in answers for x in ((CLEAR, a) if '"kind"' in a else (a,))]
         s = Session(bridge, None, RecordedVLM(list(answers)), None, ScriptedResponder(["cancel"]))
         made.append(s)
         return s
@@ -113,7 +116,7 @@ def test_a_new_session_does_not_inherit_held_state(new_session):
 
 def test_failed_and_cancelled_instructions_do_not_corrupt_the_session(new_session):
     make, run = new_session
-    dance = '{"success": [{"pred": "danced"}], "steps": [{"do": "dance"}]}'  # nobody implements it: reported, then Gemma stops
+    dance = '{"success": [{"pred": "at_home"}], "steps": [{"do": "dance"}]}'  # nobody implements it: reported, then Gemma stops
     s = make([REQ_PICK, PICK % ("a", "a"), REQ_DANCE, dance, STOP, REQ_PUT, place("next_to", "zz"), REQ_PUT, place("next_to", "c")])
     run(s, "Pick up a.")
     r_fail, _ = run(s, "Do a dance.")

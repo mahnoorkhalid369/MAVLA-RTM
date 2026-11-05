@@ -4,6 +4,19 @@ and return_home. The workflow's failure classes map to supervisor outcomes (_fai
 from __future__ import annotations
 
 from agent.capabilities.specs import Context, StepResult
+from config import layout
+
+REGION_RELATIONS = ("in",)  # what the geometry computes for a fixed planar region: inside its outline
+
+
+def _region_relation(args: dict) -> StepResult | None:
+    """A destination that is a fixed region (config/layout.py) with a relation its geometry does not compute: reported
+    as unsupported before any motion. Nothing is substituted for the relation Gemma asked for."""
+    r = layout.region((args.get("reference") or {}).get("text"))
+    if r is None or args.get("relation") in REGION_RELATIONS:
+        return None
+    return StepResult("unsupported", f"{r.id} ({r.name}) is a fixed planar region: placing {args.get('relation')!r} it "
+                      f"is not computed (only {', '.join(REGION_RELATIONS)}: inside its outline). Nothing was moved.")
 
 
 def _failure_outcome(cls: str | None, reason: str) -> str:
@@ -52,7 +65,7 @@ def _skill(ctx: Context, mode: str, task: dict, final_home: bool, step_no: int) 
         b[task["object"]["text"]] = r["object_id"]
     if r.get("reference_id") is not None and (task.get("reference") or {}).get("text"):
         b[task["reference"]["text"]] = r["reference_id"]
-    data = {"report": r, "bindings": b, "evidence": [{"kind": "verification", "check": v.get("check"), "pass": v.get("pass")}
+    data = {"report": r, "bindings": b, "reference_region": r.get("reference_region"), "evidence": [{"kind": "verification", "check": v.get("check"), "pass": v.get("pass")}
                                                      for v in r.get("verifications") or []],
             "world_changes": [f"holding #{ctx.tools.held_object}"] if mode == "pick" and r["status"] == "COMPLETED" else []}
     if r["status"] == "COMPLETED":
@@ -67,8 +80,14 @@ def _names_held(ctx: Context, text: str) -> bool:
     return held is not None and (text == f"#{held}" or (ctx.state is not None and ctx.state.bindings.get(text) == held))
 
 
+UNKNOWN_HELD = ("the gripper is closed on an object no grasp recorded (the wrist camera sees it between the fingers); "
+                "opening it here would drop it. Nothing was executed: ask the user what it is and where to put it down")
+
+
 def run_pick(ctx: Context, args: dict, step_no: int) -> StepResult:
     t, text = ctx.tools, (args.get("object") or {}).get("text") or ""
+    if getattr(t, "unknown_held", None):  # never open the gripper on an object it holds without knowing it
+        return StepResult("unsafe", UNKNOWN_HELD)
     if t.held_object is not None:
         if _names_held(ctx, text):
             return StepResult("completed", f"already holding #{t.held_object} (no new grasp)", {"bindings": {text: t.held_object}})
@@ -87,6 +106,9 @@ def run_place(ctx: Context, args: dict, final_home: bool, step_no: int) -> StepR
         return StepResult("unsupported", "nothing is held: there is nothing to place (pick it up first, or ask for pick-and-place)")
     if named.startswith("#") and named[1:].isdigit() and int(named[1:]) != t.held_object:
         return StepResult("ambiguous", f"you asked to place {named}, but the gripper holds #{t.held_object}; which one do you mean?")
+    unsupported = _region_relation(args)
+    if unsupported is not None:
+        return unsupported
     held = t.held_object
     ev = t.revalidate_held()  # the memory says "held": the fingers must say so too, before any motion
     if ev["held"] != "verified":
@@ -102,11 +124,18 @@ def run_place(ctx: Context, args: dict, final_home: bool, step_no: int) -> StepR
 
 def run_pick_place(ctx: Context, args: dict, final_home: bool, step_no: int) -> StepResult:
     held = ctx.tools.held_object
+    if getattr(ctx.tools, "unknown_held", None):
+        return StepResult("unsafe", UNKNOWN_HELD)
     if held is not None:
         if _names_held(ctx, (args.get("object") or {}).get("text") or ""):  # a precondition fact (no motion); Gemma decides
+            dest = (args.get("reference") or {}).get("text") or "<destination>"
             return StepResult("infeasible", f"#{held} is already in the gripper; pick_place starts with a grasp, so "
-                                            "nothing was executed")
+                                            f"nothing was executed. The operation for a held object is place: "
+                                            f"place relation={args.get('relation')} target={dest}")
         return StepResult("unsafe", f"the gripper already holds #{held}; place it before picking another object")
+    unsupported = _region_relation(args)
+    if unsupported is not None:
+        return unsupported
     task = {"object": args["object"], "relation": args["relation"], "reference": args["reference"],
             "frame": args.get("frame") or "robot"}
     return _skill(ctx, "pick_place", task, final_home, step_no)

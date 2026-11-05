@@ -6,6 +6,8 @@ Joint limits come from the URDF via control.kinematics.
 
 from __future__ import annotations
 
+import os
+
 import numpy as np
 
 ARM_JOINTS = [f"j{i}_joint" for i in range(1, 7)]
@@ -63,6 +65,24 @@ VIEW_POSES = {
 # and none is hidden behind the robot's base (the moving arm can still block some, as in a real cell).
 TABLE_CAMERA_POSITION = (1.5, 0.25, 1.8)  # m, world
 TABLE_CAMERA_TARGET = (0.0, 0.25, 0.0)  # point on the floor at the image centre
+
+
+def _scenario_camera(value: str | None):
+    """A scenario with its own work cell mounts the table camera elsewhere (scenarios/<name>.py TABLE_CAMERA). The
+    launchers export it as TABLE_CAMERA="ex,ey,ez,tx,ty,tz" (m) to the simulator and the agent alike, before anything
+    imports this module; unset or empty = the frozen cell's camera above."""
+    if not value:
+        return None
+    v = [float(c) for c in value.split(",")]
+    if len(v) != 6:
+        raise ValueError(f"TABLE_CAMERA={value!r}: six numbers ex,ey,ez,tx,ty,tz (m)")
+    return tuple(v[:3]), tuple(v[3:])
+
+
+# a work cell with its own camera frame has neither the frozen camera stand nor the microphone (scenarios/build.py hides them)
+SCENARIO_CELL = bool(_scenario_camera(os.environ.get("TABLE_CAMERA")))
+if SCENARIO_CELL:
+    TABLE_CAMERA_POSITION, TABLE_CAMERA_TARGET = _scenario_camera(os.environ["TABLE_CAMERA"])
 
 
 def table_camera_pose() -> np.ndarray:

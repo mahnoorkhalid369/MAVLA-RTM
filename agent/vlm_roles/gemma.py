@@ -13,7 +13,7 @@ class VLM(Protocol):
 
 
 class GemmaVLM:
-    """The project's Gemma 4 E2B (vlm/model.py), loaded once."""
+    """The project's Gemma 4 (E4B by default; agent/settings.py GEMMA_MODEL) via vlm/model.py, loaded once."""
 
     def __init__(self, model_path: str | None = None) -> None:
         """model_path: a local model folder (agent/settings.py GEMMA_MODEL); None = vlm/config.py's default."""

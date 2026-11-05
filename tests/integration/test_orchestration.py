@@ -178,9 +178,10 @@ def test_nondeterministic_planning_failure_is_still_replanned(tmp_path, monkeypa
     assert r["replans"] == 1  # the rejected re-plan counts against the budget; then Gemma had nothing more
 
 
-def test_infeasibility_goes_to_gemma_and_an_identical_retry_is_rejected(tmp_path, monkeypatch):
-    """Behaviour change (2026-10-18): the reachability check still refuses the motion, but the result is no longer
-    classified by its error text as 'never replan': Gemma sees it; an identical retry is rejected deterministically."""
+def test_a_measured_infeasible_object_stops_the_task_with_the_answer(tmp_path, monkeypatch):
+    """Behaviour change (2026-10-26, user): when the pick planner measures that the object cannot be picked (out of
+    reach), the supervisor answers with that and stops: no Gemma decision, no replan, no similar object picked instead.
+    (2026-10-18 to 2026-10-25 the result went to Gemma; live 2026-10-26 Gemma then looped on decompose.)"""
     from control.motion import PlanningError
     t = session([plan(PICK_A), plan(PICK_A)])
 
@@ -189,16 +190,16 @@ def test_infeasibility_goes_to_gemma_and_an_identical_retry_is_rejected(tmp_path
     monkeypatch.setattr(t, "plan_pick", unreachable)
     r, ev = run_in(tmp_path, "1", t)
     assert r["status"] == "FAILED" and r["outcome"] == "infeasible" and t.executed == []
-    assert "out of reach" in problems(t)[0]["event"]
-    assert [e["accepted"] for e in ev if e["kind"] == "replan"] == [False]
-    assert r["holding"] is None
+    assert problems(t) == [] and not [e for e in ev if e["kind"] == "replan"]  # Gemma was not asked
+    assert "is not possible" in r["message"] and "without trying another object" in r["message"]
+    assert len(r["plan"]) == 1 and r["holding"] is None
 
 
 # ------------------------------------------------------------------------------------- decomposition
 def _decomposer(t, subplan):
     calls = []
 
-    def decompose(goal, facts, ids, context="", menu=""):
+    def decompose(goal, facts, ids, context="", menu="", task_preds=()):
         calls.append((goal, facts, ids))
         return subplan
     t.roles.decompose = decompose

@@ -65,7 +65,7 @@ class StubTools:
     def update_world(self, obs):
         return []
 
-    def resolve(self, obs, text, exclude=()):
+    def resolve(self, obs, text, exclude=(), choose=True):
         from agent.vlm_roles import Resolution
         if text in self.ambiguous:
             return Resolution(id=None, ambiguous=True, candidates=self.ambiguous[text])
@@ -156,7 +156,7 @@ class GoalTools(StubTools):
         self.motion_count, self.view_cleared_at = 0, -1
         tools = self
 
-        def plan_goal(text, menu, context=""):
+        def plan_goal(text, menu, context="", already_met=None):
             tools.plan_calls.append(text)
             tools.plan_contexts.append(context)
             if not tools.plans:  # the scripted planner has nothing more to say: like Gemma failing twice
@@ -170,14 +170,15 @@ class GoalTools(StubTools):
         self.decide_calls: list = []  # what Gemma was given at each decision: {"event", "progress", "context"}
         self.continue_on_success = True  # scripted Gemma: "continue" after a subtask that went as planned
 
-        def decide(goal, progress, event, menu, has_pending, context=""):
+        def decide(goal, progress, event, menu, has_pending, context="", candidates=None, bound=None):
             """Scripted Gemma decision, validated like Roles.decide: "continue" when the last subtask went as planned
             and steps remain (continue_on_success); otherwise the scripted decisions in order (steps without a worker
             get the implementing one, as Gemma would name it); otherwise the next scripted plan is Gemma's re-plan (an empty plan = stop);
             with nothing left, Gemma fails (VLMFailure)."""
             from agent.vlm_roles import Decision, VLMFailure, check_decision
             from tests.support.runners import scripted_step
-            tools.decide_calls.append({"event": event, "progress": progress, "context": context, "menu": menu})
+            tools.decide_calls.append({"event": event, "progress": progress, "context": context, "menu": menu,
+                                       "candidates": candidates})
             ok = ", subtask achieved" in event or ", subtask done" in event
             if has_pending and ok and tools.continue_on_success:
                 d = Decision(action="continue", reason="the next planned subtask is still right")
@@ -259,7 +260,7 @@ class GoalTools(StubTools):
     def lexical_candidates(self, obs, text):
         return []
 
-    def resolve(self, obs, text, exclude=()):
+    def resolve(self, obs, text, exclude=(), choose=True):
         from agent.vlm_roles import Resolution
         if text in self.ambiguous:
             return Resolution(id=None, ambiguous=True, candidates=self.ambiguous[text])

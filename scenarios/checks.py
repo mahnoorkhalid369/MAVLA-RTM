@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from scenarios.core import (DECOR_MIN_RADIUS, KEEP_CLEAR, REACH_MAX, Scenario, overlaps, scenario_parts,
+from scenarios.core import (DECOR_MAX_REACH_Z, DECOR_MIN_RADIUS, KEEP_CLEAR, REACH_MAX, Scenario, overlaps, scenario_parts,
                                    world_parts)
 
 __all__ = ["grasp_feasibility", "placement_feasibility", "static_report", "top_visibility", "view_feasibility"]
@@ -51,6 +51,8 @@ def top_visibility(sc: Scenario, camera_xyz=None, robot: bool = True) -> dict:
     """Fraction of 9 points on each object's top face that the table camera sees (other colliders and, by
     default, the robot itself at HOME block the view)."""
     from control.robot import table_camera_pose
+    if camera_xyz is None and sc.view.get("table_camera"):  # the scenario mounts its own table camera
+        camera_xyz = sc.view["table_camera"][0]
     cam = np.asarray(camera_xyz if camera_xyz is not None else table_camera_pose()[:3, 3], float)
     fx, ob = scenario_parts(sc)
     rc, rr = _robot_spheres() if robot else (np.zeros((0, 3)), np.zeros(0))
@@ -165,14 +167,17 @@ def static_report(sc: Scenario, reach: bool = True) -> dict:
     problems = []
     for a, b, mm in overlaps(sc):
         problems.append(f"interpenetration {a} / {b}: {mm} mm")
+    keep_clear = [] if sc.view.get("table") else KEEP_CLEAR  # a table scene hides the frozen props (scenarios/build.py)
     for wp in fx + ob:  # props of the frozen default scene must stay clear
-        for c, r in KEEP_CLEAR:
+        for c, r in keep_clear:
             if _min_dist(wp, c) < r:
                 problems.append(f"{wp.name} inside the keep-clear zone at {c}")
     for d in sc.decor:
         for wp in world_parts(d.id, d.pos, d.yaw_deg, d.parts, collide_only=False):
             reach_r = _min_dist(wp)
-            if wp.half[2] > 0.002 and reach_r < DECOR_MIN_RADIUS:
+            bottom, top = wp.centre[2] - wp.half[2], wp.centre[2] + wp.half[2]
+            in_arm_height = top > 0.002 and bottom < DECOR_MAX_REACH_Z  # under the table top or above the arm: no matter
+            if wp.half[2] > 0.002 and in_arm_height and reach_r < DECOR_MIN_RADIUS:
                 problems.append(f"decor {wp.name} within {DECOR_MIN_RADIUS} m of the base ({reach_r:.2f} m)")
     for o in sc.objects:
         r = np.hypot(*o.pos[:2])

@@ -27,6 +27,7 @@ from agent.ask import Answer, Candidate, Question
 from agent.eventlog import EventLog
 from config.agent import Budgets
 from agent.vlm_roles import VLMFailure
+from config import layout
 from control.motion import PlanningError
 
 STATES = ["OBSERVING", "LOCALIZING", "PLANNING_GRASP", "APPROACHING", "GRASPING",
@@ -41,6 +42,7 @@ class AgentState(TypedDict, total=False):
     task: dict
     object_id: int | None
     reference_id: int | None
+    reference_region: str | None  # a fixed region of the calibrated layout (config/layout.py) as the destination
     retries: dict
     recover: dict  # {"cls": ..., "reason": ...} while RECOVERING
     questions: list
@@ -122,6 +124,9 @@ class PickPlaceWorkflow:
         return a
 
     def _cancelled(self, a: Answer, question: str) -> dict:
+        if a.kind == "text":  # the person answered in words: the step ends and the supervisor (Gemma) reads them
+            return {"next": "FAILED", "failure": {"cls": "answered", "reason": f"{question} -> the user answered in "
+                    f"words: {a.raw!r}", "answer_source": a.source}}
         why = {"cancel": f"you answered {a.raw!r}", "eof": "end of input (nobody could answer)",
                "timeout": f"no answer within {getattr(self.responder, 'timeout_s', 0):.0f} s"}[a.kind]
         return {"next": "CANCELLED", "failure": {"cls": "asked", "reason": f"{question} -> {why}", "answer_source": a.source}}
@@ -200,7 +205,11 @@ class PickPlaceWorkflow:
             self.log("identity", text=ref["text"], world_id=wid, frame_id=obs.frame_id,
                      reason="not measured in this frame: matching again")
         try:
-            exclude = {k for k, v in obs.object_ids.items() if v in rejected}
+            # a destination is never the object being put down: the held one (seen lifted in the gripper) or the one
+            # this pick_place moves (live 2026-10-26: the held cube was a "red tray" candidate). A physical fact, not
+            # a judgement of the words.
+            moving = {w for w in (self.tools.held_object, self.ctx.get("moving_id")) if w is not None} if role == "reference" else set()
+            exclude = {k for k, v in obs.object_ids.items() if v in rejected or v in moving}
             r = self.tools.resolve(obs, ref["text"], exclude=exclude) if exclude else self.tools.resolve(obs, ref["text"])
         except VLMFailure as exc:
             return None, self._fail(state, "perception", str(exc))
@@ -223,7 +232,17 @@ class PickPlaceWorkflow:
             mark, user_chosen = a.mark, True
             if obs.object_ids.get(mark) is not None:  # remember the clarification for retries / later steps
                 self.tools.resolved_refs[ref["text"].strip().lower()] = obs.object_ids[mark]
-        if ref.get("relation") and ref.get("anchor"):
+        anchor_region = layout.region(ref.get("anchor")) if ref.get("relation") else None
+        if anchor_region is not None:  # "in" a fixed region: the measured footprint against its calibrated outline
+            g = obs.measured[mark]
+            ok = ref["relation"] == "in" and self.tools.in_region(g, anchor_region)["inside"]
+            self.log("location_check", text=ref["text"], mark=mark, relation=ref["relation"], anchor=anchor_region.id,
+                     anchor_mark=None, holds=ok)
+            if not ok:
+                return None, {"next": "FAILED", "failure": {"cls": "perception", "reason": f"could not verify that "
+                              f"{ref['text']!r} is {ref['relation']} {anchor_region.id} ({anchor_region.name}) from the "
+                              f"measured position"}}
+        elif ref.get("relation") and ref.get("anchor"):
             try:
                 an = self.tools.resolve(obs, ref["anchor"])
             except VLMFailure as exc:
@@ -236,11 +255,19 @@ class PickPlaceWorkflow:
             self.log("confirmation", role=role, mark=mark, text=ref["text"], match="user_selected", reason="chosen by the user")
             self.ctx["bound"][ref["text"]] = obs.object_ids[mark]
             return mark, None
+        # the crop shows what the object looks like, not where it is or what it relates to: it is checked against
+        # Gemma's appearance words only (live 2026-11-04: "... at x +429, y +496 mm" said "no" to the right object)
+        words = ref["text"]
         try:
-            c = self.tools.confirm(obs, mark, ref["text"])
+            spec = self.tools.reference_spec(ref["text"]) if hasattr(self.tools, "reference_spec") else None
+            words = (spec.appearance or "").strip() or ref["text"] if spec is not None else ref["text"]
+        except VLMFailure:
+            pass
+        try:
+            c = self.tools.confirm(obs, mark, words)
         except VLMFailure as exc:
             return None, self._fail(state, "perception", str(exc))
-        self.log("confirmation", role=role, mark=mark, text=ref["text"], **c.model_dump())
+        self.log("confirmation", role=role, mark=mark, text=ref["text"], checked_words=words, **c.model_dump())
         if c.match == "no":  # not this one: later attempts in this task leave it out (by world id, stable across frames)
             if obs.object_ids.get(mark) is not None:
                 self.ctx.setdefault("rejected", {}).setdefault(ref["text"], set()).add(obs.object_ids[mark])
@@ -268,6 +295,11 @@ class PickPlaceWorkflow:
 
     def _localize(self, state) -> dict:
         obs, task = self.ctx["obs"], state["task"]
+        region = layout.region((task.get("reference") or {}).get("text")) if self.mode != "pick" else None
+        if self.mode == "place" and region is not None:  # a fixed region: its calibrated geometry, no matching
+            self._log_region(obs, None, self.tools.held_object, region, self.tools.held_geom)
+            return {"next": "PLANNING_GRASP", "object_id": self.tools.held_object, "reference_id": None,
+                    "reference_region": region.id}
         if self.mode == "place":  # the object is the held one; only the destination is resolved
             m_ref, upd = self._resolve_one(state, obs, task["reference"], "reference")
             if upd:
@@ -280,11 +312,16 @@ class PickPlaceWorkflow:
         m_obj, upd = self._resolve_one(state, obs, task["object"], "object")
         if upd:
             return upd
+        self.ctx["moving_id"] = obs.object_ids.get(m_obj)  # never this step's destination
         if self.mode == "pick":
             oid = obs.object_ids[m_obj]
             self.log("localized", frame_id=obs.frame_id, object_mark=m_obj, object_id=oid, reference_mark=None,
                      reference_id=None, object=self.tools.world.objects[oid].geometry, reference={})
             return {"next": "PLANNING_GRASP", "object_id": oid, "reference_id": None}
+        if region is not None:
+            oid = obs.object_ids[m_obj]
+            self._log_region(obs, m_obj, oid, region, self.tools.world.objects[oid].geometry)
+            return {"next": "PLANNING_GRASP", "object_id": oid, "reference_id": None, "reference_region": region.id}
         m_ref, upd = self._resolve_one(state, obs, task["reference"], "reference")
         if upd:
             return upd
@@ -295,6 +332,11 @@ class PickPlaceWorkflow:
         self.log("localized", frame_id=obs.frame_id, object_mark=m_obj, object_id=oid, reference_mark=m_ref, reference_id=rid,
                  object=self.tools.world.objects[oid].geometry, reference=self.tools.world.objects[rid].geometry)
         return {"next": "PLANNING_GRASP", "object_id": oid, "reference_id": rid}
+
+    def _log_region(self, obs, mark, oid, region, geom) -> None:
+        self.log("localized", frame_id=obs.frame_id, object_mark=mark, object_id=oid, reference_mark=None, reference_id=None,
+                 reference_region=region.id, region_name=region.name, object=geom or {},
+                 reference={"centre": list(region.centre), "size": list(region.size)})
 
     def _unreachable_reason(self, state, error: str) -> str | None:
         """For an out-of-reach grasp: one clear statement when no gripper orientation the arm can take picks the
@@ -308,24 +350,33 @@ class PickPlaceWorkflow:
             return None
         b = r["bearing_deg"]  # robot frame: 0 = straight ahead, + = to the right
         side = "ahead" if abs(b) <= 45 else "behind the base" if abs(b) >= 135 else ("to the right" if b > 0 else "to the left")
-        where = (f"object #{oid} at x {r['centre'][0] * 1000:+.0f}, y {r['centre'][1] * 1000:+.0f} mm "
+        marks = {w: m for m, w in (getattr(self.ctx.get("obs"), "object_ids", None) or {}).items()}
+        shown = f" (number {marks[oid]} in the camera picture)" if oid in marks else ""
+        where = (f"object #{oid}{shown} at x {r['centre'][0] * 1000:+.0f}, y {r['centre'][1] * 1000:+.0f} mm "
                  f"({r['distance_m']:.2f} m from the base, {side})")
         if not r["any_orientation"]:
             return f"No possible gripper orientation can pick up {where}: it is outside the arm's range."
-        return (f"No possible gripper orientation can pick up {where}: the gripper reaches it only tilted "
-                f"{r['tilt_deg']} deg from vertical, and grasps are made from above.")
+        from control.skills import SkillParams
+        limit = SkillParams().max_tilt_deg
+        if r["tilt_deg"] is not None and r["tilt_deg"] > limit:
+            return (f"No possible gripper orientation can pick up {where}: the gripper reaches it only tilted "
+                    f"{r['tilt_deg']} deg from vertical, beyond the {limit:.0f} deg limit for tilted grasps.")
+        return (f"Neither a top-down nor a tilted grasp (up to {limit:.0f} deg) can pick up {where}: the hand reaches that "
+                f"point only tilted {r['tilt_deg']} deg or more, and no grasp with the pads on two of its faces passed "
+                "the reach and collision checks of the approach, grasp and lift.")
 
     def _planning_grasp(self, state) -> dict:
         task = state["task"]
         try:
             q = self.tools.bridge.q()
+            region = {"region": state["reference_region"]} if state.get("reference_region") else {}  # a fixed region
             if self.mode == "pick":
                 plan = self.tools.plan_pick(state["object_id"], q)
             elif self.mode == "place":
-                plan = self.tools.plan_place_held(task["relation"], state["reference_id"], task.get("frame", "robot"), q)
+                plan = self.tools.plan_place_held(task["relation"], state["reference_id"], task.get("frame", "robot"), q, **region)
             else:
                 plan = self.tools.plan_pick_place(state["object_id"], task["relation"], state["reference_id"],
-                                                  task.get("frame", "robot"), q)
+                                                  task.get("frame", "robot"), q, **region)
         except PlanningError as exc:
             if self.tools.deterministic(str(exc)):  # re-observing cannot change it: no retry, report it as such
                 reason = self._unreachable_reason(state, str(exc)) or str(exc)
@@ -333,10 +384,13 @@ class PickPlaceWorkflow:
                 return {"next": "FAILED", "failure": {"cls": "infeasible", "reason": reason}}
             return self._fail(state, "planning", str(exc))
         self.ctx["plan"] = plan
-        summary = {"grasp": plan.grasp, "target_centre_mm": [round(v * 1000, 1) for v in plan.target_centre],
-                   "target_top_mm": round(plan.target_top * 1000, 1), "relation": plan.relation,
-                   "held": {"height_mm": round(plan.held.height * 1000, 1), "grip_depth_mm": round(plan.held.grip_depth * 1000, 1),
-                            "width_mm": round(plan.held.width * 1000, 1), "length_mm": round(plan.held.length * 1000, 1)}}
+        mm = lambda v: round(float(v) * 1000, 1)  # noqa: E731  plain floats: the summary is checkpointed (msgpack)
+        summary = {"grasp": {k: (float(v) if isinstance(v, (int, float, np.floating)) and not isinstance(v, bool) else v)
+                             for k, v in plan.grasp.items()},
+                   "target_centre_mm": [mm(v) for v in plan.target_centre], "target_top_mm": mm(plan.target_top),
+                   "relation": plan.relation,
+                   "held": {"height_mm": mm(plan.held.height), "grip_depth_mm": mm(plan.held.grip_depth),
+                            "width_mm": mm(plan.held.width), "length_mm": mm(plan.held.length)}}
         self.log("plan", **summary, mode=self.mode)
         return {"next": "TRANSPORTING" if self.mode == "place" else "APPROACHING", "plan": summary}
 
@@ -352,9 +406,14 @@ class PickPlaceWorkflow:
         p = self.ctx["plan"]
         v = self.tools.verify_contact(p.approach[1].position)
         vs = list(state.get("verifications", [])) + [v]
-        if not v["pass"]:
+        borderline = v.get("stopped_short_deg", 0.0) >= self.tools.tol.empty_deg if hasattr(self.tools, "tol") else False
+        if not v["pass"] and not borderline:
             out = self._fail(state, "grasp", "the fingers closed without stalling on the object (no contact)")
             return {**out, "verifications": vs}
+        if not v["pass"]:  # between "clearly stalled" and "closed on nothing" (thin objects): the check after the lift,
+            # with the wrist camera looking between the fingers, decides (live 2026-10-26: 1.26 deg, the block was held)
+            self.log("verification", check="contact_borderline", stopped_short_deg=v.get("stopped_short_deg"),
+                     decision="lift, then the retention check (fingers + wrist camera) decides")
         self.tools.set_held(p, p.approach[1].position)
         return {"next": "TRANSPORTING", "verifications": vs}
 
@@ -465,6 +524,7 @@ class PickPlaceWorkflow:
         status = final["timeline"][-1]["state"]
         report = {"instruction": instruction, "status": status, "seconds": round(time.monotonic() - t0, 1),
                   "task": final.get("task"), "object_id": final.get("object_id"), "reference_id": final.get("reference_id"),
+                  "reference_region": final.get("reference_region"),
                   "plan": final.get("plan"), "verifications": final.get("verifications"), "failure": final.get("failure"),
                   "questions": final.get("questions"), "retries": final.get("retries"), "timeline": final["timeline"],
                   "home": self.final_home}
@@ -481,6 +541,8 @@ def honest_message(r: dict) -> str:
     placed = (f"placed {place[-1]['xy_error_mm']} mm from the planned spot, top {place[-1]['z_error_mm']:+} mm, "
               f"tilt {place[-1]['tilt_deg']} deg") if place else ""
     if s == "COMPLETED":
+        if not place:  # a pick: nothing was placed, the grasp is what was checked
+            return f"Done: holding object #{r.get('object_id')} (finger contact confirmed after the lift)."
         back = f"; back at HOME (max joint error {home[-1]['max_error_deg']} deg)" if home else ""
         return f"Done (verified by the table camera): {placed}{back}."
     if s == "CANCELLED":

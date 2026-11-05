@@ -1,0 +1,22 @@
+# Experiment 1: the current integrated system (E4B 4-bit, embeddings in RAM), repeated pick-and-place.
+#   .venv-seg/bin/python -m gpumon bench gpumon/examples/exp1_baseline.toml [--dry-run]
+name = "exp1_baseline"
+repeats = 5
+hz = 10
+timeout_s = 2400          # per run (model load + simulator start + all instructions)
+cooldown_s = 20           # idle seconds between runs, so each starts from the same memory state
+torch_hook = true         # PyTorch allocated / reserved from inside the agent (gpumon/torch_hook)
+launcher = "launch/agent.sh"
+# fixed scene: same scenario / difficulty / seed every run; clarification questions are answered "cancel"
+launcher_args = ["--headless", "--motion", "real", "--ask", "scripted",
+                 "--scenario", "workcell", "--difficulty", "hard", "--seed", "42"]
+# EDIT: use instructions that are valid for the scene above
+instructions = [
+    "Take a look at your surroundings.",
+    "Put the red cube on the green cube.",
+]
+
+[[config]]
+label = "e4b_4bit_offload"
+gemma = "models/gemma-4-E4B-it"
+env = { VLM_QUANTIZATION = "4bit", VLM_EMBEDDINGS_ON_CPU = "1" }

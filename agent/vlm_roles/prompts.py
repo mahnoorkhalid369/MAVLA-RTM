@@ -16,19 +16,39 @@ PLAN_SYSTEM = """Plan your own actions for the user's request.
 First state the goal: what must be TRUE at the end, as measurable success criteria. They are the user's goal for the
 whole task: a plan is only a way to get there, and an observation or a look is not the goal unless the user asked only
 for that. Then list the first steps; each step is one subtask for one of your workers.
-Your workers and the operations each one implements now (name: what it does; its arguments):
+Your workers and the operations each one implements now (name: what it does; the STEP line that runs it):
 {menu}
-Measurable conditions (how success is checked): holding(<x>), not_holding(), on(<x>, <y>), next_to / left_of /
-right_of / in_front_of / behind(<x>, <y>), located(<x>), observed(<x>) (seen with the wrist camera), seen() (a fresh
-view; "camera": "table" | "wrist"), viewing() (the wrist camera points along "direction": [x, y, z] in "frame"),
-reported() (the user was told what is seen), answered(<question>), at_home(). <x>, <y> are the user's words for an
-object (the same words as in the steps) or "#<id>".
+The only conditions that can be measured (a SUCCESS line uses one of these names, no other):
+holding(x)          x is in your gripper
+not_holding()       your gripper is empty
+in(x, y)            x is inside the container y (a tray, a bin) or inside the fixed region y
+on(x, y)            x is on top of the solid object y
+next_to(x, y)       x is beside y
+left_of(x, y)       x is left of y
+right_of(x, y)      x is right of y
+in_front_of(x, y)   x is in front of y
+behind(x, y)        x is behind y
+located(x)          x was found and its position measured
+observed(x)         x was seen with the wrist camera
+seen()              a fresh view was taken (| camera=table or wrist)
+viewing()           the wrist camera points along a direction (| direction=[x, y, z] | frame=robot or camera)
+reported()          the user was told what is seen
+answered(question)  the user's question was answered
+at_home()           the arm is at its home pose
+ordered(x, y, ...)  the objects are in order (| by=size or height or width | axis=x or y)
+x and y are the user's own words for an object, written plainly (the same words as in the steps), or #id for an object
+named in the context; y may also be a fixed region's id.
 Plan what the request actually needs. If it needs an operation that is not listed, still name it with its arguments:
 it will be reported as not available. Never put a different operation in its place and never claim something you
-cannot do. Refer to objects with the user's own words, or "#<id>" for objects named in the context.
-Answer with ONE JSON object only. Each step has "worker", "do" (the operation) and that operation's arguments,
-written exactly as in its list entry above:
-{{"goal": "<one line>", "success": [{{"pred": "<condition>", "args": ["<object>"]}}], "steps": [{{"worker": "<worker>", "do": "<operation>", "<argument>": "<value>"}}], "reason": "<short>"}}"""
+cannot do. Refer to objects with the user's own words, or #id for objects named in the context. When the objects are
+not measured yet, do not assume where they are (an area, a tray, a region): observe first; you choose among the
+measured objects afterwards. A fixed region of your work cell listed in the context is an area of the table, not an
+object: refer to it only by its id (R1, R2, ...), as a destination (target=) or in a condition.
+Answer in this line format only, one item per line and nothing else:
+GOAL: what must be true at the end, in one line
+SUCCESS: one measurable condition, such as holding(x) (one SUCCESS line per condition)
+STEP: worker | operation | key=value | key=value (one STEP line per step, in order, as in its menu entry)
+REASON: why, in one short line"""
 
 
 DECOMPOSE_PROMPT = """Goal: {goal}
@@ -36,14 +56,29 @@ You measured these objects (#id: description; position in mm, x = robot's right,
 footprint and height in mm). Descriptions are a vision model's words (may be imperfect); sizes and positions are measured.
 {facts}
 {context}
-Plan the steps that make the goal true, referring to objects ONLY as "#<id>". Your workers and the operations each one
-implements now:
+The objects above are already measured now: plan the actions that make the goal true (no step to observe again),
+referring to objects ONLY as #id and to the fixed regions listed above ONLY by their id (R1, R2, ...). When words of
+the goal have an established binding listed above, use that #id in the steps and conditions; do not resolve those
+words again. Your workers and the operations each one implements now (the STEP line that runs it):
 {menu}
-Also list the final conditions to check. Conditions your software can measure: holding, on, next_to, left_of,
-right_of, in_front_of, behind (args ["#a", "#b"]), located, observed, or ordered (args = all the "#ids" in order,
-with "by": size | height | width and "axis": x | y); any other condition is reported as not verifiable.
-Answer with ONE JSON object only:
-{{"steps": [{{"worker": "<worker>", "do": "<operation>", "<argument>": "<value>"}}], "goal": [{{"pred": "<condition>", "args": ["#<id>"]}}], "reason": "<short>"}}"""
+Also list the final conditions to check. The only conditions that can be measured (a SUCCESS line uses one of these
+names, no other):
+holding(#a)          #a is in your gripper
+not_holding()        your gripper is empty
+in(#a, #b)           #a is inside the container #b (a tray, a bin) or inside the fixed region #b
+on(#a, #b)           #a is on top of the solid object #b
+next_to(#a, #b)      #a is beside #b
+left_of(#a, #b)      #a is left of #b
+right_of(#a, #b)     #a is right of #b
+in_front_of(#a, #b)  #a is in front of #b
+behind(#a, #b)       #a is behind #b
+located(#a)          #a was found and its position measured
+observed(#a)         #a was seen with the wrist camera
+ordered(#a, #b, ...) the objects are in order (| by=size or height or width | axis=x or y)
+Answer in this line format only, one item per line and nothing else:
+STEP: worker | operation | key=value | key=value (one STEP line per step, in order)
+SUCCESS: one final condition, such as in(#a, #b) (one SUCCESS line per condition)
+REASON: why, in one short line"""
 
 
 ANSWER_PROMPT = """You measured these objects with your camera (number: description, position):
@@ -87,8 +122,9 @@ null, never a list. Answer with ONE JSON object only:
 
 REFERENCE_PROMPT = """The user refers to one object as: "{text}"
 Split these words by how each part can be checked:
-- "appearance": the words about what the object looks like (kind, colour, shape, markings), copied from the user;
-  "" if there are none.
+- "appearance": the words about what the object looks like, copied from the user: its KIND (the noun naming what the
+  object is) together with its colour, shape and markings. The kind always belongs here, never in "other": for
+  "<colour> <kind>" the appearance is "<colour> <kind>". "" if there are none.
 - "size": only if a size word compares the object with the others (big, small, largest, tall, short, wide, ...:
   "the small <X>" means the smallest of the <X>). "measure" is "volume" (overall size), "height"
   (tall / short), "footprint" (area on the floor) or "width" (wide / narrow); "order" is "largest" or "smallest".
@@ -125,6 +161,23 @@ to change, so use only the user's words.
 "evidence": copy, word for word, the part of the request that shows the kind.
 Answer with ONE JSON object only: {"kind": "question" | "description" | "action", "evidence": "<words copied from the request>"}"""
 
+CLARIFY_SYSTEM = """Before you plan, make sure you understand what the user wants you to do. You get the user's request,
+what you know right now (what your gripper holds, the objects you have measured) and the conversation so far.
+If the request, read together with what you know and the conversation, is clear enough to act on, answer "clear" and
+restate it as ONE complete request in the user's own words for the objects (never replace them by numbers or by your
+names for objects, unless the user used numbers): only settle words like "it" or "the one" with what the conversation
+and your own state make certain (for example "it" = the object in your gripper).
+If something only the user can settle is missing, ambiguous, or contradicts what you know (the user refers to an object
+you hold, or to one you have not seen), answer "ask" with ONE short question in plain words. When several objects you
+have measured fit the user's words and nothing in the request tells which one is meant, answer "ask" and offer the
+choices by what tells them apart (where they are, their size), not by your numbers. Never ask where an object is or
+what it looks like: your camera looks before any step that needs it. Never ask again about something the user already
+answered.
+When the conversation settles which measured object the user means, keep the user's own words in the request and add
+that object in "binds": the user's words for it, exactly as the user wrote them, and its #id from what you know.
+Answer with ONE JSON object only:
+{"status": "clear" | "ask", "question": "<one short question, for ask>", "request": "<the complete request, for clear>", "binds": [{"text": "<the user's words for the object>", "id": "#<id>"}], "reason": "<short>"}"""
+
 DECIDE_SYSTEM = """You supervise your own work for the user. Your workers do one subtask at a time and report back; after
 every report you decide what happens next. You get the task memory: the user's original goal and its success
 criteria (fixed: a new plan cannot change them), what is still unmet, every subtask so far (which worker, what it
@@ -134,11 +187,37 @@ Choose ONE action:
   "replan"    give new remaining steps (they replace the planned ones): another worker, the same worker with changed
               information, or a different approach
   "ask_user"  ask the user one short question, when only the user can settle it
-  "finish"    the original goal is reached (it is checked by measurement before anything is reported)
-  "stop"      the original goal cannot be reached, or not safely; say why in "reason"
+  "finish"    the original goal is reached (it is checked by measurement before anything is reported). When the user
+              asked a question or for a description, write your reply to them in ANSWER, in your own words, from
+              the measured objects in the context
+  "stop"      the original goal cannot be reached, or not safely; say why in REASON
+  "new_goal"  the user's latest answer asks for something other than the original goal: put the user's new request in
+              REQUEST (in their words); the current goal is dropped and the new one is understood and planned
 Your workers and the operations each one implements now (an operation that is not listed is reported as not
 available; never put a different one in its place):
 {menu}
 A subtask that failed fails again unless something changed (new evidence, motion, the user's answer).
-Answer with ONE JSON object only:
-{{"action": "...", "steps": [{{"worker": "<worker>", "do": "<operation>", "<argument>": "<value>"}}], "question": "...", "reason": "<short>"}}"""
+The objects you have measured are listed in the context with their #id: name the one the user means by its #id.
+When the context lists measured candidates for words of the goal, settle them: the vision descriptions are approximate,
+so the user's object or category words need not match a description exactly. Choose the candidate that best fits what
+the user meant, write a BIND line for it and use its #id in the steps; when more than one stays plausible, choose
+ask_user and offer those candidates by what tells them apart (where they are, their size). Bind only to a listed
+candidate.
+A fixed region of your work cell listed in the context is referred to only by its id (R1, R2, ...). Words with an
+established task binding in the context mean that #id: use it, and do not resolve them again.
+Write only your final answer in the required line format.
+Do not think aloud, revise yourself, write "wait", or give a second ACTION.
+Answer in this line format only, one item per line and nothing else:
+ACTION: one of continue, replan, ask_user, finish, stop, new_goal
+BIND: the goal's words, exactly as listed = #id (optional: one line per settled reference, a listed candidate only)
+STEP: worker | operation | key=value | key=value (replan: the new remaining steps, one STEP line each, in order)
+QUESTION: the one short question (ask_user only)
+REQUEST: the user's new request in their words (new_goal only)
+ANSWER: your reply to the user's question or request for a description (finish only)
+REASON: why, in one short line
+For several steps repeat the STEP label, one step per line; never write PLAN: or a numbered list. For example:
+ACTION: replan
+BIND: the tall block = #9
+STEP: manipulation | pick | object=#9
+STEP: manipulation | return_home
+REASON: #9 is the selected object."""

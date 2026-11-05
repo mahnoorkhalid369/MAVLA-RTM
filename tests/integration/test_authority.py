@@ -53,7 +53,7 @@ def test_request_classifier_sees_only_the_request_and_is_validated():
 def test_question_decomposed_into_pick_and_place_moves_nothing(tmp_path):
     """The live failure (current-system test #4): a tube/vial question decomposed into pick #17 + place on #8."""
     t = question_tools([plan(("observe", {}), ("decompose", {"goal": "identify which objects are tubes and which are vials"}))])
-    t.roles.decompose = lambda goal, facts, ids, context="", menu="": SubPlan.model_validate(
+    t.roles.decompose = lambda goal, facts, ids, context="", menu="", task_preds=(): SubPlan.model_validate(
         {"steps": [{"do": "pick", "object": "#1"}, {"do": "place", "relation": "on", "target": "#2"}],
          "goal": [{"pred": "on", "args": ["#1", "#2"]}], "reason": "group them"})
     t.decisions = [{"action": "replan", "steps": [{"do": "answer", "question": QUESTION}]}]  # the question is unanswered

@@ -133,6 +133,18 @@ def main(controls=None, on_directive=None, argv=None) -> int:
         print(settings.summary(), flush=True)
         ap.set_defaults(**settings.run_defaults())
     a = ap.parse_args(argv)
+    if a.scenario:  # perception must use the camera pose the simulator renders (control/robot.py TABLE_CAMERA)
+        import scenarios
+        want = scenarios.table_camera(a.scenario)
+        if os.environ.get("TABLE_CAMERA", "") != want:
+            print(f"[agent] scenario {a.scenario!r} mounts the table camera at TABLE_CAMERA={want or '(frozen cell)'}, but "
+                  f"this process has {os.environ.get('TABLE_CAMERA') or '(frozen cell)'}: start through ./launch/agent.sh, "
+                  f"or export TABLE_CAMERA={want}", flush=True)
+            return 2
+        if os.environ.get("WORKCELL_LAYOUT", "") != scenarios.layout(a.scenario):  # its calibrated regions (config/layout.py)
+            print(f"[agent] scenario {a.scenario!r} has another calibrated layout than this process's WORKCELL_LAYOUT: "
+                  f"start through ./launch/agent.sh", flush=True)
+            return 2
     controls = controls_for(a, controls)
     print(f"[agent] motion: {controls.motion.upper()}" + {"blocked": " (no robot command is sent; --motion real to move)",
                                                          "dry_run": " (motions are planned and logged, not sent)",

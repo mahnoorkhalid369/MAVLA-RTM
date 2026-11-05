@@ -16,6 +16,8 @@ scenarios: it only sees the cameras, joints and measured objects.
 Registered now:
     default         default.py      the frozen cube scene of the manipulation baseline (referenced, not copied)
     laboratory      laboratory.py   procedural sample-handling bench, easy / medium / hard x seed
+    workcell        workcell.py     table work cell: pickup area, 3 x 3 arrangement mat, red / blue / green trays;
+                                    its own overhead front table camera (TABLE_CAMERA), easy / medium / hard x seed
     ap_occlusion    scenes/ap_occlusion.json    hidden objects (active perception)
     ap_categories   scenes/ap_categories.json   new object categories (active perception)
 
@@ -24,13 +26,16 @@ build.py (Isaac side: install / populate), checks.py (offline design checks:
 python -m scenarios.checks --scenario laboratory --difficulty easy --seed 42 --out design.json).
 
 Every scenario shares the work cell of the frozen base scene (robot, table camera on its stand, microphone prop);
-config/perception.py and frozen control/robot.py describe that cell.
+config/perception.py and frozen control/robot.py describe that cell. A scenario may mount the table camera elsewhere
+(TABLE_CAMERA in its module, table_camera() below): the launchers export it to the simulator and the agent. Its
+calibrated fixed regions (layout() in its module, layout() below) are exported to the agent as WORKCELL_LAYOUT.
 Simulator:  ./launch/sim.sh --scenario <name> [--difficulty D --seed N]
 Validation: ./launch/evaluate.sh validate-scenarios --scenario laboratory
 Docs:       docs/scenarios/README.md, docs/scenarios/LABORATORY.md
 """
 from __future__ import annotations
 
+import json
 import pkgutil
 from importlib import import_module
 from pathlib import Path
@@ -69,6 +74,24 @@ def kind(name: str) -> str | None:
 def scene_file(name: str) -> Path:
     """The JSON file of a fixed scene."""
     return SCENES / f"{name}.json"
+
+
+def table_camera(name: str) -> str:
+    """The scenario's own table-camera mount as TABLE_CAMERA="ex,ey,ez,tx,ty,tz" (control/robot.py), or "" for the frozen
+    cell's camera. A procedural scenario declares it as TABLE_CAMERA = ((ex, ey, ez), (tx, ty, tz)) in its module."""
+    if name not in SCENARIOS:
+        return ""
+    cam = getattr(import_module(SCENARIOS[name]), "TABLE_CAMERA", None)
+    return ",".join(f"{v:g}" for v in (*cam[0], *cam[1])) if cam else ""
+
+
+def layout(name: str) -> str:
+    """The scenario's calibrated fixed regions as WORKCELL_LAYOUT (JSON; config/layout.py reads it), or "" when it
+    declares none. A procedural scenario declares them as layout() -> [{"id", "name", "centre", "size", ...}]."""
+    if name not in SCENARIOS:
+        return ""
+    fn = getattr(import_module(SCENARIOS[name]), "layout", None)
+    return json.dumps({"scenario": name, "regions": fn()}, separators=(",", ":")) if fn else ""
 
 
 def generate(name: str, difficulty: str = "easy", seed: int = 0) -> Scenario:

@@ -88,7 +88,7 @@ def test_a_failed_subgoal_returns_to_gemma_with_the_evidence_and_the_task_memory
               misplace=True)
     plan_goal = t.roles.plan_goal
 
-    def planner(text, menu, context=""):  # after the first plan, placements land where they are asked to
+    def planner(text, menu, context="", already_met=None):  # after the first plan, placements land where they are asked to
         p = plan_goal(text, menu, context)
         t.misplace = len(t.plan_calls) < 2
         return p

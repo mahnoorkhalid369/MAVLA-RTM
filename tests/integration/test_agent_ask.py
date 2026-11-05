@@ -37,12 +37,17 @@ def test_a_listed_number_selects_one_candidate(text, mark):
     assert a is not None and a.kind == "choice" and a.mark == mark, why
 
 
-@pytest.mark.parametrize("text, reason", [("9", "not one of"), ("1 or 3", "answer with one of the numbers"),
-                                          ("the gold one", "answer with one of the numbers"),
-                                          ("nearest", "answer with one of the numbers"), ("object 7", "answer with one")])
-def test_anything_else_is_explained_and_not_interpreted(text, reason):
+def test_a_number_that_is_no_object_is_explained():
+    a, why = parse_answer("9", Q)
+    assert a is None and "not one of" in why
+
+
+@pytest.mark.parametrize("text", ["1 or 3", "the gold one", "nearest", "object 7", "you already have it in your grasp"])
+def test_words_are_the_users_answer_passed_on_as_typed(text):
+    """2026-10-26 (user's decision): an answer in words is never rejected; it goes to the supervisor (Gemma) as typed.
+    Live: "you already have block in your grasp" was refused as "not a number"."""
     a, why = parse_answer(text, Q)
-    assert a is None and reason in why
+    assert a.kind == "text" and a.raw == text and a.mark is None and why == ""
 
 
 @pytest.mark.parametrize("text", ["", "   "])
@@ -50,9 +55,12 @@ def test_an_empty_line_is_no_choice(text):
     assert parse_answer(text, Q)[0].kind == "cancel"
 
 
-def test_words_do_not_cancel_or_choose():
-    for text in ("cancel", "stop", "yes", "no", "the yellow one"):
-        assert parse_answer(text, Q)[0] is None
+def test_words_never_choose_a_number_and_cancel_only_says_cancel():
+    for text in ("yes", "no", "the yellow one"):
+        a = parse_answer(text, Q)[0]
+        assert a.kind == "text" and a.mark is None  # words are passed on, never turned into a choice here
+    for text in ("cancel", "stop", "none"):
+        assert parse_answer(text, Q)[0].kind == "cancel"
 
 
 # ------------------------------------------------------------------------- the terminal responder
@@ -66,11 +74,13 @@ def test_terminal_shows_ids_descriptions_and_positions_then_waits_for_input():
     assert "answer>" in shown
 
 
-def test_terminal_repeats_the_question_after_an_invalid_answer():
-    resp, out = terminal("9\nyellow\n3\n")
+def test_terminal_repeats_the_question_after_a_number_that_is_no_object_and_passes_words_on():
+    resp, out = terminal("9\n3\n")
     a = resp(Q)
-    assert a.mark == 3 and [r["input"] for r in a.attempts] == ["9", "yellow"]
-    assert out.getvalue().count("Please answer again") == 2
+    assert a.mark == 3 and [r["input"] for r in a.attempts] == ["9"] and out.getvalue().count("Please answer again") == 1
+    resp, _ = terminal("the yellow one\n")
+    a = resp(Q)
+    assert a.kind == "text" and a.raw == "the yellow one"
 
 
 def test_terminal_eof_cancels_by_policy():

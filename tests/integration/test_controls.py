@@ -144,7 +144,7 @@ def test_disabled_capabilities_show_in_this_supervisors_menu_only(tmp_path):
     menus = []
     t = GoalTools([plan(("observe", {}), ("describe_scene", {}))])
     plan_goal = t.roles.plan_goal
-    t.roles.plan_goal = lambda text, menu, context="": (menus.append(menu), plan_goal(text, menu, context))[1]
+    t.roles.plan_goal = lambda text, menu, context="", already_met=None: (menus.append(menu), plan_goal(text, menu, context))[1]
     r, _ = run_supervisor(tmp_path, t, ExecutionControls(disabled={"explore"}))
     explore_line = next(line.strip() for line in menus[0].splitlines() if line.strip().startswith("- explore:"))
     assert r["status"] == "COMPLETED" and explore_line.endswith("(not available yet)")

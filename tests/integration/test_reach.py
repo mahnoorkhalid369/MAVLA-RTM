@@ -60,17 +60,21 @@ def run_pick(tmp_path, tools):
     return r
 
 
-@pytest.mark.parametrize("reach,expect", [
+@pytest.mark.parametrize("reach,start,expect", [
     ({"from_above": False, "any_orientation": True, "tilt_deg": 29, "distance_m": 0.62, "bearing_deg": 180,
-      "centre": [0.002, -0.621, 0.013]}, "only tilted 29 deg from vertical, and grasps are made from above"),
+      "centre": [0.002, -0.621, 0.013]}, "Neither a top-down nor a tilted grasp (up to 40 deg) can pick up object #",
+     "no grasp with the pads on two of its faces passed"),
+    ({"from_above": False, "any_orientation": True, "tilt_deg": 52, "distance_m": 0.9, "bearing_deg": 180,
+      "centre": [0.002, -0.9, 0.013]}, "No possible gripper orientation can pick up object #",
+     "only tilted 52 deg from vertical, beyond the 40 deg limit for tilted grasps"),
     ({"from_above": False, "any_orientation": False, "tilt_deg": None, "distance_m": 1.6, "bearing_deg": 0,
-      "centre": [0.0, 1.6, 0.013]}, "it is outside the arm's range"),
+      "centre": [0.0, 1.6, 0.013]}, "No possible gripper orientation can pick up object #", "it is outside the arm's range"),
 ])
-def test_no_possible_orientation_is_stated_cleanly(tmp_path, reach, expect):
+def test_no_possible_orientation_is_stated_cleanly(tmp_path, reach, start, expect):
     r = run_pick(tmp_path, FarTools(reach))
     reason = r["failure"]["reason"]
     assert r["status"] == "FAILED" and r["failure"]["cls"] == "infeasible"
-    assert reason.startswith("No possible gripper orientation can pick up object #") and expect in reason
+    assert reason.startswith(start) and expect in reason
 
 
 def test_a_grasp_reachable_from_above_keeps_the_planners_message(tmp_path):
@@ -97,7 +101,7 @@ def test_resolve_gives_gemma_the_measured_height_size_position_and_camera_colour
             pass
     t = T()
     from agent.vlm_roles import ReferenceSpec
-    t.roles = SimpleNamespace(resolve=lambda som, descs, text, ids: (seen.update(d=descs), Resolution(id=8))[1],
+    t.roles = SimpleNamespace(resolve=lambda som, descs, text, ids, allowed=None: (seen.update(d=descs), Resolution(id=8))[1],
                               parse_reference=lambda text: ReferenceSpec())  # no split: the description path
     rgb = np.zeros((4, 4, 3), np.uint8)
     rgb[:2, :2] = (128, 26, 38)

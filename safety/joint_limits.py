@@ -4,6 +4,8 @@ Two layers, used by the simulator's command interface (sim/ros_control.py):
   1. check_trajectory(): a command validator. A joint trajectory is rejected before execution if any
      point is outside the joint range, any segment is faster than the joint's maximum speed, the times
      are not increasing, or it starts away from where the arm is (a jump = infinite speed).
+     It is also rejected if any point puts J1/J2/J3 in a combination the Epson manual forbids
+     (forbidden_combination(), VT series manual Rev.6, 5.3 p.88), on every point, not only the target.
   2. VelocityMonitor: a runtime monitor comparing MEASURED joint speeds with the limits; it reports
      each excursion once (when it starts) with the peak value when it ends.
 
@@ -18,6 +20,59 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 import numpy as np
+
+
+# Epson VT6L manual (VT series Rev.6) 5.3 "Restriction of Manipulator Operation by Joint Angle Combination", p.88:
+# J2/J3 combinations (deg) in which the arms would interfere with each other; the controller stops the robot there.
+# Our joint angles use Epson's zero position and directions (assets/vt6l/vt6l.urdf), so the chart applies directly.
+FORBIDDEN_J2_J3_FRONT = [(-160.0, -51.0), (-160.0, 30.0), (-120.0, -20.0), (-110.0, -20.0), (-85.0, -51.0)]  # |J1| <= 110
+FORBIDDEN_J2_J3_BACK = [(-160.0, -51.0), (-160.0, 190.0), (-120.0, 190.0), (-120.0, 0.0), (-60.0, -40.0), (65.0, -40.0),
+                        (65.0, -51.0)]  # 110 < |J1| <= 170
+FORBIDDEN_J1_SPLIT_DEG = 110.0
+# The manual warns the inside/outside decision may differ near the boundary (calculation error): we stay this far out,
+# and within this margin of |J1| = 110 deg both charts apply.
+FORBIDDEN_MARGIN_DEG = 2.0
+
+
+def _inside(x: float, y: float, poly) -> bool:
+    inside = False
+    for (x1, y1), (x2, y2) in zip(poly, poly[1:] + poly[:1]):
+        if (y1 > y) != (y2 > y) and x < (x2 - x1) * (y - y1) / (y2 - y1) + x1:
+            inside = not inside
+    return inside
+
+
+def _distance(x: float, y: float, poly) -> float:
+    d = np.inf
+    for (x1, y1), (x2, y2) in zip(poly, poly[1:] + poly[:1]):
+        a, b, p = np.array([x1, y1]), np.array([x2, y2]), np.array([x, y])
+        t = np.clip((p - a) @ (b - a) / max((b - a) @ (b - a), 1e-12), 0.0, 1.0)
+        d = min(d, float(np.linalg.norm(p - (a + t * (b - a)))))
+    return d
+
+
+def forbidden_combination(q, margin_deg: float = FORBIDDEN_MARGIN_DEG) -> str | None:
+    """None if J1/J2/J3 (rad, q[0:3]) are allowed; else why (Epson manual 5.3), including margin_deg around the zones."""
+    j1, j2, j3 = (float(np.degrees(v)) for v in np.asarray(q, float)[:3])
+    charts = []
+    if abs(j1) <= FORBIDDEN_J1_SPLIT_DEG + margin_deg:
+        charts.append(("|J1| <= 110", FORBIDDEN_J2_J3_FRONT))
+    if abs(j1) > FORBIDDEN_J1_SPLIT_DEG - margin_deg:
+        charts.append(("|J1| > 110", FORBIDDEN_J2_J3_BACK))
+    for label, poly in charts:
+        if _inside(j2, j3, poly) or _distance(j2, j3, poly) < margin_deg:
+            return (f"J1 {j1:.0f}, J2 {j2:.0f}, J3 {j3:.0f} deg is in (or within {margin_deg:.0f} deg of) a J2/J3 "
+                    f"combination the Epson manual forbids for {label} (the arms would interfere)")
+    return None
+
+
+def forbidden_on_path(positions) -> str | None:
+    """The first forbidden J1/J2/J3 combination along a joint path (n x >=3, rad), or None."""
+    for k, q in enumerate(np.atleast_2d(np.asarray(positions, float))):
+        why = forbidden_combination(q)
+        if why:
+            return f"point {k}: {why}"
+    return None
 
 
 @dataclass
@@ -77,6 +132,12 @@ def check_trajectory(limits: JointLimits, joint_names: list[str], times, points,
             if speed[k] > vmax * (1 + speed_tolerance):
                 problems.append(f"{name}: {np.degrees(speed[k]):.0f} deg/s at t = {path_t[k]:.2f} s exceeds "
                                 f"the {np.degrees(vmax):.1f} deg/s limit")
+    arm = [limits.names[i] for i in range(3)]  # J1, J2, J3
+    if all(n in joint_names for n in arm):
+        cols = [list(joint_names).index(n) for n in arm]
+        why = forbidden_on_path(points[:, cols])
+        if why:
+            problems.append(why)
     return problems
 
 
