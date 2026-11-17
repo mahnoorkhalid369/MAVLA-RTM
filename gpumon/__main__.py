@@ -1,4 +1,4 @@
-"""python -m gpumon {record,bench,report,compare} ... (see gpumon/README.md)."""
+"""python -m gpumon {record,bench,report,compare,throughput} ... (see gpumon/README.md)."""
 
 from __future__ import annotations
 
@@ -38,6 +38,19 @@ def main(argv=None) -> int:
     c = sub.add_parser("compare", help="comparison table + figure for a bench folder")
     c.add_argument("base", type=Path)
 
+    t = sub.add_parser("throughput", help="FlexGen-style experiment: Gemma alone, placement x precision x batch size")
+    t.add_argument("--configs", nargs="+", default=None, help="configurations (default: 4bit_gpu 4bit_offload 8bit_offload)")
+    t.add_argument("--batches", nargs="+", type=int, default=None, help="batch sizes (default 1 2 4 8 16)")
+    t.add_argument("--prompt-tokens", type=int, default=512)
+    t.add_argument("--gen-tokens", type=int, default=64)
+    t.add_argument("--repeats", type=int, default=3)
+    t.add_argument("--model", default="models/gemma-4-E4B-it")
+    t.add_argument("--budget-gb", type=float, default=None,
+                   help="cap PyTorch at this many GB after loading (memory left next to Isaac Sim, e.g. 6.8)")
+    t.add_argument("--out", default=None, help="run folder (default out/gpumon/throughput/<date>_<time>)")
+    t.add_argument("--report", type=Path, default=None, help="only redo summary + figure for this run folder")
+    t.add_argument("--child", default=None, help=argparse.SUPPRESS)  # internal: one configuration per process
+
     a = ap.parse_args(argv)
     if a.cmd == "record":
         from gpumon.report import report
@@ -58,6 +71,15 @@ def main(argv=None) -> int:
     if a.cmd == "compare":
         from gpumon.report import compare
         return 0 if compare(a.base) else 1
+    if a.cmd == "throughput":
+        from gpumon import throughput as tp
+        if a.report:
+            return 0 if tp.report(a.report) else 1
+        out = Path(a.out) if a.out else ROOT / "out/gpumon/throughput" / time.strftime("%Y-%m-%d_%H%M%S")
+        args = (a.batches or tp.DEFAULT_BATCHES, a.prompt_tokens, a.gen_tokens, a.repeats, a.model, a.budget_gb, out)
+        if a.child:
+            return tp.child(a.child, *args)
+        return tp.run(a.configs or tp.DEFAULT_CONFIGS, *args)
     return 2
 
 

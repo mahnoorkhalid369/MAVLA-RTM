@@ -27,4 +27,4 @@ env = { VLM_QUANTIZATION = "4bit", VLM_EMBEDDINGS_ON_CPU = "1" }
 [[config]]
 label = "e4b_bf16_gpu"
 gemma = "models/gemma-4-E4B-it"
-env = { VLM_QUANTIZATION = "none", VLM_EMBEDDINGS_ON_CPU = "0" }
+env = { VLM_QUANTIZATION = "16bit", VLM_EMBEDDINGS_ON_CPU = "0" }

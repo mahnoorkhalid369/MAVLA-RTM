@@ -21,9 +21,22 @@ RGB-D cameras measure. The cameras are a table camera on a stand and a wrist cam
 | Verification | success is measured (finger contact, camera placement check, HOME joints), never assumed |
 | Object knowledge | none is hard-coded: no colour lists, no object names, no simulator ground truth in the agent |
 
+## Versions
+
+The code exists in two versions side by side; everything below (`src/`, `launch/`, `tests/`, ...) is inside each one.
+
+| Folder | What it is |
+|---|---|
+| `v1/` | the agent as of 2026-11-10 (Gemma-planned LangGraph supervisor with capabilities and many Gemma roles), unchanged; 663 tests pass |
+| `v2/` | the redesign: one master (Gemma, thinking on) that plans in plain words, three workers that act and report (perception finds objects by your words, manipulation runs the validated pick / place skill, verification measures the result); `src/agent/` is `gemma.py`, `master.py`, `workers.py`, `loop.py`, `pick_place.py`, `run.py`, `tools/`. Design: the "VT6L Agent Redesign" doc |
+
+Run a version from its folder, e.g. `cd v1 && ./launch/agent.sh` or `cd v2 && ./launch/tests.sh`. Each launcher puts its own
+`src/` on `PYTHONPATH`; the large shared folders (`assets/`, `models/`, `data/`, `out/`, `docs/`, `gpumon/`, `.venv*`) stay at the
+top level and are linked into each version.
+
 ## Start here
 
-**1. Edit `agent/settings.py`.** It is plain Python values:
+**1. Edit `src/agent/settings.py`.** It is plain Python values:
 
 | Setting | Values |
 |---|---|
@@ -82,20 +95,20 @@ blocked unless `--motion real`. Commands, environments and the expected test res
 
 | Question | Answer |
 |---|---|
-| Where do I configure a run? | `agent/settings.py` (validated at startup; `python -m agent.settings` prints the summary) |
-| Where is the supervisor? | `agent/supervisor.py` (`GoalSupervisor`, a LangGraph state machine); plan rules in `agent/planning.py`; session state in `agent/session.py` |
-| Where are the tools? | `agent/tools/`: one `Tools` object, the agent's only access to sensors and motion (perception, resolution, manipulation, execution, verification, held-object state) |
-| Where are the capabilities the planner can choose? | `agent/capabilities/` (observe, describe, answer, locate; inspect, explore, look; pick, place, pick_place, return_home; decompose) |
-| Where is YOLO? | `perception/detector.py` (weights path in `config/models.py`); depth geometry in `perception/geometry.py`; world model in `perception/world_model.py` |
-| Where is Gemma? | `agent/vlm_roles/`: `gemma.py` (model adapter), `prompts.py`, `schemas.py`, `roles.py`; model loader `vlm/model.py`; settings `vlm/config.py` |
-| What may a request do? | `agent/authority.py`, enforced in `agent/workers.py` before any capability runs |
-| Where are the scenarios? | `scenarios/`: every scene, one file each (`default.py`, `laboratory.py`, `scenes/*.json`); add a file to plug one in (`docs/scenarios/README.md`) |
-| Where is robot execution? | `agent/tools/execution.py` (`Tools.execute`, the motion gate) → frozen `execution/ros_executor.py` → simulator `sim/ros_control.py` with `safety/joint_limits.py` |
-| Where are kinematics and grasp planning? | frozen `control/` (`kinematics.py`, `skills.py`, `collision.py`), called from `agent/tools/manipulation.py` |
-| Where is the simulator? | `sim/` (`run_live.py` default scene, `run_scenario.py` test scenes, `scene.py`, ROS bridge) |
-| Where is configuration? | `config/` (perception thresholds, tolerances, budgets, model paths); robot constants in frozen `control/robot.py` |
+| Where do I configure a run? | `src/agent/settings.py` (validated at startup; `python -m agent.settings` prints the summary) |
+| Where is the supervisor? | `src/agent/supervisor.py` (`GoalSupervisor`, a LangGraph state machine); plan rules in `src/agent/planning.py`; session state in `src/agent/session.py` |
+| Where are the tools? | `src/agent/tools/`: one `Tools` object, the agent's only access to sensors and motion (perception, resolution, manipulation, execution, verification, held-object state) |
+| Where are the capabilities the planner can choose? | `src/agent/capabilities/` (observe, describe, answer, locate; inspect, explore, look; pick, place, pick_place, return_home; decompose) |
+| Where is YOLO? | `src/perception/detector.py` (weights path in `src/config/models.py`); depth geometry in `src/perception/geometry.py`; world model in `src/perception/world_model.py` |
+| Where is Gemma? | `src/agent/vlm_roles/`: `gemma.py` (model adapter), `prompts.py`, `schemas.py`, `roles.py`; model loader `src/vlm/model.py`; settings `src/vlm/config.py` |
+| What may a request do? | `src/agent/authority.py`, enforced in `src/agent/workers.py` before any capability runs |
+| Where are the scenarios? | `src/scenarios/`: every scene, one file each (`default.py`, `laboratory.py`, `scenes/*.json`); add a file to plug one in (`docs/scenarios/README.md`) |
+| Where is robot execution? | `src/agent/tools/execution.py` (`Tools.execute`, the motion gate) → frozen `src/execution/ros_executor.py` → simulator `src/sim/ros_control.py` with `src/safety/joint_limits.py` |
+| Where are kinematics and grasp planning? | frozen `src/control/` (`kinematics.py`, `skills.py`, `collision.py`), called from `src/agent/tools/manipulation.py` |
+| Where is the simulator? | `src/sim/` (`run_live.py` default scene, `run_scenario.py` test scenes, `scene.py`, ROS bridge) |
+| Where is configuration? | `src/config/` (perception thresholds, tolerances, budgets, model paths); robot constants in frozen `src/control/robot.py` |
 | Where are the tests? | `tests/unit/`, `tests/integration/`, shared fakes in `tests/support/` |
-| Where are the experiments? | `evaluation/` (active) and `evaluation/historical/`; results under `out/` |
+| Where are the experiments? | `evaluation/` (active); archived ones in `misc/`; results under `out/` |
 
 ## How one instruction travels through the system
 
@@ -129,20 +142,22 @@ Every function in this path is listed in `docs/architecture/EXECUTION_FLOW.md`, 
 
 | Folder | Role |
 |---|---|
-| `agent/` | orchestration: supervisor, planning, session, authority, goals, controls, workflow, `capabilities/`, `tools/`, `vlm_roles/` |
-| `perception/` | YOLO detector, RGB-D geometry, set-of-mark images, world model, wrist viewpoints (+ helpers shared with frozen / legacy code) |
-| `config/` | configuration values and model paths |
-| `scenarios/` | every scene the robot can run in (plug-in registry): default, laboratory, ap_occlusion, ap_categories |
-| `sim/` | Isaac Sim processes and the ROS 2 bridge |
-| `control/`, `execution/`, `safety/` | **frozen** robot core: kinematics, planning, collision, executor, joint limits |
-| `evaluation/` | research experiments and scoring (active); `evaluation/historical/` for earlier phases |
+| `src/` | **the robot system's Python packages** (below); the launchers put `<version>/src` on `PYTHONPATH` |
+| `src/agent/` | orchestration: supervisor, planning, session, authority, goals, controls, workflow, `capabilities/`, `tools/`, `vlm_roles/` |
+| `src/perception/` | YOLO detector, RGB-D geometry, set-of-mark images, world model, wrist viewpoints (+ helpers shared with frozen / legacy code) |
+| `src/config/` | configuration values and model paths |
+| `src/scenarios/` | every scene the robot can run in (plug-in registry): default, laboratory, workcell, scrub_nurse, ap_occlusion, ap_categories |
+| `src/sim/` | Isaac Sim processes and the ROS 2 bridge |
+| `src/control/`, `src/execution/`, `src/safety/` | **frozen** robot core: kinematics, planning, collision, executor, joint limits |
+| `evaluation/` | research experiments and scoring (active) |
 | `tests/` | automated tests: `unit/`, `integration/`, `support/` |
-| `launch/` | `agent.sh`, `sim.sh`, `tests.sh`, `evaluate.sh`; `run.sh` and `legacy/` start the legacy stack |
-| `assets/` | URDF / USD of the VT6L and the 2F-85 (frozen) |
-| `docs/` | `DEVELOPER_GUIDE.md`, `architecture/`, `scenarios/`, `validation/`, `baselines/` (frozen evidence), `history/` |
-| `datagen/`, `seg/` | synthetic training data and YOLO / Mask R-CNN training (offline tooling) |
-| `experiments/`, `scripts/` | frozen baseline experiments and robot validation; early demos |
-| `ros_nodes/`, `vlm/` | camera viewers; legacy agent nodes and planner (`vlm/model.py` is shared) |
+| `launch/` | `agent.sh`, `sim.sh`, `tests.sh`, `evaluate.sh`; `run.sh` starts the legacy stack |
+| `assets/` | URDF / USD of the VT6L and the 2F-85 (frozen); real surgical-instrument models (`instruments/`) |
+| `docs/` | `DEVELOPER_GUIDE.md`, `architecture/`, `src/scenarios/`, `validation/`, `baselines/` (frozen evidence), `history/` |
+| `gpumon/` | ECE 565 GPU-memory monitor (plugin, off by default) |
+| `scripts/` | one-off tools (`convert_instruments.py`) |
+| `src/ros_nodes/`, `src/vlm/` | camera viewers; legacy agent nodes and planner (`src/vlm/model.py` is shared) |
+| `misc/` | archived, not used by the running system: training-data and detector training (`datagen/`, `seg/`), early baselines (`experiments/`), old demos and scripts, the external Epson clone; see `misc/README.md` |
 
 **Not in git (hidden in the VS Code Explorer):**
 
@@ -152,7 +167,7 @@ Every function in this path is listed in `docs/architecture/EXECUTION_FLOW.md`, 
 | `data/` | YCB assets, datasets |
 | `out/` | outputs and experiment evidence |
 | `.venv*` | Python environments |
-| `epson-robot-ros2/` | external clone |
+| `misc/epson-robot-ros2/` | external clone |
 
 ## Environments
 

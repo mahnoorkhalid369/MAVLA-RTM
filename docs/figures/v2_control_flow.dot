@@ -1,0 +1,181 @@
+// VT6L agent v2: control flow of one instruction, from the user's request to COMPLETED / STOPPED / FAILED.
+// Code: v2/src/agent/loop.py (instruction loop), workers.py (workers), pick_place.py (skill), master.py, gemma.py.
+//
+// Render (vector):  dot -Tpdf v2_control_flow.dot -o v2_control_flow.pdf
+//                   dot -Tsvg v2_control_flow.dot -o v2_control_flow.svg
+// Edit: change a label in quotes, or an edge "a -> b". Node shapes: box = action, diamond = decision,
+// rounded box = terminal outcome, note = report; filled boxes = Gemma calls.
+
+digraph v2_control_flow {
+  graph [rankdir=TB, fontname="Helvetica", fontsize=11, nodesep=0.35, ranksep=0.42, newrank=true, compound=true,
+         label="VT6L agent v2: one instruction as a state machine (LOOK, PLAN, DISPATCH, REVIEW, DECIDE, ASK, FINISH), all paths to success or failure", labelloc=t, fontsize=14];
+  node  [fontname="Helvetica", fontsize=10, shape=box, style="rounded", margin="0.12,0.06"];
+  edge  [fontname="Helvetica", fontsize=9, arrowsize=0.7];
+
+  // ---- outcomes
+  COMPLETED [label="COMPLETED", shape=box, style="rounded,bold,filled", fillcolor="#d8f0d8"];
+  STOPPED   [label="STOPPED\n(master's reason, or the budget:\n40 steps / 20 decisions)", shape=box, style="rounded,bold,filled", fillcolor="#fbe6c8"];
+  FAILED    [label="FAILED\n(no plan / no decision / internal error)", shape=box, style="rounded,bold,filled", fillcolor="#f6d0d0"];
+
+  // ================================================================ instruction loop (loop.py)
+  subgraph cluster_loop {
+    label="Instruction loop  (loop.py)"; style="rounded,dashed"; color="#555555";
+
+    request [label="User request", shape=oval];
+    look    [label="LOOK\ntable camera -> YOLO masks -> depth -> world ids\nGemma names every object (describe)", style="rounded,filled", fillcolor="#e6eefb"];
+    plan    [label="MASTER PLAN\nGemma, thinking on; system prompt describes the workers\ncamera image + objects and places in words -> '<worker>: <plain sentence>' lines + memory", style="rounded,filled", fillcolor="#e6eefb"];
+    planok  [label="plan readable?", shape=diamond];
+    next    [label="NEXT STEP\nsend to its worker"];
+    lim_s   [label="> 40 steps?", shape=diamond];
+    report  [label="REPORT (sentences, objects in words)\nok | done | yes\nfailed | unsure | no", shape=note];
+    vfinal  [label="last plan step was\nverification 'yes'?", shape=diamond];
+    moved   [label="did the arm act in\nthis instruction?", shape=diamond];
+    okleft  [label="ok / done / yes\nand steps left?", shape=diamond];
+    lim_d   [label="> 20 decisions?", shape=diamond];
+    decide  [label="MASTER DECIDES\nGemma, thinking on\nrequest + the table NOW + its memory +\nplan left + latest reports + budget left\n-> decision + memory rewritten in plain words", style="rounded,filled", fillcolor="#e6eefb"];
+    decok   [label="decision\nreadable?", shape=diamond];
+    action  [label="decision", shape=diamond];
+    hassteps[label="steps left?", shape=diamond];
+    ask     [label="ASK USER (in words, no numbers)\nanswer added to history"];
+    verified[label="verification yes\nsince the last arm step?", shape=diamond];
+    vnow    [label="run VERIFICATION now\n(same checks as the\nverification worker)"];
+    vyes    [label="yes?", shape=diamond];
+    notdone [label="history: 'you said done;\nverification no -> NOT done'", shape=note];
+  }
+
+  request -> look;
+  look -> plan;
+  look -> FAILED [label="Gemma answer\nunusable twice", style=dashed];
+  plan -> planok;
+  planok -> next [label="yes"];
+  planok -> plan [label="no: sent back once\nwith the reason", style=dashed];
+  planok -> FAILED [label="no, twice", style=dashed];
+  next -> lim_s;
+  lim_s -> STOPPED [label="yes"];
+  report -> vfinal;
+  vfinal -> COMPLETED [label="yes\n(no Gemma call)"];
+  vfinal -> okleft [label="no"];
+  okleft -> next [label="yes"];
+  okleft -> lim_d [label="no (problem, or\nno steps left)"];
+  lim_d -> STOPPED [label="yes"];
+  lim_d -> decide [label="no"];
+  decide -> decok;
+  decok -> action [label="yes"];
+  decok -> FAILED [label="no, twice", style=dashed];
+  action -> hassteps [label="continue"];
+  hassteps -> next [label="yes"];
+  hassteps -> lim_d [label="no: 'write a plan,\nask, done or stop'"];
+  action -> next [label="plan: new steps"];
+  action -> ask [label="ask"];
+  ask -> lim_d;
+  action -> STOPPED [label="stop"];
+  action -> moved [label="done: answer\nto the user"];
+  moved -> COMPLETED [label="no (a question):\nthe master's answer"];
+  moved -> verified [label="yes"];
+  verified -> COMPLETED [label="yes"];
+  verified -> vnow [label="no"];
+  vnow -> vyes;
+  vyes -> COMPLETED [label="yes"];
+  vyes -> notdone [label="no"];
+  notdone -> lim_d;
+
+  // ================================================================ workers (workers.py)
+  subgraph cluster_workers {
+    label="Workers  (workers.py)"; style="rounded,dashed"; color="#555555";
+
+    subgraph cluster_perc {
+      label="Perception"; style="rounded"; color="#8899bb";
+      p_look [label="look again if the\narm moved since the last look"];
+      p_find [label="Gemma, thinking off\ncamera image + objects and places in words\nanswers the master in sentences\n(finds, describes, answers questions)", style="rounded,filled", fillcolor="#e6eefb"];
+      p_ans  [label="OK / UNSURE /\nNOT FOUND", shape=diamond];
+    }
+    subgraph cluster_manip {
+      label="Manipulation"; style="rounded"; color="#8899bb";
+      m_read [label="GROUNDING: Gemma, thinking on\nthe only place with internal numbers:\nnumbered image + numbered objects, places, held object ->\npick #n | place <rel> #n or R | pick + place | home | cannot\n(other form: sent back once)", style="rounded,filled", fillcolor="#e6eefb"];
+      m_fn   [label="an arm action?", shape=diamond];
+      m_home [label="return HOME,\njoints within 1.5 deg?", shape=diamond];
+      m_vals [label="valid? object / target exists,\nempty gripper for a pick, held object for a place\n(a place R: inside its outline)", shape=diamond];
+    }
+    subgraph cluster_verif {
+      label="Verification  (sensors only, no Gemma)"; style="rounded"; color="#8899bb";
+      v_any  [label="anything picked or\nplaced in this instruction?", shape=diamond];
+      v_chk  [label="held: fingers -> wrist depth -> table camera\nplaced: measured position vs target / place outline"];
+      v_all  [label="all hold?", shape=diamond];
+    }
+  }
+
+  next -> p_look [label="perception", lhead=cluster_perc];
+  next -> m_read [label="manipulation", lhead=cluster_manip];
+  m_read -> m_fn;
+  next -> v_any [label="verification", lhead=cluster_verif];
+
+  p_look -> p_find;
+  p_find -> p_ans;
+  p_ans -> report [label="ok / unsure / failed"];
+
+  m_fn -> report [label="no: failed\n(cannot, unreadable)"];
+  m_fn -> m_home [label="home"];
+  m_home -> report [label="done / failed"];
+  m_fn -> m_vals [label="pick / place /\npick + place"];
+  m_vals -> report [label="no: failed"];
+  m_vals -> s_obs [label="yes", lhead=cluster_skill];
+
+  v_any -> report [label="no: 'no'"];
+  v_any -> v_chk [label="yes"];
+  v_chk -> v_all;
+  v_all -> report [label="yes / no"];
+
+  // ================================================================ pick / place skill (pick_place.py)
+  subgraph cluster_skill {
+    label="Pick / place skill  (pick_place.py, sensors + collision-checked motion, no Gemma)"; style="rounded,dashed"; color="#555555";
+    s_obs   [label="OBSERVING\nfresh look reused, or park out of view\nif the object was hidden, then look"];
+    s_loc   [label="LOCALIZING\nobject / target measured in this view?"];
+    s_plan  [label="PLANNING_GRASP\ncollision-checked grasp + place plan"];
+    s_app   [label="APPROACHING -> GRASPING"];
+    s_vg    [label="VERIFYING_GRASP\nfingers stalled on the object?"];
+    s_tr    [label="TRANSPORTING\nlift (and carry); still held?"];
+    s_pick  [label="mode pick?", shape=diamond];
+    s_pl    [label="PLACING -> RETREATING"];
+    s_vp    [label="VERIFYING_PLACEMENT\npark, look, compare to plan (10 mm, 5 mm, 5 deg);\nnot outlined by the detector: depth at the planned spot"];
+    s_home  [label="RETURNING_HOME ->\nVERIFYING_HOME"];
+    s_rec   [label="RECOVERING\nretries left for this class?\nperception 2, planning 2, grasp 1,\nplacement 1, execution 0", shape=diamond];
+    s_done  [label="skill COMPLETED", style="rounded,bold"];
+    s_fail  [label="skill FAILED\n<class>: <reason>", style="rounded,bold"];
+  }
+
+  s_obs -> s_loc;
+  s_loc -> s_plan;
+  s_plan -> s_app;
+  s_app -> s_vg;
+  s_vg -> s_tr;
+  s_tr -> s_pick;
+  s_pick -> s_done [label="yes"];
+  s_pick -> s_pl [label="no"];
+  s_pl -> s_vp;
+  s_vp -> s_home;
+  s_home -> s_done;
+
+  s_obs  -> s_rec [label="no objects", style=dashed, color="#aa3333", fontcolor="#aa3333"];
+  s_loc  -> s_rec [label="not in view", style=dashed, color="#aa3333", fontcolor="#aa3333"];
+  s_loc  -> s_fail [label="object = target", style=dashed, color="#aa3333", fontcolor="#aa3333"];
+  s_plan -> s_rec [label="planning error", style=dashed, color="#aa3333", fontcolor="#aa3333"];
+  s_plan -> s_fail [label="infeasible (reach,\nwidth, no free spot)", style=dashed, color="#aa3333", fontcolor="#aa3333"];
+  s_app  -> s_rec [label="motion rejected", style=dashed, color="#aa3333", fontcolor="#aa3333"];
+  s_vg   -> s_rec [label="no contact", style=dashed, color="#aa3333", fontcolor="#aa3333"];
+  s_tr   -> s_rec [xlabel="object lost", style=dashed, color="#aa3333", fontcolor="#aa3333"];
+  s_pl   -> s_rec [label="motion rejected", style=dashed, color="#aa3333", fontcolor="#aa3333"];
+  s_vp   -> s_rec [xlabel="out of\ntolerance", style=dashed, color="#aa3333", fontcolor="#aa3333"];
+  s_home -> s_fail [label="HOME not reached", style=dashed, color="#aa3333", fontcolor="#aa3333"];
+  s_rec  -> s_obs [label="yes: perception, planning,\ngrasp (open, lift back)", style=dashed];
+  s_rec  -> s_vp [taillabel="placement:\nlook again", labeldistance=4, style=dashed];
+  s_rec  -> s_fail [label="no"];
+
+  s_done -> report [label="done: holding #n /\n#n in #m, HOME"];
+  s_fail -> report [label="failed: <class>"];
+
+  // any unexpected exception, anywhere
+  exc [label="unexpected exception\n(any level)", shape=plaintext, fontcolor="#aa3333"];
+  exc -> FAILED [style=dashed, color="#aa3333"];
+
+  { rank=same; COMPLETED; STOPPED; FAILED; }
+}

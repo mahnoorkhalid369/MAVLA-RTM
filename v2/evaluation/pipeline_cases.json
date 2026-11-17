@@ -1,0 +1,947 @@
+{
+  "schema": 2,
+  "default_suite": "core",
+  "profiles": {
+    "baseline": {
+      "V2_BASELINE": "1"
+    },
+    "deduplicated": {
+      "V2_REUSE_PLACEMENT": "1",
+      "V2_FINISH_PLAN": "1"
+    },
+    "headless": {
+      "V2_REUSE_PLACEMENT": "1",
+      "V2_FINISH_PLAN": "1"
+    },
+    "no_thinking": {
+      "V2_PLACEMENT_THINKING": "0"
+    },
+    "wrist_560": {
+      "V2_WRIST_IMAGE_TOKENS": "560"
+    },
+    "reasoning_1024": {
+      "V2_REASONING_TOKENS": "1024"
+    },
+    "prefix_cache": {
+      "V2_PREFIX_CACHE": "1"
+    },
+    "overlap_home": {
+      "V2_OVERLAP_HOME": "1"
+    },
+    "chain": {
+      "V2_CHAIN_TRANSFERS": "1"
+    },
+    "carry_125": {
+      "V2_CARRY_SPEED_SCALE": "1.25"
+    }
+  },
+  "cases": [
+    {
+      "id": "easy_s7_apple",
+      "scenario": "snack_kitchen",
+      "difficulty": "easy",
+      "seed": 7,
+      "instruction": "Put the apple in the blue serving tray.",
+      "objects": [
+        "apple"
+      ],
+      "destination": "serving_tray",
+      "impossible": false
+    },
+    {
+      "id": "easy_s7_water",
+      "scenario": "snack_kitchen",
+      "difficulty": "easy",
+      "seed": 7,
+      "instruction": "Put the water bottle in the blue serving tray.",
+      "objects": [
+        "water_bottle"
+      ],
+      "destination": "serving_tray",
+      "impossible": false
+    },
+    {
+      "id": "easy_s7_cheezit",
+      "scenario": "snack_kitchen",
+      "difficulty": "easy",
+      "seed": 7,
+      "instruction": "Put the cheezit in the blue serving tray.",
+      "objects": [
+        "food_003_cracker_box"
+      ],
+      "destination": "serving_tray",
+      "impossible": false
+    },
+    {
+      "id": "easy_s7_milk_alias",
+      "scenario": "snack_kitchen",
+      "difficulty": "easy",
+      "seed": 7,
+      "instruction": "Put the milk bottle in the blue serving tray.",
+      "objects": [
+        "milk"
+      ],
+      "destination": "serving_tray",
+      "impossible": false
+    },
+    {
+      "id": "easy_s7_two_items",
+      "scenario": "snack_kitchen",
+      "difficulty": "easy",
+      "seed": 7,
+      "instruction": "Put the apple and the water bottle in the blue serving tray. Leave the pudding on the counter.",
+      "objects": [
+        "apple",
+        "water_bottle"
+      ],
+      "destination": "serving_tray",
+      "impossible": false
+    },
+    {
+      "id": "easy_s7_basket",
+      "scenario": "snack_kitchen",
+      "difficulty": "easy",
+      "seed": 7,
+      "instruction": "Put the apple in the brown storage basket.",
+      "objects": [
+        "apple"
+      ],
+      "destination": "storage_basket",
+      "impossible": false
+    },
+    {
+      "id": "easy_s7_impossible",
+      "scenario": "snack_kitchen",
+      "difficulty": "easy",
+      "seed": 7,
+      "instruction": "Put the banana in the blue serving tray.",
+      "objects": [],
+      "destination": "serving_tray",
+      "impossible": true
+    },
+    {
+      "id": "easy_s42_apple",
+      "scenario": "snack_kitchen",
+      "difficulty": "easy",
+      "seed": 42,
+      "instruction": "Put the apple in the blue serving tray.",
+      "objects": [
+        "apple"
+      ],
+      "destination": "serving_tray",
+      "impossible": false
+    },
+    {
+      "id": "easy_s42_water",
+      "scenario": "snack_kitchen",
+      "difficulty": "easy",
+      "seed": 42,
+      "instruction": "Put the water bottle in the blue serving tray.",
+      "objects": [
+        "water_bottle"
+      ],
+      "destination": "serving_tray",
+      "impossible": false
+    },
+    {
+      "id": "easy_s42_cheezit",
+      "scenario": "snack_kitchen",
+      "difficulty": "easy",
+      "seed": 42,
+      "instruction": "Put the cheezit in the blue serving tray.",
+      "objects": [
+        "food_003_cracker_box"
+      ],
+      "destination": "serving_tray",
+      "impossible": false
+    },
+    {
+      "id": "easy_s42_milk_alias",
+      "scenario": "snack_kitchen",
+      "difficulty": "easy",
+      "seed": 42,
+      "instruction": "Put the milk bottle in the blue serving tray.",
+      "objects": [
+        "milk"
+      ],
+      "destination": "serving_tray",
+      "impossible": false
+    },
+    {
+      "id": "easy_s42_two_items",
+      "scenario": "snack_kitchen",
+      "difficulty": "easy",
+      "seed": 42,
+      "instruction": "Put the apple and the water bottle in the blue serving tray. Leave the pudding on the counter.",
+      "objects": [
+        "apple",
+        "water_bottle"
+      ],
+      "destination": "serving_tray",
+      "impossible": false
+    },
+    {
+      "id": "easy_s42_basket",
+      "scenario": "snack_kitchen",
+      "difficulty": "easy",
+      "seed": 42,
+      "instruction": "Put the apple in the brown storage basket.",
+      "objects": [
+        "apple"
+      ],
+      "destination": "storage_basket",
+      "impossible": false
+    },
+    {
+      "id": "easy_s42_impossible",
+      "scenario": "snack_kitchen",
+      "difficulty": "easy",
+      "seed": 42,
+      "instruction": "Put the banana in the blue serving tray.",
+      "objects": [],
+      "destination": "serving_tray",
+      "impossible": true
+    },
+    {
+      "id": "easy_s123_apple",
+      "scenario": "snack_kitchen",
+      "difficulty": "easy",
+      "seed": 123,
+      "instruction": "Put the apple in the blue serving tray.",
+      "objects": [
+        "apple"
+      ],
+      "destination": "serving_tray",
+      "impossible": false
+    },
+    {
+      "id": "easy_s123_water",
+      "scenario": "snack_kitchen",
+      "difficulty": "easy",
+      "seed": 123,
+      "instruction": "Put the water bottle in the blue serving tray.",
+      "objects": [
+        "water_bottle"
+      ],
+      "destination": "serving_tray",
+      "impossible": false
+    },
+    {
+      "id": "easy_s123_cheezit",
+      "scenario": "snack_kitchen",
+      "difficulty": "easy",
+      "seed": 123,
+      "instruction": "Put the cheezit in the blue serving tray.",
+      "objects": [
+        "food_003_cracker_box"
+      ],
+      "destination": "serving_tray",
+      "impossible": false
+    },
+    {
+      "id": "easy_s123_milk_alias",
+      "scenario": "snack_kitchen",
+      "difficulty": "easy",
+      "seed": 123,
+      "instruction": "Put the milk bottle in the blue serving tray.",
+      "objects": [
+        "milk"
+      ],
+      "destination": "serving_tray",
+      "impossible": false
+    },
+    {
+      "id": "easy_s123_two_items",
+      "scenario": "snack_kitchen",
+      "difficulty": "easy",
+      "seed": 123,
+      "instruction": "Put the apple and the water bottle in the blue serving tray. Leave the pudding on the counter.",
+      "objects": [
+        "apple",
+        "water_bottle"
+      ],
+      "destination": "serving_tray",
+      "impossible": false
+    },
+    {
+      "id": "easy_s123_basket",
+      "scenario": "snack_kitchen",
+      "difficulty": "easy",
+      "seed": 123,
+      "instruction": "Put the apple in the brown storage basket.",
+      "objects": [
+        "apple"
+      ],
+      "destination": "storage_basket",
+      "impossible": false
+    },
+    {
+      "id": "easy_s123_impossible",
+      "scenario": "snack_kitchen",
+      "difficulty": "easy",
+      "seed": 123,
+      "instruction": "Put the banana in the blue serving tray.",
+      "objects": [],
+      "destination": "serving_tray",
+      "impossible": true
+    },
+    {
+      "id": "medium_s7_apple",
+      "scenario": "snack_kitchen",
+      "difficulty": "medium",
+      "seed": 7,
+      "instruction": "Put the apple in the blue serving tray.",
+      "objects": [
+        "apple"
+      ],
+      "destination": "serving_tray",
+      "impossible": false
+    },
+    {
+      "id": "medium_s7_water",
+      "scenario": "snack_kitchen",
+      "difficulty": "medium",
+      "seed": 7,
+      "instruction": "Put the water bottle in the blue serving tray.",
+      "objects": [
+        "water_bottle"
+      ],
+      "destination": "serving_tray",
+      "impossible": false
+    },
+    {
+      "id": "medium_s7_cheezit",
+      "scenario": "snack_kitchen",
+      "difficulty": "medium",
+      "seed": 7,
+      "instruction": "Put the cheezit in the blue serving tray.",
+      "objects": [
+        "food_003_cracker_box"
+      ],
+      "destination": "serving_tray",
+      "impossible": false
+    },
+    {
+      "id": "medium_s7_milk_alias",
+      "scenario": "snack_kitchen",
+      "difficulty": "medium",
+      "seed": 7,
+      "instruction": "Put the milk bottle in the blue serving tray.",
+      "objects": [
+        "milk"
+      ],
+      "destination": "serving_tray",
+      "impossible": false
+    },
+    {
+      "id": "medium_s7_two_items",
+      "scenario": "snack_kitchen",
+      "difficulty": "medium",
+      "seed": 7,
+      "instruction": "Put the apple and the water bottle in the blue serving tray. Leave the pudding on the counter.",
+      "objects": [
+        "apple",
+        "water_bottle"
+      ],
+      "destination": "serving_tray",
+      "impossible": false
+    },
+    {
+      "id": "medium_s7_basket",
+      "scenario": "snack_kitchen",
+      "difficulty": "medium",
+      "seed": 7,
+      "instruction": "Put the apple in the brown storage basket.",
+      "objects": [
+        "apple"
+      ],
+      "destination": "storage_basket",
+      "impossible": false
+    },
+    {
+      "id": "medium_s7_impossible",
+      "scenario": "snack_kitchen",
+      "difficulty": "medium",
+      "seed": 7,
+      "instruction": "Put the banana in the blue serving tray.",
+      "objects": [],
+      "destination": "serving_tray",
+      "impossible": true
+    },
+    {
+      "id": "medium_s42_apple",
+      "scenario": "snack_kitchen",
+      "difficulty": "medium",
+      "seed": 42,
+      "instruction": "Put the apple in the blue serving tray.",
+      "objects": [
+        "apple"
+      ],
+      "destination": "serving_tray",
+      "impossible": false
+    },
+    {
+      "id": "medium_s42_water",
+      "scenario": "snack_kitchen",
+      "difficulty": "medium",
+      "seed": 42,
+      "instruction": "Put the water bottle in the blue serving tray.",
+      "objects": [
+        "water_bottle"
+      ],
+      "destination": "serving_tray",
+      "impossible": false
+    },
+    {
+      "id": "medium_s42_cheezit",
+      "scenario": "snack_kitchen",
+      "difficulty": "medium",
+      "seed": 42,
+      "instruction": "Put the cheezit in the blue serving tray.",
+      "objects": [
+        "food_003_cracker_box"
+      ],
+      "destination": "serving_tray",
+      "impossible": false
+    },
+    {
+      "id": "medium_s42_milk_alias",
+      "scenario": "snack_kitchen",
+      "difficulty": "medium",
+      "seed": 42,
+      "instruction": "Put the milk bottle in the blue serving tray.",
+      "objects": [
+        "milk"
+      ],
+      "destination": "serving_tray",
+      "impossible": false
+    },
+    {
+      "id": "medium_s42_two_items",
+      "scenario": "snack_kitchen",
+      "difficulty": "medium",
+      "seed": 42,
+      "instruction": "Put the apple and the water bottle in the blue serving tray. Leave the pudding on the counter.",
+      "objects": [
+        "apple",
+        "water_bottle"
+      ],
+      "destination": "serving_tray",
+      "impossible": false
+    },
+    {
+      "id": "medium_s42_basket",
+      "scenario": "snack_kitchen",
+      "difficulty": "medium",
+      "seed": 42,
+      "instruction": "Put the apple in the brown storage basket.",
+      "objects": [
+        "apple"
+      ],
+      "destination": "storage_basket",
+      "impossible": false
+    },
+    {
+      "id": "medium_s42_impossible",
+      "scenario": "snack_kitchen",
+      "difficulty": "medium",
+      "seed": 42,
+      "instruction": "Put the banana in the blue serving tray.",
+      "objects": [],
+      "destination": "serving_tray",
+      "impossible": true
+    },
+    {
+      "id": "medium_s123_apple",
+      "scenario": "snack_kitchen",
+      "difficulty": "medium",
+      "seed": 123,
+      "instruction": "Put the apple in the blue serving tray.",
+      "objects": [
+        "apple"
+      ],
+      "destination": "serving_tray",
+      "impossible": false
+    },
+    {
+      "id": "medium_s123_water",
+      "scenario": "snack_kitchen",
+      "difficulty": "medium",
+      "seed": 123,
+      "instruction": "Put the water bottle in the blue serving tray.",
+      "objects": [
+        "water_bottle"
+      ],
+      "destination": "serving_tray",
+      "impossible": false
+    },
+    {
+      "id": "medium_s123_cheezit",
+      "scenario": "snack_kitchen",
+      "difficulty": "medium",
+      "seed": 123,
+      "instruction": "Put the cheezit in the blue serving tray.",
+      "objects": [
+        "food_003_cracker_box"
+      ],
+      "destination": "serving_tray",
+      "impossible": false
+    },
+    {
+      "id": "medium_s123_milk_alias",
+      "scenario": "snack_kitchen",
+      "difficulty": "medium",
+      "seed": 123,
+      "instruction": "Put the milk bottle in the blue serving tray.",
+      "objects": [
+        "milk"
+      ],
+      "destination": "serving_tray",
+      "impossible": false
+    },
+    {
+      "id": "medium_s123_two_items",
+      "scenario": "snack_kitchen",
+      "difficulty": "medium",
+      "seed": 123,
+      "instruction": "Put the apple and the water bottle in the blue serving tray. Leave the pudding on the counter.",
+      "objects": [
+        "apple",
+        "water_bottle"
+      ],
+      "destination": "serving_tray",
+      "impossible": false
+    },
+    {
+      "id": "medium_s123_basket",
+      "scenario": "snack_kitchen",
+      "difficulty": "medium",
+      "seed": 123,
+      "instruction": "Put the apple in the brown storage basket.",
+      "objects": [
+        "apple"
+      ],
+      "destination": "storage_basket",
+      "impossible": false
+    },
+    {
+      "id": "medium_s123_impossible",
+      "scenario": "snack_kitchen",
+      "difficulty": "medium",
+      "seed": 123,
+      "instruction": "Put the banana in the blue serving tray.",
+      "objects": [],
+      "destination": "serving_tray",
+      "impossible": true
+    },
+    {
+      "id": "hard_s7_apple",
+      "scenario": "snack_kitchen",
+      "difficulty": "hard",
+      "seed": 7,
+      "instruction": "Put the apple in the blue serving tray.",
+      "objects": [
+        "apple"
+      ],
+      "destination": "serving_tray",
+      "impossible": false
+    },
+    {
+      "id": "hard_s7_water",
+      "scenario": "snack_kitchen",
+      "difficulty": "hard",
+      "seed": 7,
+      "instruction": "Put the water bottle in the blue serving tray.",
+      "objects": [
+        "water_bottle"
+      ],
+      "destination": "serving_tray",
+      "impossible": false
+    },
+    {
+      "id": "hard_s7_cheezit",
+      "scenario": "snack_kitchen",
+      "difficulty": "hard",
+      "seed": 7,
+      "instruction": "Put the cheezit in the blue serving tray.",
+      "objects": [
+        "food_003_cracker_box"
+      ],
+      "destination": "serving_tray",
+      "impossible": false
+    },
+    {
+      "id": "hard_s7_milk_alias",
+      "scenario": "snack_kitchen",
+      "difficulty": "hard",
+      "seed": 7,
+      "instruction": "Put the milk bottle in the blue serving tray.",
+      "objects": [
+        "milk"
+      ],
+      "destination": "serving_tray",
+      "impossible": false
+    },
+    {
+      "id": "hard_s7_two_items",
+      "scenario": "snack_kitchen",
+      "difficulty": "hard",
+      "seed": 7,
+      "instruction": "Put the apple and the water bottle in the blue serving tray. Leave the pudding on the counter.",
+      "objects": [
+        "apple",
+        "water_bottle"
+      ],
+      "destination": "serving_tray",
+      "impossible": false
+    },
+    {
+      "id": "hard_s7_basket",
+      "scenario": "snack_kitchen",
+      "difficulty": "hard",
+      "seed": 7,
+      "instruction": "Put the apple in the brown storage basket.",
+      "objects": [
+        "apple"
+      ],
+      "destination": "storage_basket",
+      "impossible": false
+    },
+    {
+      "id": "hard_s7_impossible",
+      "scenario": "snack_kitchen",
+      "difficulty": "hard",
+      "seed": 7,
+      "instruction": "Put the banana in the blue serving tray.",
+      "objects": [],
+      "destination": "serving_tray",
+      "impossible": true
+    },
+    {
+      "id": "hard_s42_apple",
+      "scenario": "snack_kitchen",
+      "difficulty": "hard",
+      "seed": 42,
+      "instruction": "Put the apple in the blue serving tray.",
+      "objects": [
+        "apple"
+      ],
+      "destination": "serving_tray",
+      "impossible": false
+    },
+    {
+      "id": "hard_s42_water",
+      "scenario": "snack_kitchen",
+      "difficulty": "hard",
+      "seed": 42,
+      "instruction": "Put the water bottle in the blue serving tray.",
+      "objects": [
+        "water_bottle"
+      ],
+      "destination": "serving_tray",
+      "impossible": false
+    },
+    {
+      "id": "hard_s42_cheezit",
+      "scenario": "snack_kitchen",
+      "difficulty": "hard",
+      "seed": 42,
+      "instruction": "Put the cheezit in the blue serving tray.",
+      "objects": [
+        "food_003_cracker_box"
+      ],
+      "destination": "serving_tray",
+      "impossible": false
+    },
+    {
+      "id": "hard_s42_milk_alias",
+      "scenario": "snack_kitchen",
+      "difficulty": "hard",
+      "seed": 42,
+      "instruction": "Put the milk bottle in the blue serving tray.",
+      "objects": [
+        "milk"
+      ],
+      "destination": "serving_tray",
+      "impossible": false
+    },
+    {
+      "id": "hard_s42_two_items",
+      "scenario": "snack_kitchen",
+      "difficulty": "hard",
+      "seed": 42,
+      "instruction": "Put the apple and the water bottle in the blue serving tray. Leave the pudding on the counter.",
+      "objects": [
+        "apple",
+        "water_bottle"
+      ],
+      "destination": "serving_tray",
+      "impossible": false
+    },
+    {
+      "id": "hard_s42_basket",
+      "scenario": "snack_kitchen",
+      "difficulty": "hard",
+      "seed": 42,
+      "instruction": "Put the apple in the brown storage basket.",
+      "objects": [
+        "apple"
+      ],
+      "destination": "storage_basket",
+      "impossible": false
+    },
+    {
+      "id": "hard_s42_impossible",
+      "scenario": "snack_kitchen",
+      "difficulty": "hard",
+      "seed": 42,
+      "instruction": "Put the banana in the blue serving tray.",
+      "objects": [],
+      "destination": "serving_tray",
+      "impossible": true
+    },
+    {
+      "id": "hard_s123_apple",
+      "scenario": "snack_kitchen",
+      "difficulty": "hard",
+      "seed": 123,
+      "instruction": "Put the apple in the blue serving tray.",
+      "objects": [
+        "apple"
+      ],
+      "destination": "serving_tray",
+      "impossible": false
+    },
+    {
+      "id": "hard_s123_water",
+      "scenario": "snack_kitchen",
+      "difficulty": "hard",
+      "seed": 123,
+      "instruction": "Put the water bottle in the blue serving tray.",
+      "objects": [
+        "water_bottle"
+      ],
+      "destination": "serving_tray",
+      "impossible": false
+    },
+    {
+      "id": "hard_s123_cheezit",
+      "scenario": "snack_kitchen",
+      "difficulty": "hard",
+      "seed": 123,
+      "instruction": "Put the cheezit in the blue serving tray.",
+      "objects": [
+        "food_003_cracker_box"
+      ],
+      "destination": "serving_tray",
+      "impossible": false
+    },
+    {
+      "id": "hard_s123_milk_alias",
+      "scenario": "snack_kitchen",
+      "difficulty": "hard",
+      "seed": 123,
+      "instruction": "Put the milk bottle in the blue serving tray.",
+      "objects": [
+        "milk"
+      ],
+      "destination": "serving_tray",
+      "impossible": false
+    },
+    {
+      "id": "hard_s123_two_items",
+      "scenario": "snack_kitchen",
+      "difficulty": "hard",
+      "seed": 123,
+      "instruction": "Put the apple and the water bottle in the blue serving tray. Leave the pudding on the counter.",
+      "objects": [
+        "apple",
+        "water_bottle"
+      ],
+      "destination": "serving_tray",
+      "impossible": false
+    },
+    {
+      "id": "hard_s123_basket",
+      "scenario": "snack_kitchen",
+      "difficulty": "hard",
+      "seed": 123,
+      "instruction": "Put the apple in the brown storage basket.",
+      "objects": [
+        "apple"
+      ],
+      "destination": "storage_basket",
+      "impossible": false
+    },
+    {
+      "id": "hard_s123_impossible",
+      "scenario": "snack_kitchen",
+      "difficulty": "hard",
+      "seed": 123,
+      "instruction": "Put the banana in the blue serving tray.",
+      "objects": [],
+      "destination": "serving_tray",
+      "impossible": true
+    },
+    {
+      "scenario": "snack_kitchen",
+      "difficulty": "easy",
+      "seed": 42,
+      "destination": "serving_tray",
+      "impossible": false,
+      "id": "easy_s42_on_the_tray",
+      "instruction": "Put the apple on the tray.",
+      "objects": [
+        "apple"
+      ],
+      "answers": [
+        "the blue serving tray"
+      ]
+    },
+    {
+      "scenario": "snack_kitchen",
+      "difficulty": "easy",
+      "seed": 42,
+      "destination": "serving_tray",
+      "impossible": false,
+      "id": "easy_s42_occupied_tray",
+      "instruction": "Put the cheezit in the blue serving tray.",
+      "objects": [
+        "food_003_cracker_box"
+      ],
+      "setup": {
+        "preplace": {
+          "apple": "serving_tray"
+        }
+      },
+      "preserve": [
+        "apple"
+      ]
+    },
+    {
+      "scenario": "snack_kitchen",
+      "difficulty": "easy",
+      "seed": 42,
+      "destination": "serving_tray",
+      "impossible": false,
+      "id": "easy_s42_milk_session",
+      "instruction": "Put the milk bottle on the tray.",
+      "objects": [
+        "milk",
+        "food_003_cracker_box"
+      ],
+      "instructions": [
+        {
+          "request": "Put the milk bottle on the tray.",
+          "answers": [
+            "the blue serving tray"
+          ]
+        },
+        {
+          "request": "Put the cheezit on that same tray. Leave the milk bottle where you placed it.",
+          "answers": [
+            "the blue serving tray"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": "snack_kitchen",
+      "difficulty": "easy",
+      "seed": 42,
+      "destination": "serving_tray",
+      "impossible": false,
+      "id": "easy_s42_cheezit_back",
+      "instruction": "Put the cheezit in the blue serving tray.",
+      "objects": [
+        "food_003_cracker_box"
+      ],
+      "setup": {
+        "rotate_yaw_deg": {
+          "food_003_cracker_box": 180
+        }
+      },
+      "view_requirement": "Confirm the saved source wrist crop shows the back of the cracker box; yaw alone does not prove it."
+    },
+    {
+      "scenario": "snack_kitchen",
+      "difficulty": "medium",
+      "seed": 42,
+      "destination": "serving_tray",
+      "impossible": false,
+      "id": "medium_s42_on_the_tray",
+      "instruction": "Put the apple on the tray.",
+      "objects": [
+        "apple"
+      ],
+      "answers": [
+        "the blue serving tray"
+      ]
+    },
+    {
+      "scenario": "snack_kitchen",
+      "difficulty": "medium",
+      "seed": 42,
+      "destination": "serving_tray",
+      "impossible": false,
+      "id": "medium_s42_occupied_tray",
+      "instruction": "Put the cheezit in the blue serving tray.",
+      "objects": [
+        "food_003_cracker_box"
+      ],
+      "setup": {
+        "preplace": {
+          "apple": "serving_tray"
+        }
+      },
+      "preserve": [
+        "apple"
+      ]
+    },
+    {
+      "scenario": "snack_kitchen",
+      "difficulty": "medium",
+      "seed": 42,
+      "destination": "serving_tray",
+      "impossible": false,
+      "id": "medium_s42_milk_session",
+      "instruction": "Put the milk bottle on the tray.",
+      "objects": [
+        "milk",
+        "food_003_cracker_box"
+      ],
+      "instructions": [
+        {
+          "request": "Put the milk bottle on the tray.",
+          "answers": [
+            "the blue serving tray"
+          ]
+        },
+        {
+          "request": "Put the cheezit on that same tray. Leave the milk bottle where you placed it.",
+          "answers": [
+            "the blue serving tray"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": "snack_kitchen",
+      "difficulty": "medium",
+      "seed": 42,
+      "destination": "serving_tray",
+      "impossible": false,
+      "id": "medium_s42_cheezit_back",
+      "instruction": "Put the cheezit in the blue serving tray.",
+      "objects": [
+        "food_003_cracker_box"
+      ],
+      "setup": {
+        "rotate_yaw_deg": {
+          "food_003_cracker_box": 180
+        }
+      },
+      "view_requirement": "Confirm the saved source wrist crop shows the back of the cracker box; yaw alone does not prove it."
+    }
+  ]
+}

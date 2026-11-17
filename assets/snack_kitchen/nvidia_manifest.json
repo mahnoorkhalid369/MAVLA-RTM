@@ -1,0 +1,440 @@
+{
+  "source": "NVIDIA Omniverse Residential Assets Pack",
+  "source_page": "https://docs.omniverse.nvidia.com/usd/latest/usd_content_samples/downloadable_packs.html#residential-assets-pack",
+  "archive_url": "https://d4i3qtqj3r0z5.cloudfront.net/Residential_NVD%4010012.zip",
+  "archive_bytes": 22889899286,
+  "license_file": "PACKAGE-LICENSES/Residential_NVD-license.txt",
+  "runtime_materials": [
+    "OmniPBR.mdl",
+    "OmniGlass.mdl"
+  ],
+  "files": [
+    {
+      "path": "Assets/ArchVis/Residential/Appliances/Microwaves/Textures/microwave_AluminiumBase_BaseColor.png",
+      "bytes": 2320229,
+      "sha256": "abdf277173e1b7b45bb506581b2f939ce7bf5be53b06df31717416cf2e0f447e"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Appliances/Microwaves/Textures/microwave_AluminiumBase_Metallic.png",
+      "bytes": 709364,
+      "sha256": "c33b9d7e7fe2486484c52fb13b7b2161517a0b1bed51a8334de507fe396bc658"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Appliances/Microwaves/Textures/microwave_AluminiumBase_Normal.png",
+      "bytes": 2550986,
+      "sha256": "c9d3ceff282f1711d7ca0319cae22d770aad446c8152cd63fd44bf99e42cfe2f"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Appliances/Microwaves/Textures/microwave_AluminiumBase_Roughness.png",
+      "bytes": 1951697,
+      "sha256": "f8d57ea93982e5b1f8bfa24634c2c7527ed919090f44657a030b3ea3e98e17e9"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Appliances/Microwaves/Textures/microwave_AluminiumShiny_BaseColor.png",
+      "bytes": 633392,
+      "sha256": "49625a755cda7ec0971742c8e750ddbebcf7d44342de4dd7a735b91eb5abf702"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Appliances/Microwaves/Textures/microwave_AluminiumShiny_Metallic.png",
+      "bytes": 141423,
+      "sha256": "74b3aae91c1d05399b6b87b02779b64f29c88c4e97736f54eaec3f93cfb43844"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Appliances/Microwaves/Textures/microwave_AluminiumShiny_Normal.png",
+      "bytes": 326664,
+      "sha256": "420384bad30fa0b09975b2948f8167abb6602511c926b4727093493bc133beaf"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Appliances/Microwaves/Textures/microwave_AluminiumShiny_Roughness.png",
+      "bytes": 1682824,
+      "sha256": "49080ebb3ff063634e28dd1ad1c789ecd793ed6a7e1927af1e600660dd73eea5"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Appliances/Microwaves/Textures/microwave_ControlPanel_BaseColor.png",
+      "bytes": 2677269,
+      "sha256": "40812dbd474c5fffd53ecf82a2ba2d961b9a77c917a204092df7b556a8be8b2a"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Appliances/Microwaves/Textures/microwave_ControlPanel_Emissive.png",
+      "bytes": 274883,
+      "sha256": "58e76b101ad82f198b9067ed5fad90175f6c34f843ee8ce35adddb3c7b5ba1a4"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Appliances/Microwaves/Textures/microwave_ControlPanel_Normal.png",
+      "bytes": 213950,
+      "sha256": "57dca41ff8df1e27cd686ad5494088e1ba09759ff00ad59550698ba9e55d3b9e"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Appliances/Microwaves/Textures/microwave_ControlPanel_Roughness.png",
+      "bytes": 1772885,
+      "sha256": "cdfaff437170fed347871f80b20157a3b5e52c31d28d194d81fcea2832f0604f"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Appliances/Microwaves/Textures/microwave_GlassDark_Normal.png",
+      "bytes": 139367,
+      "sha256": "70604ee427906cfdd28a0c76b71b7044bea15c24b413c1e8c66107317770d9f1"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Appliances/Microwaves/Textures/microwave_GlassDark_Roughness.png",
+      "bytes": 1305764,
+      "sha256": "992f4e257eb48e80ebdd1a2924a17f992f5876864976812716c7bda13d7b1de0"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Appliances/Microwaves/Textures/microwave_Interior_BaseColor.png",
+      "bytes": 5172534,
+      "sha256": "7dc63ecc2b9ef2d162bdb0c19b48b5ab00cb293c3986264f3f76e2e470e2a550"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Appliances/Microwaves/Textures/microwave_Interior_Metallic.png",
+      "bytes": 115681,
+      "sha256": "6f6d0dc1ae379942d4d4250e8a7aef8f2027d5661b9cde4c89b49cd9fd4553c6"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Appliances/Microwaves/Textures/microwave_Interior_Normal.png",
+      "bytes": 392086,
+      "sha256": "2b72a2c219d6536a2346e61348dfad78809b1662ce832fafbfd8da877646a6c9"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Appliances/Microwaves/Textures/microwave_Interior_Opacity.png",
+      "bytes": 108803,
+      "sha256": "b3bb43980f93ad0ead7f0cd3e3883c627df0f51d239675165b9cd2bccbf2ee88"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Appliances/Microwaves/Textures/microwave_Interior_Roughness.png",
+      "bytes": 1115176,
+      "sha256": "6538a519b1501439988458f151ba46fdc245fd7c51bd03b0f0702fccb3a9a772"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Appliances/Microwaves/Textures/microwave_MetalDarkPainted_BaseColor.png",
+      "bytes": 5322398,
+      "sha256": "9f24dba7505bc2dbe1a898a3f7d2b7274a5fb307a606962cbc6dc5831af6cdfe"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Appliances/Microwaves/Textures/microwave_MetalDarkPainted_Metallic.png",
+      "bytes": 1288033,
+      "sha256": "9520ee7c76cdff7e7247628fcab05bb86a3f32de3e0298d323c85a57fee00ff7"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Appliances/Microwaves/Textures/microwave_MetalDarkPainted_Normal.png",
+      "bytes": 2839722,
+      "sha256": "f05823c3998a764b7a4ebb94411770c6162cf97719c60d3a09719ce50e4a8eb5"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Appliances/Microwaves/Textures/microwave_MetalDarkPainted_Roughness.png",
+      "bytes": 2074065,
+      "sha256": "aa2cc470065103c379f970a63b47660b743b488d74e2c3881ada319a8c53037f"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Appliances/Microwaves/Textures/microwave_PlasticDarkHard_BaseColor.png",
+      "bytes": 1564785,
+      "sha256": "e5a088f5d57e04a1d6acaab73f6ecf50203ffa9af88ad056e3e6c8312b412160"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Appliances/Microwaves/Textures/microwave_PlasticDarkSoft_BaseColor.png",
+      "bytes": 2729013,
+      "sha256": "06212a39fe2e1555ca7318e8e58a6f33b86e91ee6bca6c167e020aa193a71c96"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Appliances/Microwaves/Textures/microwave_PlasticDarkSoft_Normal.png",
+      "bytes": 16901,
+      "sha256": "c81c086a2c19b0c9398dae6529a9792f384f8ca7cebbfbec5f2fce92dbd193f5"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Appliances/Microwaves/Textures/microwave_PlasticDarkSoft_Roughness.png",
+      "bytes": 2147650,
+      "sha256": "6dec2c37b759e1c377596179f08e39910a578b8ea7448f44b699566f6cbbf357"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Appliances/Microwaves/Textures/microwave_RadiationPattern.png",
+      "bytes": 603635,
+      "sha256": "9b838731d9df5299aad9aa7f5566f3d3817677cfb56c27a751a2f7ea3f316c61"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Appliances/Microwaves/Textures/microwave_StainlessSteel_BaseColor.png",
+      "bytes": 6807066,
+      "sha256": "2a0922c7d0547b86f93b2da017e82688d8741fbfbff58ce5b56d7adae91b666c"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Appliances/Microwaves/Textures/microwave_StainlessSteel_Metallic.png",
+      "bytes": 888357,
+      "sha256": "b8c0eeceb297438559057552b7f2244fc3844b83220e181ac562b1d0e5da9ee8"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Appliances/Microwaves/Textures/microwave_StainlessSteel_Normal.png",
+      "bytes": 320178,
+      "sha256": "27b076c97cf021bd0a8cbca48a56f6280230f79092802a0970e2001be3f5de71"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Appliances/Microwaves/Textures/microwave_StainlessSteel_Roughness.png",
+      "bytes": 2054875,
+      "sha256": "bbafaeeca756732a59be1ad4cb9fb9ebd0ebb40f73beaa8943452fa6936ef40a"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Appliances/Microwaves/microwave.usd",
+      "bytes": 4435908,
+      "sha256": "13c51f3e7fc69a561aaef7562e46c93a9636689080393a40fb0c7735b82e8ed8"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Appliances/Refrigerators/Textures/fridge_AluminiumBase_BaseColor.png",
+      "bytes": 2320229,
+      "sha256": "abdf277173e1b7b45bb506581b2f939ce7bf5be53b06df31717416cf2e0f447e"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Appliances/Refrigerators/Textures/fridge_AluminiumBase_Metallic.png",
+      "bytes": 709364,
+      "sha256": "c33b9d7e7fe2486484c52fb13b7b2161517a0b1bed51a8334de507fe396bc658"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Appliances/Refrigerators/Textures/fridge_AluminiumBase_Normal.png",
+      "bytes": 2550986,
+      "sha256": "c9d3ceff282f1711d7ca0319cae22d770aad446c8152cd63fd44bf99e42cfe2f"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Appliances/Refrigerators/Textures/fridge_AluminiumBase_Roughness.png",
+      "bytes": 1951697,
+      "sha256": "f8d57ea93982e5b1f8bfa24634c2c7527ed919090f44657a030b3ea3e98e17e9"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Appliances/Refrigerators/Textures/fridge_AluminiumShiny_BaseColor.png",
+      "bytes": 633392,
+      "sha256": "49625a755cda7ec0971742c8e750ddbebcf7d44342de4dd7a735b91eb5abf702"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Appliances/Refrigerators/Textures/fridge_AluminiumShiny_Metallic.png",
+      "bytes": 141423,
+      "sha256": "74b3aae91c1d05399b6b87b02779b64f29c88c4e97736f54eaec3f93cfb43844"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Appliances/Refrigerators/Textures/fridge_AluminiumShiny_Normal.png",
+      "bytes": 326664,
+      "sha256": "420384bad30fa0b09975b2948f8167abb6602511c926b4727093493bc133beaf"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Appliances/Refrigerators/Textures/fridge_AluminiumShiny_Roughness.png",
+      "bytes": 1682824,
+      "sha256": "49080ebb3ff063634e28dd1ad1c789ecd793ed6a7e1927af1e600660dd73eea5"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Appliances/Refrigerators/Textures/fridge_ControlPanel_BaseColor.png",
+      "bytes": 2756548,
+      "sha256": "ed84065d0c19c49877fb06d1cda840be76e34f3fa0ff999e0b7407dc142ceb28"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Appliances/Refrigerators/Textures/fridge_ControlPanel_Normal.png",
+      "bytes": 128873,
+      "sha256": "b0b4f50cc4d3c3bb7b15782b7a7b8eacbb269404d21e7d8ee65a8882e6a86495"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Appliances/Refrigerators/Textures/fridge_ControlPanel_Roughness.png",
+      "bytes": 2292541,
+      "sha256": "1391f9f9e405bd6db9a5c1503a6d7a6043e78d522fa79404934cde8464b090a4"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Appliances/Refrigerators/Textures/fridge_PlasticDarkSoft_BaseColor.png",
+      "bytes": 2729013,
+      "sha256": "06212a39fe2e1555ca7318e8e58a6f33b86e91ee6bca6c167e020aa193a71c96"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Appliances/Refrigerators/Textures/fridge_PlasticDarkSoft_Normal.png",
+      "bytes": 16901,
+      "sha256": "c81c086a2c19b0c9398dae6529a9792f384f8ca7cebbfbec5f2fce92dbd193f5"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Appliances/Refrigerators/Textures/fridge_PlasticDarkSoft_Roughness.png",
+      "bytes": 2147650,
+      "sha256": "6dec2c37b759e1c377596179f08e39910a578b8ea7448f44b699566f6cbbf357"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Appliances/Refrigerators/Textures/fridge_PlasticWhiteHard_BaseColor.png",
+      "bytes": 2442091,
+      "sha256": "5853c4bbeebbd8a0d5c75427c9a65bab162297b89d5b5bdaaac2ba9211c0659d"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Appliances/Refrigerators/Textures/fridge_PlasticWhiteHard_Roughness.png",
+      "bytes": 2279855,
+      "sha256": "10f9d8ee4cd01825e22fcba0a62aceff92254ae9d57f6b45d5d434ab94d40d3e"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Appliances/Refrigerators/Textures/fridge_StainlessSteel_BaseColor.png",
+      "bytes": 6807066,
+      "sha256": "2a0922c7d0547b86f93b2da017e82688d8741fbfbff58ce5b56d7adae91b666c"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Appliances/Refrigerators/Textures/fridge_StainlessSteel_Metallic.png",
+      "bytes": 888357,
+      "sha256": "b8c0eeceb297438559057552b7f2244fc3844b83220e181ac562b1d0e5da9ee8"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Appliances/Refrigerators/Textures/fridge_StainlessSteel_Normal.png",
+      "bytes": 320178,
+      "sha256": "27b076c97cf021bd0a8cbca48a56f6280230f79092802a0970e2001be3f5de71"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Appliances/Refrigerators/Textures/fridge_StainlessSteel_Roughness.png",
+      "bytes": 2054875,
+      "sha256": "bbafaeeca756732a59be1ad4cb9fb9ebd0ebb40f73beaa8943452fa6936ef40a"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Appliances/Refrigerators/fridge.usd",
+      "bytes": 30012755,
+      "sha256": "0205555f2af7f3b1542598a62f62dd7bab1757eac0d4e641dfd7f9619e3e2986"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Food/Fruit/Apple.usd",
+      "bytes": 492189,
+      "sha256": "bc4da593285d53315bc752e8808fba891f2023b160795019b2e024ff7da397b0"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Food/Fruit/Textures/apple_albedo.png",
+      "bytes": 6490098,
+      "sha256": "7a722c005482741ff109d28987845d312b1c5476a273cfeb49178384bb0074f2"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Food/Fruit/Textures/apple_metal.png",
+      "bytes": 4166,
+      "sha256": "bf083eb05987cb6308e0e47ff7b6d679875bc08f984cbcaf4ca82ea44f8927f4"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Food/Fruit/Textures/apple_normal.png",
+      "bytes": 614501,
+      "sha256": "bd42264a42a8bf04c2b264440b1fd4d7b056dbe472ab31d85cd7c89071a12768"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Food/Fruit/Textures/apple_rough.png",
+      "bytes": 2083271,
+      "sha256": "588f542192a83c373e99d3bc845ff39765220fed1c62c99938eedabbe7f4639b"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Kitchen/Kitchenware/CuttingBoards/Textures/Cutting_Board_BaseColor.png",
+      "bytes": 6904833,
+      "sha256": "ce6240b565120a1eb30c28870828fbcfb8ee195846e68daba3d3d51663c2cf77"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Kitchen/Kitchenware/CuttingBoards/Textures/Cutting_Board_Metallic.png",
+      "bytes": 4166,
+      "sha256": "bf083eb05987cb6308e0e47ff7b6d679875bc08f984cbcaf4ca82ea44f8927f4"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Kitchen/Kitchenware/CuttingBoards/Textures/Cutting_Board_Normal.png",
+      "bytes": 1945416,
+      "sha256": "109904485000cbc5b7e964138ee280030f31608f4c98e980a5e3039ed9c0597c"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Kitchen/Kitchenware/CuttingBoards/Textures/Cutting_Board_Roughness.png",
+      "bytes": 422632,
+      "sha256": "392d5bebf2c33bfdfa2c5098885129fdf617fb66cc57f97e71e8b45751468507"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Kitchen/Kitchenware/CuttingBoards/cutting_board_A.usd",
+      "bytes": 494326,
+      "sha256": "94be7d2bf137cc4924ebfe644f942021156fa71dccdc8b279e4c8a3923ce8b1e"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Kitchen/Kitchenware/Serving/Textures/White_Tray_albedo.png",
+      "bytes": 79405,
+      "sha256": "b1c1a419999ee1c3296ede293ec1764d5d9099ec2fc4957337ad5baff1ab25df"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Kitchen/Kitchenware/Serving/Textures/White_Tray_metal.png",
+      "bytes": 4166,
+      "sha256": "bf083eb05987cb6308e0e47ff7b6d679875bc08f984cbcaf4ca82ea44f8927f4"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Kitchen/Kitchenware/Serving/Textures/White_Tray_normal.png",
+      "bytes": 627955,
+      "sha256": "40c6462a0c537f652802946adc7be05f3c41d67f6af14c9f527cec2af4129697"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Kitchen/Kitchenware/Serving/Textures/White_Tray_rough.png",
+      "bytes": 786723,
+      "sha256": "0b355781e049ea814e9c92d01a6421752626ffde1091c09729c8d66ed17add88"
+    },
+    {
+      "path": "Assets/ArchVis/Residential/Kitchen/Kitchenware/Serving/white_tray.usd",
+      "bytes": 2203774,
+      "sha256": "4b54f96d9f939d3464e54d0db2e75c5d594a6178df23ed642dde4def2797ad93"
+    },
+    {
+      "path": "PACKAGE-LICENSES/Residential_NVD-license.txt",
+      "bytes": 372,
+      "sha256": "d928c749badf35ef34c8df57ee012cc1ae7c9e8f62cb04bf8092db114424e841"
+    }
+  ],
+  "models": {
+    "microwave": {
+      "file": "Assets/ArchVis/Residential/Appliances/Microwaves/microwave.usd",
+      "wrapper": "assets/snack_kitchen/models/microwave.usd",
+      "size_m": [
+        0.7454967498779297,
+        0.5444680786132813,
+        0.4678507232666016
+      ],
+      "source_metres_per_unit": 0.01,
+      "source_centre": [
+        0.0,
+        0.1717987060546875,
+        23.392536163330078
+      ]
+    },
+    "fridge": {
+      "file": "Assets/ArchVis/Residential/Appliances/Refrigerators/fridge.usd",
+      "wrapper": "assets/snack_kitchen/models/fridge.usd",
+      "size_m": [
+        1.8654753875732422,
+        0.7006390380859375,
+        1.8358661460876464
+      ],
+      "source_metres_per_unit": 0.01,
+      "source_centre": [
+        3.814697265625e-06,
+        0.0,
+        92.29079914093018
+      ]
+    },
+    "cutting_board": {
+      "file": "Assets/ArchVis/Residential/Kitchen/Kitchenware/CuttingBoards/cutting_board_A.usd",
+      "wrapper": "assets/snack_kitchen/models/cutting_board.usd",
+      "size_m": [
+        0.6145434761047364,
+        0.44693727493286134,
+        0.06079864501953125
+      ],
+      "source_metres_per_unit": 0.01,
+      "source_centre": [
+        0.013476371765136719,
+        1.9392099380493164,
+        3.0416011810302734
+      ]
+    },
+    "white_tray": {
+      "file": "Assets/ArchVis/Residential/Kitchen/Kitchenware/Serving/white_tray.usd",
+      "wrapper": "assets/snack_kitchen/models/white_tray.usd",
+      "size_m": [
+        0.3222747611999512,
+        0.08237653732299804,
+        0.07647979736328125
+      ],
+      "source_metres_per_unit": 0.01,
+      "source_centre": [
+        -0.00033283233642578125,
+        -0.016144752502441406,
+        3.8175182342529297
+      ]
+    },
+    "apple": {
+      "file": "Assets/ArchVis/Residential/Food/Fruit/Apple.usd",
+      "wrapper": "assets/snack_kitchen/models/apple.usd",
+      "size_m": [
+        0.08923133373260499,
+        0.0873969841003418,
+        0.10469616711139679
+      ],
+      "source_metres_per_unit": 0.01,
+      "source_centre": [
+        -0.3870060443878174,
+        1.1661968231201172,
+        5.138901323080063
+      ]
+    }
+  }
+}

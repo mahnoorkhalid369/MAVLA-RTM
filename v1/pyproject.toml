@@ -1,0 +1,14 @@
+# This version's packages live in src/. The launchers put src/ on PYTHONPATH, so no install is needed (v1/ and v2/
+# use the same package names, so neither is installed into the shared environments).
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vt6l-agent"
+version = "0.1.0"
+description = "Epson VT6L multimodal manipulation: Gemma-planned agent, Isaac Sim scenes, robot core"
+requires-python = ">=3.10"
+
+[tool.setuptools.packages.find]
+where = ["src"]

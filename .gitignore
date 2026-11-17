@@ -11,4 +11,16 @@ out/
 data/
 *.log
 # upstream Epson repository (external clone, 221 MB; the VT6L model in assets/ is self-contained)
-epson-robot-ros2/
+misc/epson-robot-ros2/
+
+# editable-install metadata (pyproject.toml)
+*.egg-info/
+
+# v1/ and v2/ link to the shared, ignored folders at the top level (the links are not committed)
+/v[0-9]*/.venv
+/v[0-9]*/.venv-seg
+/v[0-9]*/.venv-vlm
+/v[0-9]*/models
+/v[0-9]*/data
+/v[0-9]*/out
+/Untitled-1

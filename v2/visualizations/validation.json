@@ -1,0 +1,452 @@
+{
+  "standalone_sha256": "e5a57dca554010339f39d88a3f209b8e1b102a0f69ff38c51ce301010139658b",
+  "checks": {
+    "final": {
+      "width": 1366,
+      "height": 625,
+      "checks": [
+        {
+          "label": "next",
+          "ok": true
+        },
+        {
+          "label": "back",
+          "ok": true
+        },
+        {
+          "label": "play",
+          "ok": true
+        },
+        {
+          "label": "pause",
+          "ok": true
+        },
+        {
+          "label": "scrub",
+          "ok": true
+        },
+        {
+          "label": "mode success",
+          "ok": true
+        },
+        {
+          "label": "Gemma call count success",
+          "ok": true
+        },
+        {
+          "label": "mode clarify",
+          "ok": true
+        },
+        {
+          "label": "Gemma call count clarify",
+          "ok": true
+        },
+        {
+          "label": "mode failure",
+          "ok": true
+        },
+        {
+          "label": "Gemma call count failure",
+          "ok": true
+        },
+        {
+          "label": "mode rejection",
+          "ok": true
+        },
+        {
+          "label": "Gemma call count rejection",
+          "ok": true
+        },
+        {
+          "label": "mode setup",
+          "ok": true
+        },
+        {
+          "label": "Gemma call count setup",
+          "ok": true
+        },
+        {
+          "label": "prompts dialog",
+          "ok": true
+        },
+        {
+          "label": "close dialog",
+          "ok": true
+        },
+        {
+          "label": "all 29 templates",
+          "ok": true
+        },
+        {
+          "label": "no horizontal scrolling",
+          "ok": true
+        },
+        {
+          "label": "no vertical scrolling",
+          "ok": true
+        },
+        {
+          "label": "nodes fit",
+          "ok": true
+        }
+      ],
+      "issues": [],
+      "state": {
+        "mode": "success",
+        "index": 2,
+        "playing": false,
+        "steps": 19,
+        "calls": 1,
+        "active": [
+          "user",
+          "table",
+          "master",
+          "state",
+          "gemma",
+          "prompts"
+        ],
+        "geometryVersion": 2
+      }
+    },
+    "small": {
+      "width": 1280,
+      "height": 577,
+      "checks": [
+        {
+          "label": "next",
+          "ok": true
+        },
+        {
+          "label": "back",
+          "ok": true
+        },
+        {
+          "label": "play",
+          "ok": true
+        },
+        {
+          "label": "pause",
+          "ok": true
+        },
+        {
+          "label": "scrub",
+          "ok": true
+        },
+        {
+          "label": "mode success",
+          "ok": true
+        },
+        {
+          "label": "Gemma call count success",
+          "ok": true
+        },
+        {
+          "label": "mode clarify",
+          "ok": true
+        },
+        {
+          "label": "Gemma call count clarify",
+          "ok": true
+        },
+        {
+          "label": "mode failure",
+          "ok": true
+        },
+        {
+          "label": "Gemma call count failure",
+          "ok": true
+        },
+        {
+          "label": "mode rejection",
+          "ok": true
+        },
+        {
+          "label": "Gemma call count rejection",
+          "ok": true
+        },
+        {
+          "label": "mode setup",
+          "ok": true
+        },
+        {
+          "label": "Gemma call count setup",
+          "ok": true
+        },
+        {
+          "label": "prompts dialog",
+          "ok": true
+        },
+        {
+          "label": "close dialog",
+          "ok": true
+        },
+        {
+          "label": "all 29 templates",
+          "ok": true
+        },
+        {
+          "label": "no horizontal scrolling",
+          "ok": true
+        },
+        {
+          "label": "no vertical scrolling",
+          "ok": true
+        },
+        {
+          "label": "nodes fit",
+          "ok": true
+        }
+      ],
+      "issues": [],
+      "state": {
+        "mode": "success",
+        "index": 2,
+        "playing": false,
+        "steps": 19,
+        "calls": 1,
+        "active": [
+          "user",
+          "table",
+          "master",
+          "state",
+          "gemma",
+          "prompts"
+        ],
+        "geometryVersion": 2
+      }
+    },
+    "320": {
+      "width": 500,
+      "height": 907,
+      "checks": [
+        {
+          "label": "next",
+          "ok": true
+        },
+        {
+          "label": "back",
+          "ok": true
+        },
+        {
+          "label": "play",
+          "ok": true
+        },
+        {
+          "label": "pause",
+          "ok": true
+        },
+        {
+          "label": "scrub",
+          "ok": true
+        },
+        {
+          "label": "mode success",
+          "ok": true
+        },
+        {
+          "label": "Gemma call count success",
+          "ok": true
+        },
+        {
+          "label": "mode clarify",
+          "ok": true
+        },
+        {
+          "label": "Gemma call count clarify",
+          "ok": true
+        },
+        {
+          "label": "mode failure",
+          "ok": true
+        },
+        {
+          "label": "Gemma call count failure",
+          "ok": true
+        },
+        {
+          "label": "mode rejection",
+          "ok": true
+        },
+        {
+          "label": "Gemma call count rejection",
+          "ok": true
+        },
+        {
+          "label": "mode setup",
+          "ok": true
+        },
+        {
+          "label": "Gemma call count setup",
+          "ok": true
+        },
+        {
+          "label": "prompts dialog",
+          "ok": true
+        },
+        {
+          "label": "close dialog",
+          "ok": true
+        },
+        {
+          "label": "all 29 templates",
+          "ok": true
+        },
+        {
+          "label": "no horizontal scrolling",
+          "ok": true
+        },
+        {
+          "label": "no vertical scrolling",
+          "ok": true
+        },
+        {
+          "label": "nodes fit",
+          "ok": true
+        }
+      ],
+      "issues": [],
+      "state": {
+        "mode": "success",
+        "index": 2,
+        "playing": false,
+        "steps": 19,
+        "calls": 1,
+        "active": [
+          "user",
+          "table",
+          "master",
+          "state",
+          "gemma",
+          "prompts"
+        ],
+        "geometryVersion": 7
+      }
+    },
+    "large": {
+      "width": 1840,
+      "height": 857,
+      "checks": [
+        {
+          "label": "next",
+          "ok": true
+        },
+        {
+          "label": "back",
+          "ok": true
+        },
+        {
+          "label": "play",
+          "ok": true
+        },
+        {
+          "label": "pause",
+          "ok": true
+        },
+        {
+          "label": "scrub",
+          "ok": true
+        },
+        {
+          "label": "mode success",
+          "ok": true
+        },
+        {
+          "label": "Gemma call count success",
+          "ok": true
+        },
+        {
+          "label": "mode clarify",
+          "ok": true
+        },
+        {
+          "label": "Gemma call count clarify",
+          "ok": true
+        },
+        {
+          "label": "mode failure",
+          "ok": true
+        },
+        {
+          "label": "Gemma call count failure",
+          "ok": true
+        },
+        {
+          "label": "mode rejection",
+          "ok": true
+        },
+        {
+          "label": "Gemma call count rejection",
+          "ok": true
+        },
+        {
+          "label": "mode setup",
+          "ok": true
+        },
+        {
+          "label": "Gemma call count setup",
+          "ok": true
+        },
+        {
+          "label": "prompts dialog",
+          "ok": true
+        },
+        {
+          "label": "close dialog",
+          "ok": true
+        },
+        {
+          "label": "all 29 templates",
+          "ok": true
+        },
+        {
+          "label": "no horizontal scrolling",
+          "ok": true
+        },
+        {
+          "label": "no vertical scrolling",
+          "ok": true
+        },
+        {
+          "label": "nodes fit",
+          "ok": true
+        }
+      ],
+      "issues": [],
+      "state": {
+        "mode": "success",
+        "index": 2,
+        "playing": false,
+        "steps": 19,
+        "calls": 1,
+        "active": [
+          "user",
+          "table",
+          "master",
+          "state",
+          "gemma",
+          "prompts"
+        ],
+        "geometryVersion": 2
+      }
+    },
+    "timed": {
+      "movingPackets": true,
+      "autoplayAdvanced": true,
+      "replayAfterEnd": true,
+      "state": {
+        "mode": "success",
+        "index": 1,
+        "playing": true,
+        "steps": 19,
+        "calls": 0,
+        "active": [
+          "table",
+          "loop",
+          "state"
+        ],
+        "geometryVersion": 2
+      }
+    }
+  },
+  "scope": "Browser-only animation checks; no robot or model inference was run."
+}

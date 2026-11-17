@@ -1,0 +1,24 @@
+# Demo for the presentation: the same model with the embedding table in CPU RAM vs on the GPU, next to Isaac Sim.
+#   .venv-seg/bin/python -m gpumon bench gpumon/examples/demo_offload.toml
+# Expected: "offload" loads, the simulator starts and the task runs; "no_offload" fills the 12 GB GPU and Isaac Sim
+# exits with ERROR_OUT_OF_DEVICE_MEMORY (a feasibility result). Then: python -m gpumon compare out/gpumon/bench/demo_offload
+name = "demo_offload"
+repeats = 1
+hz = 10
+timeout_s = 900
+cooldown_s = 20
+torch_hook = true
+launcher = "launch/agent.sh"
+launcher_args = ["--headless", "--motion", "real", "--ask", "scripted",
+                 "--scenario", "workcell", "--difficulty", "hard", "--seed", "42"]
+instructions = ["Put the red cube on the green cube."]
+
+[[config]]
+label = "offload"
+gemma = "models/gemma-4-E4B-it"
+env = { VLM_QUANTIZATION = "4bit", VLM_EMBEDDINGS_ON_CPU = "1" }
+
+[[config]]
+label = "no_offload"
+gemma = "models/gemma-4-E4B-it"
+env = { VLM_QUANTIZATION = "4bit", VLM_EMBEDDINGS_ON_CPU = "0" }
