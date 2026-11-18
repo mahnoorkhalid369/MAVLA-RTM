@@ -110,7 +110,7 @@ The conversation so far:
 {talk}
 
 The master asks you: {message}
-Describe what you really see in the picture that matters for this: where each thing in question stands now, and anything that is missing, fallen over or in a wrong place. Report only what you see; the master judges. At most four short sentences."""
+Describe what you really see in the picture that matters for this. For each thing in question, find it in the picture first, then say what is directly under it: the bare table, or a tray or another object it stands in or on. The measured positions above come from this same picture and can help you find things. Also name anything from the user's request that is not where it should be, and anything fallen over. Report only what you see; the master judges. At most four short sentences."""
 
 PERCEIVE = """You are the perception worker of a robot team. The picture shows the table through the overhead camera.
 
