@@ -6,6 +6,7 @@ object fits and the arm can put it down, and a picture that shows that spot back
 """
 
 import dataclasses
+import time
 
 import cv2
 import numpy as np
@@ -181,6 +182,55 @@ class Robot(frozen.Robot):
         cv2.imwrite(str(self.t.run_dir / "images" / f"{self.view.frame_id}_place_{plan.object_id}.jpg"),
                     cv2.cvtColor(shown, cv2.COLOR_RGB2BGR))
         return shown, round(float(np.hypot(x - self.target[0], y - self.target[1])) * 1000)
+
+    # ------------------------------------------------------------------ gripping
+    def _settle(self):
+        """Waits until the fingers stand still, so that a finger still on its way is not taken for contact."""
+        last = self.t.bridge.finger()
+        for _ in range(12):
+            time.sleep(0.35)
+            now = self.t.bridge.finger()
+            if abs(now - last) < np.radians(0.1):
+                return
+            last = now
+
+    def _grasp(self, plan):
+        """Hover, descend, close by touch, lift. True when the fingers hold the object after the lift.
+
+        The frozen robot closes to (the width the camera estimated - 16 mm). The finger drive is soft, so the grip
+        force is set by how far past the object's real surface that is: a width estimated too small (a round object
+        seen from the side) grips far too hard and squeezes the object out. Here the fingers step in until they
+        stall on the object, and then close a fixed distance past the gap they felt: the same force for every
+        object, whatever the camera estimated."""
+        t = self.t
+        self._do(plan.hover + plan.approach[:1], "approach")
+        gap, felt = min(config.GRIP_OPEN_M, max(plan.held.width, plan.held.length or 0.0) + config.GRIP_STEP_M), None
+        while gap > config.GRIP_STEP_M:
+            close = frozen.GripperStep(frozen.finger_angle_for_gap(gap), "close gripper", 0.6)
+            self._do([close], "close")
+            self._settle()
+            felt = t.verify_contact(close.position)
+            if felt.get("pass"):
+                break
+            gap, felt = gap - config.GRIP_STEP_M, None
+        if felt is None:
+            self.say("robot", "finger check after closing: NO contact, the fingers closed on nothing")
+            self._do([frozen.GripperStep(frozen.GRIPPER_OPEN, "open gripper", 0.8)], "open")
+            return False
+        close = frozen.GripperStep(frozen.finger_angle_for_gap(max(felt["gap_mm"] / 1000 - config.GRIP_SQUEEZE_M, 0.0)), "close gripper", 0.6)
+        self._do([close], "close")
+        self._settle()
+        held = t.verify_contact(close.position)
+        self.say("robot", f"finger check after closing: the fingers touch the object, {held['gap_mm']:.0f} mm apart")
+        t.set_held(plan, close.position)
+        self._do(plan.lift, "lift")
+        held = t.confirm_held(close.position, plan.object_id, "retention")["pass"]
+        self.say("robot", "finger check after the lift: " + ("the object is held" if held else "NOTHING is held"))
+        if held:
+            return True
+        t.clear_held()
+        self._do([frozen.GripperStep(frozen.GRIPPER_OPEN, "open gripper", 0.8)], "open")  # a closed gripper cannot go HOME
+        return False
 
     def carry_out(self, plan):
         """Do a plan from aim(): grip, lift, carry, put down, back to HOME. Returns (ok, what happened)."""
