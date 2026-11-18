@@ -88,6 +88,30 @@ Not solved: the fruit cup is usually lost at its first pick from where it stands
 centre and grip force are right. A squeeze of 8 mm was too weak (the cup slipped), and gripping 10 mm lower made
 the gripper touch the apple's collision shape, which in v2's scene is a cylinder 8 mm taller than the visible apple.
 
+## The grip: closing by touch
+
+The frozen v3 closes the fingers to (the width the camera estimated - 16 mm). The finger drive is soft, so the grip
+force depends on how far past the object's real surface that is. For the apple the estimate was 43.5 mm instead of
+67 mm: the fingers were driven about 39 mm past its surface, with about 2.5 times the force of a working grip, and
+the apple slid toward the fingertips during every lift.
+
+Here the fingers step in (4 mm at a time) until they stall on the object, and then close a fixed 16 mm past the gap
+they felt. Every object gets the same force, whatever the camera estimated. The values are in `v3_config.py`.
+
+Measured by moving the apple and the fruit cup back and forth without the language model
+(`out/v3d/experiments/grip_2026-11-18_*`):
+
+| | Frozen grip | Closing by touch |
+|---|---|---|
+| Apple: where the fingers stop | 53 mm (67 mm wide apple) | 67 mm |
+| Apple: slides during the lift | 5 to 14 mm, every pick | about 5 mm, held 3 of 3 |
+| Fruit cup, first pick from its start spot | lost 4 of 6 | lost 2 of 2 |
+| Fruit cup, picked from another spot | held 2 of 2 | held 1 of 1 |
+
+Not solved: the fruit cup is usually lost at its first pick from where it stands at the start, although its width,
+centre and grip force are right. A squeeze of 8 mm was too weak (the cup slipped), and gripping 10 mm lower made
+the gripper touch the apple's collision shape, which in v2's scene is a cylinder 8 mm taller than the visible apple.
+
 ## Tests
 
 ```bash
