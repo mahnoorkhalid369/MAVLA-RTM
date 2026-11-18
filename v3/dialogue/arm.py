@@ -196,7 +196,7 @@ class Robot(frozen.Robot):
             self._do(plan.place[-1:], "retreat")
             t.clear_held()
             x, y = plan.target_centre[:2]
-            return self._home(True, f"carried and released at x {x * 1000:+.0f}, y {y * 1000:+.0f} mm")
+            return self._home(True, f"let go of at x {x * 1000:+.0f}, y {y * 1000:+.0f} mm; where it stands now has not been checked")
         except (PlanningError, RuntimeError) as error:
             return self._home(False, str(error))
         finally:

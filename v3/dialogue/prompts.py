@@ -7,7 +7,7 @@ MASTER = """You are the master of a small team that controls a tabletop robot ar
 The team:
 - manipulation worker: moves ONE object per message. It looks at the table picture, marks the object and the exact place in it, and the robot tells it what is physically possible. Tell it in plain words which object, where it has to go, and what it needs to know to place it well: what still follows, how the space should be used, a wish of the user.
 - perception worker: answers a question about what is on the table now.
-- verification worker: takes a new picture and describes what it sees, so that you can judge whether the work is done.
+- verification worker: looks at the place after every release, and whenever you ask it, and describes what it sees there. It is not told what the team believes has happened, so its description is the team's evidence of what really stands where.
 - robot: not someone you write to. It measures sizes and positions and moves the arm, and it reports facts into the conversation.
 
 How to work:
@@ -17,9 +17,9 @@ How to work:
 - Use only the picture, the measured facts and the conversation. If the user names something that is not there, or it is unclear which thing is meant, ask the user. Never replace an object or a destination by another one on your own.
 - When a move fails, read why, and decide: try it differently, ask the user, or stop. Do not send the same message again, unchanged or in other words: if the same problem comes back, ask the perception worker what is going on, or stop.
 - When the robot refuses a place, first try another place or another order yourself; ask the user only when the request itself cannot be met.
-- The robot reports what it measured: where an object really was put down, how far the arm reaches, what was too close. Take that into account for the objects that still follow.
+- The robot reports what it measured: where it let go of an object, how far the arm reaches, what was too close. Letting go is not proof that the object stands there now: it can roll, tip over or be pushed. What the verification worker describes after the release counts.
 - Ask the user only what the user can know: what they want. What stands where on the table is a question for the perception worker. If something went wrong that the team cannot repair, stop and tell the user plainly what was done and what was not.
-- After the arm has moved, ask the verification worker before you tell the user it is done, and compare its description critically with what the user asked for.
+- Compare every description of the verification worker critically with what the user asked for. When it shows that a thing is not where it should be, or has fallen over, that thing is open again: have it moved again, in another way or to another spot, and if that cannot work, tell the user plainly what stands where.
 - A question of the user that needs no motion is answered directly, with the perception worker's help if you need it.
 
 Every answer of yours ends with exactly ONE message on its own line, in one of these forms:
@@ -44,7 +44,7 @@ MASTER_NEXT = """Measured facts about the table (sizes and positions from the de
 The conversation so far:
 {talk}
 
-What happens next? First go through the conversation: which of the things the user asked for has the robot already reported as carried and released, and which is still open? Move only what the user asked for, each object once, and never anything else. When nothing is open any more, ask the verification worker; when its description agrees with the request, answer "done:".
+What happens next? First go through the conversation: which of the things the user asked for does the verification worker's latest description show at its place, and which is still open? Move only what the user asked for, and never anything else. When the latest descriptions show everything the user asked for, answer "done:"; if you are not sure, ask the verification worker to look again.
 Give ONE message."""
 
 REPAIR = ("\n\nYour last answer had no message line. Answer again and end with exactly one line that starts with "

@@ -9,10 +9,11 @@ import agents
 
 class FakeGemma:
     def __init__(self, answers):
-        self.answers, self.prompts = list(answers), []
+        self.answers, self.prompts, self.images = list(answers), [], []
 
     def ask(self, text, images=(), **options):
         self.prompts.append(text)
+        self.images.append(list(images))
         return self.answers.pop(0)
 
 
@@ -77,7 +78,7 @@ def case(name, answers, request, expected, replies=()):
 
 case("one object, the worker accepts the outlined place", [
     "Plan: milk to the tray.\nto manipulation: Put the milk carton into the blue tray.",
-    *MILK, "At the side of the tray.", "box: 500, 500, 600, 600 | at the side", "fine: beside the rim",
+    *MILK, "At the side of the tray.", "box: 500, 500, 600, 600 | at the side", "fine: beside the rim", "The milk carton stands in the blue tray.",
     "to verification: Is the milk carton in the blue tray?", "The milk carton stands in the blue tray.",
     "done: The milk carton is in the blue tray."],
     "put the milk in the tray", ("COMPLETED", [(1, 3, 765, 465)], 0, 0))
@@ -85,13 +86,17 @@ case("one object, the worker accepts the outlined place", [
 a = case("two objects, one correction of the place", [
     "to manipulation: Put the milk carton into the blue tray, at a side; the apple follows.",
     *MILK, "In the upper left corner.", "box: 0, 0, 200, 200 | corner",
-    "move it: into the lower right corner", "box: 800, 800, 1000, 1000 | other corner", "fine: good",
+    "move it: into the lower right corner", "box: 800, 800, 1000, 1000 | other corner", "fine: good", "The milk carton stands in the tray.",
     "to manipulation: Put the apple into the blue tray, beside the milk.",
-    *APPLE, "Close beside the milk.", "box: 400, 400, 600, 600 | beside the milk", "fine: ok",
+    *APPLE, "Close beside the milk.", "box: 400, 400, 600, 600 | beside the milk", "fine: ok", "The milk carton and the apple stand in the tray.",
     "to verification: Are both in the tray?", "Both stand in the tray.", "done: Both are in the tray."],
     "put the milk and the apple in the tray", ("COMPLETED", [(1, 3, 870, 570), (2, 3, 750, 450)], 0, 0))
-print("PASS" if "robot -> manipulation: The white outline" in a.gemma.prompts[-4] and "middle at x" not in a.gemma.prompts[-4] and "master -> manipulation: Put the apple" in a.gemma.prompts[-4]
+print("PASS" if "robot -> manipulation: The white outline" in a.gemma.prompts[-5] and "middle at x" not in a.gemma.prompts[-5] and "master -> manipulation: Put the apple" in a.gemma.prompts[-5]
       else "FAIL", "every agent reads the whole conversation, the pointing worker without positions |")
+look = a.gemma.prompts[-4]  # the look after the apple was let go of
+print("PASS" if "Where is the apple now" in look and "user -> master: put the milk and the apple" in look and "robot ->" not in look
+      and "manipulation ->" not in look and a.gemma.images[-4] == ["close-up"]
+      else "FAIL", "after every release the verification worker sees a close-up and the user's words, not the team's claims |")
 
 case("the worker points at nothing measured: the master hears it and stops", [
     "to manipulation: Put the banana into the blue tray.",
@@ -114,14 +119,14 @@ case("a question only, no motion", [
 case("the master's answer has no message line, then it is repaired", [
     "I think the milk should go to the tray.",
     "to manipulation: Put the milk carton into the blue tray.",
-    *MILK, "In the middle.", "box: 500, 500, 600, 600 | middle", "fine: ok",
+    *MILK, "In the middle.", "box: 500, 500, 600, 600 | middle", "fine: ok", "The milk carton stands in the tray.",
     "done: Done."],
     "put the milk in the tray", ("COMPLETED", [(1, 3, 765, 465)], 0, 0))
 
 case("onto the table beside another object", [
     "to manipulation: Put the apple on the table close beside the milk carton.",
     "pick up: apple\non the table by: milk carton\nwhy: asked", "box: 400, 100, 500, 200 | the apple", "box: 100, 100, 200, 200 | the milk",
-    "Just right of the milk carton.", "box: 400, 600, 600, 800 | right of the milk", "fine: close beside it",
+    "Just right of the milk carton.", "box: 400, 600, 600, 800 | right of the milk", "fine: close beside it", "The apple stands right of the milk carton.",
     "done: The apple stands beside the milk carton."],
     "put the apple next to the milk", ("COMPLETED", [(2, None, 170, 150)], 0, 0))
 

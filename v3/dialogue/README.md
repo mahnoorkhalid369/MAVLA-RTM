@@ -41,11 +41,34 @@ The frozen v3 still starts with `cd v3 && ./launch.sh`. One simulator at a time.
 8. The robot carries the object over and reports to the master in a sentence.
 9. At the end the **verification worker** describes the table, and the master decides: done, try again, ask the user, or stop.
 
+## The look after every release
+
+The robot only knows where it let go of an object. Whether the object stands there is found out by looking again:
+after every release, and whenever the master asks, the verification worker describes the place.
+
+- It is not told what the team believes happened: it reads the user's words, the question and the measurements.
+- It sees a plain close-up of the places the robot worked at in this request, not the whole table.
+- The master treats that description, not the robot's report, as what really stands where.
+
+Why, measured with Gemma alone on the last picture of 8 recorded runs (30 object cases, 11 of them outside the
+tray; `out/v3d/experiments/verify_2026-11-18/`):
+
+| What the checking worker is given | Right, of 30 | Run with two things beside the tray, of 4 |
+|---|---|---|
+| Whole conversation, whole-table picture (before) | 26 | 2 |
+| No conversation, whole-table picture | 29 | 3 |
+| No conversation, whole table with numbered outlines | 27 | 2 |
+| No conversation, close-up of the tray only (now) | 30 | 4 |
+| No conversation, close-up with outlines | 26 | 4 |
+| No conversation, whole table and close-up together | 29 | 3 |
+
+Known limits: an object lying on its side was not reported as fallen over, and things are sometimes misnamed.
+
 ## Tests
 
 ```bash
 cd v3/dialogue
-PYTHONPATH=. ../../v2/.venv-seg/bin/python tests/test_dialogue.py          # 9 scripted checks, no GPU
+PYTHONPATH=. ../../v2/.venv-seg/bin/python tests/test_dialogue.py          # 10 scripted checks, no GPU
 env -u AMENT_PREFIX_PATH PYTHONPATH=.:../../v2/src ../../v2/.venv-seg/bin/python tests/gemma_only.py \
     ../out/v3d/<date>/run_<time>/01 "Put the milk carton on the light blue serving tray, in a corner."
 ```

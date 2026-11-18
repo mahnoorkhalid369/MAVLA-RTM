@@ -53,8 +53,9 @@ class Agents:
         self.say(f"{speaker} -> {to}", text, started)
 
     def ask(self, body, images, **options):
+        blind = options.pop("blind", False)  # a checking worker reads what the user said, not what the team claims
         """One Gemma call with the facts and the whole conversation; the full text is saved in the event log."""
-        text = body.format(facts=self.facts(), things=self.facts(False), talk="\n".join(self.talk), **options.pop("fill", {})) if "{talk}" in body else body
+        text = body.format(facts=self.facts(), things=self.facts(False), talk="\n".join(t for t in self.talk if not blind or t.startswith("user -> master")), **options.pop("fill", {})) if "{talk}" in body else body
         text += options.pop("more", "")
         log = getattr(self.gemma, "log", None)
         if log is not None:
@@ -177,23 +178,37 @@ class Agents:
         ok, text = robot.carry_out(plan)
         self.note("robot", "master", f"{names[picked]} to {where}: {text}")
         self.look()  # the table has changed, also when the move failed partway
+        if ok:  # act, look, report: an independent look at the place after every release
+            self.places += [near] if near not in self.places else []
+            self.describe(f"Where is the {names[picked]} now, and what stands in or on the {names[near]}?")
         return ok
 
     def perception(self, message):
         started = time.monotonic()
-        self.note("perception", "master", self.ask(prompts.PERCEIVE, [self.rgb], fill={"message": message}, max_new_tokens=150), started)
+        self.note("perception", "master", self.ask(prompts.PERCEIVE, [self.rgb], fill={"message": message}, max_new_tokens=150, blind=True), started)
         return True
 
     def verification(self, message):
         started = time.monotonic()
         self.look()  # a new table picture, taken with the arm out of the way
-        self.note("verification", "master", self.ask(prompts.VERIFY, [self.rgb], fill={"message": message}, max_new_tokens=200), started)
+        self.describe(message, started)
         return True
+
+    def describe(self, message, started=None):
+        """The verification worker looks at a plain close-up of the places the robot worked at in this request (the
+        whole table when it has not put anything down yet) and is not told what the team believes happened."""
+        started = started or time.monotonic()
+        boxes = [self.robot.boxes[oid] for oid in self.places if oid in self.robot.boxes]
+        picture = self.rgb
+        if boxes:
+            picture = self.robot.zoom((min(b[0] for b in boxes), min(b[1] for b in boxes),
+                                       max(b[0] + b[2] for b in boxes), max(b[1] + b[3] for b in boxes)), 60)[0]
+        self.note("verification", "master", self.ask(prompts.VERIFY, [picture], fill={"message": message}, max_new_tokens=200, blind=True), started)
 
     # ------------------------------------------------------------------ one instruction
     def run(self, request):
         """Returns (status, answer): COMPLETED, STOPPED or FAILED."""
-        self.robot.moved, self.talk = False, []
+        self.robot.moved, self.talk, self.places = False, [], []
         self.note("user", "master", request)
         self.look()
         think, questions = True, 0
