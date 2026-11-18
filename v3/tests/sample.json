@@ -1,0 +1,25 @@
+[
+ {
+  "request": "place the cracker box on the tray",
+  "answers": [
+   "the blue serving tray",
+   "the blue one"
+  ]
+ },
+ {
+  "request": "put the milk and the water bottle in the tray",
+  "answers": [
+   "the blue serving tray",
+   "the blue one"
+  ]
+ },
+ {
+  "request": "place the apple on the tray",
+  "answers": [
+   "never mind, leave it"
+  ]
+ },
+ {
+  "request": "what is on the table?"
+ }
+]
