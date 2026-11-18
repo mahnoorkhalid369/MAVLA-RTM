@@ -5,12 +5,29 @@ measured object a box means, where a marked place is on the table in millimetres
 object fits and the arm can put it down, and a picture that shows that spot back. Nothing is decided here.
 """
 
+import dataclasses
+
 import cv2
 import numpy as np
 
+import v3_config as config  # not "config": that name is v2's settings folder
 import robot as frozen  # v3/robot.py, not edited
+from agent.tools import manipulation as v2_manipulation
 from agent.tools.manipulation import REACH_MAX_M, REACH_MIN_M
 from control.motion import PlanningError
+from control.skills import SkillParams
+
+
+@dataclasses.dataclass
+class Speeds(SkillParams):
+    """v2's motion settings with the arm speeds of v3_config.py."""
+    tcp_speed: float = config.LINE_SPEED
+    place_speed: float = config.LOWER_SPEED
+    joint_speed: float = config.JOINT_SPEED
+
+
+v2_manipulation.SkillParams = Speeds  # v2's planner takes its settings from here: this version's speeds, v2's files unchanged
+v2_manipulation.ARM_SPEED = config.JOINT_SPEED  # the moves from and to HOME
 
 
 FINGER_ROOM_M = 0.03  # free room kept between a put-down object and its neighbours, for the open fingers

@@ -22,6 +22,7 @@ The frozen v3 still starts with `cd v3 && ./launch.sh`. One simulator at a time.
 | `prompts.py` | Every prompt of the master and the workers |
 | `agents.py` | The shared conversation and who speaks when |
 | `arm.py` | The robot: measuring, picture point to millimetres, fit and collision checks, motion. It imports the frozen `../robot.py` |
+| `v3_config.py` | The arm speeds of this version: 1.5 times v2's (45 deg/s, 0.12 m/s, lowering 0.0375 m/s) |
 | `run.py`, `launch.sh` | Start-up, logging, the live screen |
 | `tests/test_dialogue.py` | Scripted tests with a fake Gemma and a fake robot (no GPU) |
 | `tests/gemma_only.py` | The real Gemma on a saved table picture, without the simulator |
