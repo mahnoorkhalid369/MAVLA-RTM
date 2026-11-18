@@ -9,7 +9,7 @@ Gemma decides and the agents talk in plain sentences. Code only measures, checks
 cd v3/dialogue
 ./launch.sh                                    # type instructions; an empty line quits
 ./launch.sh --instructions tests/sample.json   # run a list of requests
-./launch.sh --gui                              # with the Isaac Sim window
+HEADLESS=1 ./launch.sh                         # without the Isaac Sim window (it opens by default)
 ```
 
 Logs and pictures of every request: `v3/out/v3d/<date>/run_<time>/<nn>/` (`events.jsonl`, `images/`), and `results.json` per session.
@@ -23,7 +23,8 @@ The frozen v3 still starts with `cd v3 && ./launch.sh`. One simulator at a time.
 | `agents.py` | The shared conversation and who speaks when |
 | `arm.py` | The robot: measuring, picture point to millimetres, fit and collision checks, motion. It imports the frozen `../robot.py` |
 | `v3_config.py` | The arm speeds of this version: 1.5 times v2's (45 deg/s, 0.12 m/s, lowering 0.0375 m/s) |
-| `run.py`, `launch.sh` | Start-up, logging, the live screen |
+| `run.py`, `launch.sh` | Start-up and logging |
+| `screen.py` | The live screen: the table camera with outlines, the wrist camera beside it, the logs below. Key `c` swaps the two cameras. It uses v2's dashboard as a library |
 | `tests/test_dialogue.py` | Scripted tests with a fake Gemma and a fake robot (no GPU) |
 | `tests/gemma_only.py` | The real Gemma on a saved table picture, without the simulator |
 | `tests/sample.json` | Sample requests for `--instructions` |
